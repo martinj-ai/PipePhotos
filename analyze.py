@@ -36,7 +36,7 @@ INPUT_DIR = ROOT / "data" / "input"
 OUTPUT_DIR = ROOT / "data" / "output"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-MIN_RESOLUTION = (800, 600)  # rejet sous ce seuil ; les vraies photos doivent être HD
+MIN_RESOLUTION = (500, 320)  # seuil bas : les variants Drupal 540x336 et autres mid-res passent
 
 # Si ANALYZE_RATE_LIMIT=0 dans .env → pas de sleep (paid tier).
 # Sinon valeur en secondes entre appels (défaut 13s = free tier 5 RPM).
@@ -139,7 +139,7 @@ Tu regardes une photo d'hôtel et tu retournes UNIQUEMENT un objet JSON strict (
     "y_min_pct": 0,
     "x_max_pct": 100,
     "y_max_pct": 100,
-    "reason": "Si la photo gagnerait à être recadrée (espace mort à supprimer, sujet à recentrer selon règle des tiers, horizon à redresser, zoom intéressant sur l'élément principal), passe should_crop=true et donne la box de crop en pourcentage de l'image (0-100). Ne propose PAS de crop si la photo est déjà bien cadrée. Le crop ne doit PAS supprimer plus de 40% de l'image (zone à conserver ≥ 60%). Si pas pertinent, laisse should_crop=false."
+    "reason": "Si la photo gagnerait à être recadrée (espace mort à supprimer, sujet à recentrer selon règle des tiers, horizon à redresser, zoom intéressant sur l'élément principal), passe should_crop=true et donne la box de crop en pourcentage de l'image (0-100). Ne propose PAS de crop si la photo est déjà bien cadrée. Le crop ne doit PAS supprimer plus de 40% de l'image (zone à conserver ≥ 60%). \n\n🚨 RÈGLE STRICTE : si un ou plusieurs humains sont visibles dans la photo (corps entier, visage), JAMAIS proposer un crop qui couperait leur tête, leur visage, ou leur corps. Soit le crop préserve TOUS les humains visibles INTÉGRALEMENT, soit should_crop=false. Couper une personne au-dessus du nombril ou décapiter un humain est interdit. \n\nSi pas pertinent, laisse should_crop=false."
   },
   "issues": ["liste problèmes éventuels pour le brand: sombre, nuit, cadrage raté, etc. Vide si rien."]
 }
@@ -157,15 +157,15 @@ def get_model(model_name: str = "gemini-2.5-flash"):
     return genai.GenerativeModel(model_name)
 
 
-def load_image(path: Path) -> Image.Image | None:
-    """N1 — Ingestion."""
+def load_image(path: Path) -> tuple[Image.Image | None, str | None]:
+    """N1 — Ingestion. Retourne (image, error_reason). image=None + reason si refus."""
     try:
         img = Image.open(path)
         if img.width < MIN_RESOLUTION[0] or img.height < MIN_RESOLUTION[1]:
-            return None
-        return img
-    except Exception:
-        return None
+            return None, f"résolution trop faible ({img.width}x{img.height} < {MIN_RESOLUTION[0]}x{MIN_RESOLUTION[1]})"
+        return img, None
+    except Exception as e:
+        return None, f"PIL load failed: {type(e).__name__}: {str(e)[:200]}"
 
 
 def _call_gemini(img: Image.Image, model) -> tuple[dict, int, dict]:
@@ -237,12 +237,15 @@ def analyze_image_full(source_path: Path, model, write: bool = True) -> dict:
 
     # N1 — Ingestion
     t0 = time.time()
-    img = load_image(source_path)
-    trace.append({
+    img, ingestion_reason = load_image(source_path)
+    n1_entry = {
         "node": "N1_ingestion",
         "result": "pass" if img else "reject",
         "duration_ms": int((time.time() - t0) * 1000),
-    })
+    }
+    if ingestion_reason:
+        n1_entry["error"] = ingestion_reason
+    trace.append(n1_entry)
 
     img_size = (img.width, img.height) if img else (0, 0)
     analysis = None

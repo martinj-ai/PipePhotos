@@ -21,10 +21,11 @@ TARGETS = {
     "rooftop":  {"min": 1, "max": 3, "required_amenity": "rooftop", "is_amenity": True},
     "spa":      {"min": 1, "max": 2, "required_amenity": "spa",     "is_amenity": True},
     "beach":    {"min": 1, "max": 3, "required_amenity": "beach",   "is_amenity": True},
-    # Martin: bar/food sont moins aspirationnels que pool/cabana/rooftop pour Day Pass.
+    # Martin: bar/food/gym sont moins aspirationnels que pool/cabana/rooftop pour Day Pass.
     # On limite à 1 max chacun dans le pack final.
     "food":     {"min": 1, "max": 1, "required_amenity": "food",    "is_amenity": True},
     "bar":      {"min": 0, "max": 1, "required_amenity": "bar",     "is_amenity": True},
+    "gym":      {"min": 0, "max": 1, "required_amenity": "gym",     "is_amenity": True},
     "hero_ext": {"min": 1, "max": 2, "required_amenity": None,      "is_amenity": False},
     "detail":   {"min": 0, "max": 2, "required_amenity": None,      "is_amenity": False},
 }
@@ -35,10 +36,11 @@ GEMINI_TO_TARGET = {
     "piscine": "pool",
     "piscine_vue_aerienne": "pool",
     "cabana": "cabana",
-    "transat": "cabana",  # daybeds/transats comptent dans cabana, principal sujet ajout perso
+    "transat": "cabana",
     "rooftop": "rooftop",
     "spa": "spa",
-    "f_and_b": "food",     # par défaut, on raffine avec presence cocktail dans subjects ci-dessous
+    "gym": "gym",
+    "f_and_b": "food",
     "beach": "beach",
     "exterieur": "hero_ext",
     "facade": "hero_ext",
@@ -54,12 +56,21 @@ def gemini_categories_to_targets(analysis: dict) -> list[str]:
 
     Une photo "rooftop avec piscine" peut renvoyer ['rooftop', 'pool'].
     Permet de compter dans plusieurs buckets de la shopping list.
+
+    🚫 Exception : si primary = chambre / staff → PAS de target (Day Pass n'inclut pas la chambre,
+    et les photos staff ne sont jamais des contenus pour la fiche).
+    Une chambre avec une vue extérieure superbe reste UNE chambre, on ne l'utilise pas comme hero_ext.
     """
     if not analysis or "factual" not in analysis:
         return []
 
     factual = analysis["factual"]
     cat_primary = (factual.get("category") or "").lower()
+
+    # Hard exclusion : chambre & staff sont totalement exclus du pack Day Access
+    if cat_primary in ("chambre", "staff"):
+        return []
+
     cats_secondary = [c.lower() for c in (factual.get("categories_secondary") or []) if isinstance(c, str)]
     all_cats = [cat_primary] + cats_secondary
 
@@ -223,9 +234,17 @@ def compute_score_components(entry: dict) -> dict:
         hero = 0
     shot = ((a.get("shot_type") or {}).get("type") or "").lower()
     human_count = factual.get("human_count") or 0
+    primary_cat = (factual.get("category") or "").lower()
 
-    gemini_says_closeup = (shot == "close_up" and human_count > 0 and dominance < 30)
-    python_says_disguised = _is_lifestyle_disguised_closeup(a)
+    # Exemption : pour les catégories food/F&B, le close-up sur assiette/cocktail est légitime.
+    # On ne déclenche pas le filtre lifestyle même si shot=close_up + main visible.
+    closeup_exempt = primary_cat in ("f_and_b",)
+
+    gemini_says_closeup = (
+        not closeup_exempt
+        and shot == "close_up" and human_count > 0 and dominance < 30
+    )
+    python_says_disguised = (not closeup_exempt) and _is_lifestyle_disguised_closeup(a)
     is_lifestyle_closeup = gemini_says_closeup or python_says_disguised
 
     effective_dominance = dominance
@@ -314,6 +333,12 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
     # 3) Sort par score brand décroissant — utilise compute_score_components au top-level
     score_of = score_of_entry
 
+    # Catégories où le close-up est LÉGITIME (pas un lifestyle déguisé) :
+    # food = close-up sur assiette/cocktail = format attendu pour vendre la cuisine
+    # bar  = close-up sur cocktail/comptoir = pareil
+    # Pour ces catégories, on ne penalise pas le close-up.
+    CATEGORIES_WHERE_CLOSEUP_IS_OK = {"food", "bar"}
+
     rejected_low_score: list[dict] = []
     rescued_transformable: list[dict] = []
     for cat in buckets:
@@ -325,12 +350,18 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
         ok: list[dict] = []
         lifestyle_supplemental: list[dict] = []
         fallback: list[dict] = []
+
+        # Pour food/bar, on désactive le filtre close-up (close-up sur assiette = légitime)
+        closeup_filter_active = cat not in CATEGORIES_WHERE_CLOSEUP_IS_OK
+
         for entry in buckets[cat]:
             a = entry.get("analysis") or {}
             score = score_of(entry)
-            is_closeup = _is_lifestyle_disguised_closeup(a) or (
-                ((a.get("shot_type") or {}).get("type") or "").lower() == "close_up"
-                and (a.get("factual") or {}).get("human_count", 0) > 0
+            is_closeup = closeup_filter_active and (
+                _is_lifestyle_disguised_closeup(a) or (
+                    ((a.get("shot_type") or {}).get("type") or "").lower() == "close_up"
+                    and (a.get("factual") or {}).get("human_count", 0) > 0
+                )
             )
 
             if is_closeup:

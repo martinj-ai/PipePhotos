@@ -129,19 +129,24 @@ PERSONA_TEMPLATES = {
         "OR if only one good spot exists, ONE single person is better — do not force a couple if it requires inventing furniture."
     ),
     "solos": (
-        "ONE single relaxed adult woman (late 20s/early 30s, mixed-race or any ethnicity that fits the scene), "
-        "wearing chic leisure attire (one-piece swimsuit, bikini, light dress, summer hat optional). "
+        "ONE single STUNNING adult woman (late 20s/early 30s, mixed-race or any ethnicity that fits the scene). "
+        "She is the editorial focal point — make her ELEGANT, SUNKISSED, ASPIRATIONAL, the kind of subject that makes someone want to book this exact pool RIGHT NOW. "
+        "Outfit : chic SWIMWEAR (sleek one-piece swimsuit, stylish bikini, monokini) — NEVER a long dress, NEVER a robe, NEVER street clothes. Sunglasses pushed up in her hair or on her face, a summer hat (straw / canvas / bucket) optional, gold or shell minimal jewelry. Wet or dry skin depending on the placement. Toned, healthy figure, natural-looking, real beauty (NOT artificial / Instagram-filter-overprocessed)."
         "\n\n"
-        "PLACEMENT — pick the OPTION that fits THIS exact scene best (priority order):\n"
-        "  (1) IF an empty lounger/daybed/cabana is CLEARLY visible in the foreground → reclining elegantly on it, holding a glass/drink/sunglasses.\n"
-        "  (2) IF the pool edge/deck is visible at the foreground → sitting at the edge with legs in the water (calves submerged), or standing on the deck holding a drink, looking at the view.\n"
-        "  (3) IF the pool water surface is visible and there is no clear lounger → IN the water: floating on her back (planking pose, arms relaxed, hair fanned in water), OR swimming gently breaststroke with head above water, OR emerging from the pool at the edge (water dripping, hair wet, leaning on the pool rim with elbows). Body partially submerged, water displacement around her, hair wet if applicable.\n"
-        "  (4) IF none of the above fit naturally, DO NOT add the subject — return the image unchanged rather than invent furniture or place subjects awkwardly.\n"
+        "PLACEMENT — pick the OPTION that fits THIS exact scene best (priority order — IN water comes FIRST for pool scenes):\n"
+        "  (1) ⭐ IN THE WATER (default for ANY photo where pool/water surface is visible) — pick the most editorial pose for the scene:\n"
+        "       • Floating on her back in 'planking' pose, arms relaxed at her sides or above her head, hair fanned out in the water, sunglasses on, peaceful eyes closed or looking up at the sky\n"
+        "       • Half-emerging from the pool at the edge — wet skin glistening in sunlight, hair slicked back wet, elbows leaning on the pool rim, water dripping down her shoulders, looking off-scene with a soft smile\n"
+        "       • Swimming gently breaststroke or sidestroke, head above water, slight wake behind her, in golden-hour light\n"
+        "       • Standing waist-deep in the pool, water at hip level, arms gliding through water, hair partially wet, looking towards the horizon\n"
+        "       Body MUST be realistically immersed — water displacement around her, wet hair if her head is at water level, splashes acceptable, NEVER floating dry on top of water.\n"
+        "  (2) AT THE POOL EDGE (if water is visible but you really want her dry) — sitting at the edge of the deck with calves submerged in water, leaning back on her hands, looking at the view ; OR standing on the existing deck holding a drink, in a relaxed editorial pose.\n"
+        "  (3) ON AN EXISTING EMPTY LOUNGER (last resort, ONLY if a lounger is CLEARLY VISIBLE EMPTY in the foreground in the original input) — reclining elegantly on it, holding a drink, sunglasses on, looking off-scene.\n"
+        "  (4) IF NONE OF THE ABOVE FITS NATURALLY → DO NOT ADD anyone. Return the image unchanged. A clean pool photo without a subject is FAR better than a photo with a fabricated lounger.\n"
         "\n"
-        "🔥 ABSOLUTE RULE — DO NOT INVENT any new lounger, daybed, raft, float, platform, or any furniture/object that is not clearly visible in the input image. If you cannot place the subject without inventing, choose option (3) IN the water, or do not add anyone.\n"
+        "🔥 ABSOLUTE RULE — DO NOT INVENT any furniture, raft, float, daybed, lounger, platform, towel-on-the-ground, that is not 100% clearly visible in the input. If options (1)/(2) feel forced, just don't add the subject. NEVER reduce or shrink the existing pool, decking, or any other element to make space for the subject.\n"
         "\n"
-        "Looking off-scene (profile or 3/4 angle, never at camera), mid-action candid moment, "
-        "warm afternoon golden-hour light, premium-accessible mood, lifestyle editorial feel."
+        "Looking off-scene (profile or 3/4 angle, NEVER directly at camera, NEVER posing for selfie), mid-action candid moment, warm golden-hour light on her skin, premium-accessible editorial Vogue/Condé-Nast Traveler feel — never stock-photo, never catalog."
     ),
     "families": (
         "a young family of 3-4 (two parents mixed-race + 1-2 children ages 5-10) "
@@ -167,11 +172,12 @@ PERSONA_TEMPLATES = {
 CATEGORY_ACTION_HINT = {
     "cabana":   "lounging on the existing daybed/cabana sofa, sunglasses on, relaxed posture (use existing furniture only)",
     "transat":  "reclining on the existing sun lounger(s), correct contact with the chair, natural weight (use existing furniture only)",
-    "piscine":  "PREFER placements IN or AT THE EDGE of the water: floating on her back (planking pose), swimming gently breaststroke head above water, sitting at pool edge legs submerged, OR emerging from pool with wet hair leaning on rim. Use an existing lounger ONLY if clearly visible empty in foreground. Swimwear, relaxed mood. Never invent a raft/lounger/daybed.",
+    "piscine":  "DEFAULT placement = IN the water. Pick the most editorial pose: floating on her back with hair fanned in water (planking), OR half-emerging from the pool at the edge with wet hair slicked back, water dripping (most aspirational), OR swimming breaststroke head above water in golden light, OR standing waist-deep gliding hands through water. Stylish swimwear (bikini/one-piece). Editorial wet-look beauty. Use an existing lounger ONLY if clearly empty in foreground — but IN-water is preferred 95% of the time on pool scenes. NEVER invent a raft, lounger, daybed, towel, or any object.",
     "piscine_vue_aerienne": "DO NOT add subjects (aerial view — added humans would be tiny). If the brief insists, return image unchanged.",
     "rooftop":  "standing at the rooftop with view in background holding a drink, OR seated on existing rooftop lounger, OR if there's a rooftop pool: in/at the pool (cf. piscine rules)",
     "f_and_b":  "around the existing dining table, mid-meal moment (passing food, pouring drink), one or two glasses on the table",
     "beach":    "on the existing sun lounger or beach chair, swimwear, relaxed beach moment, OR walking on the sand/at water edge",
+    "gym":      "ONE adult mid-action using the EXISTING equipment visible in the photo : doing yoga/pilates pose on a yoga mat (downward dog, plank, lunge, savasana), OR light stretching against a wall/floor, OR holding a small dumbbell/kettlebell at low weight, OR moderate pace on a stationary bike/treadmill if visible. Athleisure outfit (leggings, sports bra, fitted t-shirt). Focused but relaxed mood, never grimacing, never lifting heavy weights. Use ONLY existing equipment — do not invent machines, weights, or mats.",
     "exterieur": "naturally placed in the existing outdoor space, casual moment",
     "interieur_commun": "naturally placed in the existing interior space (seated on chairs/sofas, gathered near tables, walking through), casual conversation, fitting the venue type — leisure/business-casual attire, no formal black-tie",
 }
@@ -222,11 +228,44 @@ FORBIDDEN placements in this scene (do NOT place subjects here under any circums
 Maximum subjects to add for this scene: {max_h} (less is better).
 """
 
-    return f"""ABSOLUTE FRAMING LOCK (MOST IMPORTANT RULE):
+    return f"""🛑 RULE #1 — SUBJECT-ONLY ADDITION (THE MOST IMPORTANT RULE OF ALL):
+
+You are ONLY allowed to add human subject(s) — and only the items they personally hold or wear (swimwear, dress, sunglasses, hat, drink in hand, sarong, towel held by them).
+
+You MUST NEVER add ANY of the following — NO EXCEPTIONS:
+- A lounger, daybed, sofa, sun lounger, beach chair, raft, float, pool noodle, bench, table, ottoman, bed
+- A pillow, towel placed on the ground/lounger, blanket, rug
+- A plant, vase, decoration, lamp, candle, sign, board
+- Any new equipment, drinkware (a drink in their HAND is OK; a tray, additional glasses on a fictional table are NOT OK)
+- Any modification to existing pool water shape, decking size, walls, doors, windows, pillars, plants, fences, railings
+
+You MUST NEVER reduce / resize / move / shrink ANY existing element of the scene to "make room" for the subject.
+For example: shrinking the pool to add a lounger, or moving real loungers to add a fictional one — STRICTLY FORBIDDEN.
+
+If the scene does not have a natural place for a human subject (no empty existing seat clearly visible AND no water to enter AND no solid ground to stand on), then DO NOT ADD anyone. Return the image unchanged. A scene without a subject is INFINITELY better than a scene with invented furniture.
+
+ABSOLUTE FRAMING LOCK (RULE #2):
 - DO NOT zoom in or out. DO NOT crop. DO NOT change the camera angle, height, or focal length.
 - Preserve the EXACT same field of view and image dimensions as the input.
 - If you cannot honor this constraint, return the image unchanged.
-- The output MUST look like the SAME photograph, just with a few subjects added.
+- The output MUST look like the SAME photograph, just with a human subject added.
+
+🚨 STRUCTURAL PRESERVATION (CRITICAL — VIOLATION CAUSES IMMEDIATE REJECTION):
+
+The ONLY thing you are allowed to add to this image is the requested human subject(s).
+EVERYTHING ELSE in the original must remain PIXEL-IDENTICAL.
+
+You MAY NOT, under any circumstance:
+- Remove, hide, or modify ANY object visible in the original — including: TVs and screens (even if turned off / black), signs, panels, posters, balustrades, railings, drainage grilles, manholes, electrical boxes, AC units, fire-escape staircases, surveillance cameras, antennas, cables, columns, walls, floors.
+- Change the architecture or any building visible in the background (windows, balconies, fire escapes, neighbouring buildings, skyline, vegetation).
+- Replace existing furniture, decor, or scenic elements with "prettier" ones (a black TV stays a black TV — not artwork ; an industrial railing stays as is).
+- Alter the scene composition, perspective, lighting direction, or color grading.
+- Add ANY plant, vase, prop, decoration, drink, or accessory that is not requested for the subject(s).
+- "Improve" or "clean up" perceived eyesores. THAT IS NOT YOUR JOB. The cleanup is handled by a separate dedicated step.
+
+Concretely : if the original has an ugly screen on a wall and an industrial drainage grille on the floor, both MUST appear UNCHANGED in your output. The only difference between input and output should be a human-shaped region where the subject is placed (and the immediate shadow/reflection of that subject).
+
+If you cannot add the subject without modifying the surrounding scene, choose option (3) of the placement priority (place them IN water if water is present, OR standing on existing ground), OR return the image unchanged.
 
 Now, naturally add {persona_desc} to this exact scene.
 {safe_zones_block}
@@ -282,7 +321,12 @@ Premium-accessible, never catalog-style, never stock-photo-style.
 
 NEGATIVE PROMPT (HARD avoid):
 - ANY zoom-in, ANY crop, ANY camera angle change vs input
-- inventing, adding, or hallucinating new furniture (especially: floating daybeds, rafts, platforms, beds on the water, new chairs/loungers placed where there were none in the original)
+- removing, hiding, or modifying ANY existing element of the scene : TVs, screens (even off/black), signs, panels, posters, drainage grilles, manholes, AC units, fire escapes, surveillance cameras, antennas, balustrades, industrial railings, electrical boxes, cables. Black screens stay black. Ugly stuff stays ugly.
+- altering, replacing, or "beautifying" any architecture, window, balcony, fire escape, neighbouring building, or skyline visible in background
+- 🚨 SHRINKING / RESIZING / MOVING any existing element (pool, deck, plants, furniture, walls) to "make space" for the subject — the existing scene must remain pixel-identical in size and position
+- adding any new plant, vase, prop, decor, lamp, food/drink, or accessory not requested for the subject(s)
+- inventing, adding, or hallucinating new furniture — ESPECIALLY a new lounger, daybed, beach chair, sofa, raft, float, towel-on-the-ground, ottoman, table — that is not 100% clearly visible in the input
+- subject wearing street clothes / long dress / robe / business attire on a pool scene — the subject MUST be in proper SWIMWEAR (bikini / one-piece swimsuit / monokini) on pool scenes
 - subjects standing on top of water as if walking on it, or floating dry without a flotation device
 - standing on daybeds / sun loungers / sofas / tables / any furniture meant for sitting or lying
 - subjects on the wrong side of railings, barriers, glass panels, balustrades
@@ -442,12 +486,27 @@ def _pick_main_action(
 
 
 def _maybe_crop_step(analysis: dict | None) -> dict | None:
-    """Retourne un step crop si Gemini a recommandé un crop pertinent (60-95% conservé)."""
+    """Retourne un step crop si Gemini a recommandé un crop pertinent (60-95% conservé).
+
+    🛡 Garde-fou : si la photo a un humain bien visible (full_visible), on désactive le crop.
+    Trop risqué de couper la tête/corps. La photo originale est gardée telle quelle dans ces cas.
+    """
     if not analysis:
         return None
     rec = analysis.get("recommended_crop") or {}
     if not rec.get("should_crop"):
         return None
+
+    # ━ Anti-coupure humain ━
+    # Cas typique : photo de yoga/sport/lifestyle où Gemini suggère un crop "pour recentrer
+    # sur l'amenity" qui finit par couper la tête de la personne.
+    # Si humain présent ET bien visible → on skip le crop.
+    factual = analysis.get("factual") or {}
+    presence = (factual.get("human_presence_type") or "").lower()
+    human_count = factual.get("human_count") or 0
+    if human_count > 0 and presence in ("full_visible", "fully visible", "complete"):
+        return None
+
     x_min = rec.get("x_min_pct", 0)
     y_min = rec.get("y_min_pct", 0)
     x_max = rec.get("x_max_pct", 100)
@@ -561,7 +620,8 @@ def pick_strategy(
 # Heuristique pour repérer les photos candidates ajout personnage quand Gemini ne le retourne pas explicitement.
 # Catégorie compatible : amenities + intérieur commun (sauf chambre, interdite par règle métier).
 AI_ADD_OK_CATEGORIES = {
-    "cabana", "transat", "piscine", "rooftop", "beach", "exterieur", "interieur_commun"
+    "cabana", "transat", "piscine", "rooftop", "beach", "exterieur",
+    "interieur_commun", "gym",
 }
 
 

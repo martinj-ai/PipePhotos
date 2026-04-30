@@ -96,9 +96,14 @@ def validate_ai_output(input_path: Path, output_path: Path,
             # Filtrage selon le contexte d'action : certaines "violations" sont en réalité des
             # transformations légitimes attendues.
             ALLOWED_BY_ACTION = {
-                "ai_lighting": {"scene_regenerated", "lighting_break"},  # transformation nuit→jour autorisée
-                "ai_recompose": {"scene_regenerated"},                    # recadrage IA peut sembler régénéré
-                "ai_remove_clutter": {"architecture_changed"},            # retrait clutter modifie le décor
+                # ai_lighting (nuit→jour) : la transformation modifie INÉVITABLEMENT le décor
+                # perçu (bâtiments illuminés vs ensoleillés, ciel, ombres, ambiance générale).
+                # On accepte ces 3 violations comme effet de bord légitime.
+                "ai_lighting": {"scene_regenerated", "lighting_break", "architecture_changed"},
+                # ai_recompose : recadrage peut paraître "régénéré" pour le validateur
+                "ai_recompose": {"scene_regenerated"},
+                # ai_remove_clutter : effacer des objets modifie nécessairement le décor
+                "ai_remove_clutter": {"architecture_changed"},
             }
             allowed = ALLOWED_BY_ACTION.get(action_context or "", set())
             filtered = [v for v in violations if v not in allowed]

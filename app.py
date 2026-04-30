@@ -722,9 +722,14 @@ def api_run():
         emotional = analysis.get("emotional") or {}
         scores = emotional.get("pillar_scores") or {}
         sel = selection_meta.get(filename)
-        # Récupère l'erreur Gemini si analyse échouée (debug front)
+        # Récupère l'erreur Gemini OU l'erreur d'ingestion (résolution trop faible, fichier corrompu)
         gemini_trace = next((t for t in a.get("trace", []) if t.get("node") == "N2_analyze_gemini"), None)
-        gemini_error = gemini_trace.get("error") if gemini_trace and gemini_trace.get("result") != "pass" else None
+        n1_trace = next((t for t in a.get("trace", []) if t.get("node") == "N1_ingestion"), None)
+        gemini_error = None
+        if gemini_trace and gemini_trace.get("result") != "pass":
+            gemini_error = gemini_trace.get("error")
+        elif n1_trace and n1_trace.get("result") == "reject":
+            gemini_error = f"Ingestion : {n1_trace.get('error', 'rejected')}"
 
         # Score components calculé en live pour TOUTES les photos (sélectionnées ou non)
         try:

@@ -37,17 +37,21 @@ VLM_PARALLEL_WORKERS = 3
 
 VALIDATION_MODEL = "gemini-2.5-flash"
 
-VALIDATION_PROMPT = """Tu reçois 2 photos d'hôtel. Détermine si elles montrent la MÊME scène (même sujet principal, même partie de l'hôtel) sous des angles légèrement différents (zoom ou cadrage variant), OU si elles montrent des sujets/zones différents.
+VALIDATION_PROMPT = """Tu reçois 2 photos d'hôtel. Détermine si elles sont des DOUBLONS (très similaires, redondants pour une fiche hôtel) OU si elles apportent une INFORMATION DIFFÉRENTE (à garder toutes les 2).
 
-Critères "MÊME scène" :
-- Même sujet principal identifiable (la même piscine spécifique, le même cabana, la même salle...)
-- Mobilier/architecture commune visible dans les 2 photos
-- L'une peut être un crop ou un zoom de l'autre
+Critères "DOUBLON" (same_scene = true) :
+- Même angle de caméra et même cadrage, conditions lumineuses similaires
+- L'une est manifestement un crop / zoom / léger recadrage de l'autre
+- Ne montrent rien de différent visuellement (pas d'élément distinctif unique à l'une)
 
-Critères "scènes DIFFÉRENTES" :
-- Sujets distincts (piscine A vs piscine B, ou piscine vs spa)
-- Zones différentes de l'hôtel
-- Angles fondamentalement opposés sur des sujets différents
+Critères "PAS un doublon" (same_scene = false — à GARDER toutes les 2) :
+- Même lieu mais conditions différentes : jour vs nuit, ensoleillé vs orageux, vide vs animé
+- Même piscine mais angles/perspectives fondamentalement différents (vue large vs zoom serré sur un détail, vue à hauteur d'eau vs aérienne)
+- Une avec et une sans humain (apportent des moods différents)
+- Sujets distincts (piscine A vs piscine B, ou piscine vs spa, ou intérieur vs extérieur)
+- L'une est plus aspirationnelle / mieux composée que l'autre — chacune peut servir à un moment différent du parcours utilisateur
+
+⚠️ IMPORTANT : une même piscine prise de JOUR et la même piscine prise la NUIT/CRÉPUSCULE = scènes DIFFÉRENTES. On veut les 2 versions pour offrir 2 ambiances. NE PAS les marquer comme doublons.
 
 Retourne UNIQUEMENT un JSON :
 {
@@ -75,14 +79,21 @@ def _ensure_configured():
 
 def _prefilter_compatible(a1: dict, a2: dict) -> bool:
     """Pré-filtre : retourne True si les 2 analyses sont assez similaires
-    sémantiquement pour mériter un check VLM. Sinon on skip (économie)."""
+    sémantiquement pour mériter un check VLM. Sinon on skip (économie + garde-fou).
+
+    Règle critique : 2 photos avec time_of_day différent (jour vs nuit/crépuscule) ou ambiance
+    différente (lumineux vs sombre) sont AUTOMATIQUEMENT considérées comme scènes différentes
+    — on ne perd pas la version de nuit d'une piscine sous prétexte qu'on a la version de jour.
+    """
     if not a1 or not a2:
-        return True  # pas d'info, on check par sécurité
+        return True
 
     f1 = a1.get("factual") or {}
     f2 = a2.get("factual") or {}
+    h1 = a1.get("technical_hints") or {}
+    h2 = a2.get("technical_hints") or {}
 
-    # Catégories différentes ET sans recouvrement secondaire → skip
+    # Catégories différentes ET sans recouvrement secondaire → skip (scènes différentes évidentes)
     cat1 = (f1.get("category") or "").lower()
     cat2 = (f2.get("category") or "").lower()
     sec1 = set((f1.get("categories_secondary") or []))
@@ -92,13 +103,23 @@ def _prefilter_compatible(a1: dict, a2: dict) -> bool:
     if not (all_cats_1 & all_cats_2):
         return False
 
-    # Si les 2 photos n'ont aucun subject commun, probablement scènes différentes
-    s1 = set(s.lower() for s in (f1.get("subjects") or []))
-    s2 = set(s.lower() for s in (f2.get("subjects") or []))
-    if s1 and s2 and not (s1 & s2):
-        # Pas de subject commun → moins probable que ce soit la même scène, mais on check quand même
-        # (Gemini peut nommer les subjects différemment)
-        pass
+    # ━ Garde-fou jour/nuit : si l'une est nocturne/crépusculaire et l'autre est de jour,
+    #   on ne les considère PAS comme doublons (conditions lumineuses fondamentalement différentes). ━
+    NIGHT_TODS = {"nuit", "aube_crepuscule"}
+    tod1 = (f1.get("time_of_day") or "").lower()
+    tod2 = (f2.get("time_of_day") or "").lower()
+    is_night_1 = tod1 in NIGHT_TODS
+    is_night_2 = tod2 in NIGHT_TODS
+    if is_night_1 != is_night_2:
+        return False  # une de jour, une de nuit → on garde les 2
+
+    # Pareil sur l'ambiance (parfois Gemini classifie correctement l'ambiance mais pas tod)
+    amb1 = (h1.get("ambiance") or "").lower()
+    amb2 = (h2.get("ambiance") or "").lower()
+    is_dark_1 = amb1.startswith("sombre")
+    is_dark_2 = amb2.startswith("sombre")
+    if is_dark_1 != is_dark_2:
+        return False  # une sombre, une lumineuse → conditions différentes
 
     return True
 

@@ -16,15 +16,15 @@ from __future__ import annotations
 
 
 # Priorité des amenities pour le slot 1 et l'ordre général
-AMENITY_PRIORITY = ["pool", "cabana", "rooftop", "beach", "spa", "bar", "food"]
+AMENITY_PRIORITY = ["pool", "cabana", "rooftop", "beach", "spa", "bar", "food", "gym"]
 INTERIOR_TARGETS = {"detail"}  # interieur_commun → mappé sur detail
 HERO_EXT_TARGETS = {"hero_ext"}
 
-# ━ Tiers pour le SLOT 1 (Martin : photo de couverture = WOW amenity, jamais bar/food) ━
+# ━ Tiers pour le SLOT 1 (Martin : photo de couverture = WOW amenity, jamais bar/food/gym) ━
 # Tier 1 = "hero amenities" : ce qu'on attend en couverture d'une fiche Day Pass
 SLOT1_TIER_1 = {"pool", "cabana", "rooftop", "beach"}
 SLOT1_TIER_2 = {"spa"}
-SLOT1_TIER_3 = {"bar", "food"}  # exclus du slot 1 sauf fallback ultime
+SLOT1_TIER_3 = {"bar", "food", "gym"}  # exclus du slot 1 sauf fallback ultime
 
 
 def _score(analysis: dict) -> int:
@@ -283,7 +283,7 @@ def order_final_pack(
     #   Phase 2 : bar/food si pas plein (ils sont moins aspirationnels)
     # Cette logique respecte le souhait Martin : bar/food en queue de pack, pas mélangés au top.
     HERO_AMENITY_ORDER = ["pool", "cabana", "rooftop", "beach", "spa"]
-    SUPPLEMENTAL_AMENITY_ORDER = ["bar", "food"]
+    SUPPLEMENTAL_AMENITY_ORDER = ["bar", "food", "gym"]
 
     target_with_human = (target_count_max // 2)
     placed_with_human = 1 if _has_human(ordered[0].get("analysis") or {}) else 0

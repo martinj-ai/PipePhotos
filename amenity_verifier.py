@@ -38,6 +38,7 @@ AMENITY_DESCRIPTION = {
     "rooftop":  "rooftop terrace / sky-deck (elevated outdoor area with skyline or terrace view)",
     "spa":      "spa amenity (massage tables, sauna, hammam, jacuzzi, treatment rooms — wellness setting)",
     "beach":    "beach (sand, ocean, beachfront setting — at ground level)",
+    "gym":      "gym / fitness room (workout machines, dumbbells, yoga mats, treadmills, exercise bikes — sport setting)",
     "food":     "food / restaurant (served plates, dressed dining tables, kitchen)",
     "bar":      "bar amenity (cocktails, drinks served, bar counter)",
     "hero_ext": "exterior facade / outdoor venue view of the hotel",
@@ -182,7 +183,7 @@ def verify_top_candidates(analyses: list[dict], coverage_result: dict,
     # Identifier les candidats à re-vérifier (toutes les photos d'un bucket amenity)
     by_filename = {a["input"]["filename"]: a for a in analyses}
     top_candidates: list[tuple[str, str]] = []  # (filename, claimed_amenity)
-    AMENITY_BUCKETS = {"pool", "cabana", "rooftop", "spa", "beach", "food", "bar"}
+    AMENITY_BUCKETS = {"pool", "cabana", "rooftop", "spa", "beach", "food", "bar", "gym"}
 
     for cat, info in (coverage_result.get("by_category") or {}).items():
         if cat not in AMENITY_BUCKETS:
@@ -242,14 +243,17 @@ def verify_top_candidates(analyses: list[dict], coverage_result: dict,
             original_dom = 0
 
         if not r["is_focused"]:
-            # Photo lifestyle déguisée : on plafonne à la valeur du verifier (généralement basse)
+            # Verifier dit "pas focus" : on plombe la dominance (cas lifestyle déguisé)
             ad["primary_amenity_visible_pct"] = min(original_dom, r["real_dominance_pct"])
             ad["is_amenity_focused"] = False
             ad["verifier_reason"] = r["reason"]
         else:
-            # Photo OK : on confirme. Si verifier dit moins que la 1ère passe, on ajuste prudemment.
-            ad["primary_amenity_visible_pct"] = min(original_dom, r["real_dominance_pct"]) \
-                if r["real_dominance_pct"] > 0 else original_dom
+            # Verifier dit "focus" : on prend la valeur la PLUS HAUTE entre Gemini et verifier.
+            # Cas concret (rooftop pool) : Gemini dit primary_amenity=5% (il calcule la dominance
+            # du rooftop, pas de la pool ciblée par bucket), verifier dit pool=70% → on prend 70.
+            # Si verifier renvoie 0 (échec), on garde la valeur Gemini originale.
+            if r["real_dominance_pct"] > 0:
+                ad["primary_amenity_visible_pct"] = max(original_dom, r["real_dominance_pct"])
             ad["is_amenity_focused"] = True
             ad["verifier_reason"] = r["reason"]
 
