@@ -20,6 +20,12 @@ AMENITY_PRIORITY = ["pool", "cabana", "rooftop", "beach", "spa", "bar", "food"]
 INTERIOR_TARGETS = {"detail"}  # interieur_commun → mappé sur detail
 HERO_EXT_TARGETS = {"hero_ext"}
 
+# ━ Tiers pour le SLOT 1 (Martin : photo de couverture = WOW amenity, jamais bar/food) ━
+# Tier 1 = "hero amenities" : ce qu'on attend en couverture d'une fiche Day Pass
+SLOT1_TIER_1 = {"pool", "cabana", "rooftop", "beach"}
+SLOT1_TIER_2 = {"spa"}
+SLOT1_TIER_3 = {"bar", "food"}  # exclus du slot 1 sauf fallback ultime
+
 
 def _score(analysis: dict) -> int:
     """Score brand global (0-300) — utilisé pour le tri général dans les slots non-slot-1."""
@@ -221,11 +227,13 @@ def order_final_pack(
         for entry in amenity_buckets[amenity]:
             all_amenity_candidates.append((entry, amenity))
 
-    # ━━ SLOT 1 (Q1+Q2 Martin) ━━
-    # Hard filter d'abord : amenity dominante + pas close-up + hero >= 50
-    # Humain natif N'EST PAS un critère discriminant (on en ajoute en IA après).
-    # Tri parmi les éligibles : hero_score → amenity_dominance → score brand.
-    eligible_amenity = [(e, am) for (e, am) in all_amenity_candidates if _is_slot1_eligible(e)]
+    # ━━ SLOT 1 ━━
+    # Stratégie en 3 tiers (Martin : la 1ère photo doit être une amenity WOW, pas bar/food) :
+    #   Tier 1 = pool/cabana/rooftop/beach
+    #   Tier 2 = spa
+    #   Tier 3 = bar/food (fallback ultime uniquement si rien d'autre)
+    # Dans chaque tier : hard filter (dominance/closeup/hero) puis tri par hero_score.
+    # Humain natif n'est pas discriminant (on en ajoute en IA si besoin).
 
     def _amenity_dominance(entry: dict) -> int:
         a = entry.get("analysis") or {}
@@ -235,72 +243,88 @@ def order_final_pack(
     def _slot1_sort_key(t):
         entry = t[0]
         return (
-            -_hero_score(entry),                       # WOW factor en premier (Q3 Elser)
+            -_hero_score(entry),                       # WOW factor en premier
             -_amenity_dominance(entry),                # amenity bien visible
             -1 if _is_slot1_worthy(entry) else 0,
-            -1 if (_has_human(entry) or _human_can_be_prominent(entry)) else 0,  # tiebreak doux
+            -1 if (_has_human(entry) or _human_can_be_prominent(entry)) else 0,
             -_score(entry.get("analysis") or {}),
         )
 
-    if eligible_amenity:
-        eligible_amenity.sort(key=_slot1_sort_key)
-        slot1 = eligible_amenity[0][0]
-    else:
-        # Fallback : aucune photo amenity ne passe les hard requirements (cas extrême).
-        # On relâche : la meilleure amenity au sens du score brand.
-        all_amenity_candidates.sort(key=_slot1_sort_key)
-        slot1 = all_amenity_candidates[0][0] if all_amenity_candidates else None
-        if not slot1 and hero_ext_bucket:
-            slot1 = max(hero_ext_bucket, key=_hero_score)
-        if not slot1 and interior_bucket:
-            slot1 = max(interior_bucket, key=_hero_score)
+    def _pick_slot1_from_tier(tier_amenities: set) -> dict | None:
+        """Sélectionne le meilleur slot 1 candidat dans les amenities de ce tier."""
+        candidates = [(e, am) for (e, am) in all_amenity_candidates if am in tier_amenities]
+        eligible = [(e, am) for (e, am) in candidates if _is_slot1_eligible(e)]
+        if eligible:
+            eligible.sort(key=_slot1_sort_key)
+            return eligible[0][0]
+        # Pas d'éligible strict → on relâche les hard requirements pour ce tier
+        if candidates:
+            candidates.sort(key=_slot1_sort_key)
+            return candidates[0][0]
+        return None
+
+    slot1 = _pick_slot1_from_tier(SLOT1_TIER_1)
+    if not slot1:
+        slot1 = _pick_slot1_from_tier(SLOT1_TIER_2)
+    if not slot1:
+        slot1 = _pick_slot1_from_tier(SLOT1_TIER_3)
+    if not slot1 and hero_ext_bucket:
+        slot1 = max(hero_ext_bucket, key=_hero_score)
+    if not slot1 and interior_bucket:
+        slot1 = max(interior_bucket, key=_hero_score)
 
     if slot1:
         ordered.append(slot1)
         used.add(slot1["input"]["filename"])
 
     # ---- Slots 2..N : alternance avec/sans humain + round-robin amenities ----
-    # On veut une photo sur 2 avec humain.
-    # Algo : on alterne, en piochant à chaque tour la meilleure dispo dans la "bonne" catégorie (round-robin amenity).
+    # Round-robin en 2 phases :
+    #   Phase 1 : hero amenities seulement (pool/cabana/rooftop/beach/spa) → on remplit en priorité
+    #   Phase 2 : bar/food si pas plein (ils sont moins aspirationnels)
+    # Cette logique respecte le souhait Martin : bar/food en queue de pack, pas mélangés au top.
+    HERO_AMENITY_ORDER = ["pool", "cabana", "rooftop", "beach", "spa"]
+    SUPPLEMENTAL_AMENITY_ORDER = ["bar", "food"]
 
-    target_with_human = (target_count_max // 2)  # cible 50/50 environ
+    target_with_human = (target_count_max // 2)
     placed_with_human = 1 if _has_human(ordered[0].get("analysis") or {}) else 0
     placed_total = len(ordered)
 
-    amenity_round_idx = 0  # pour round-robin
+    amenity_round_idx = 0
     consecutive_same_amenity = 0
     last_amenity_used: str | None = None
 
-    while placed_total < target_count_max:
-        # Décide si on cherche avec humain ou sans
-        ratio_with = placed_with_human / max(placed_total, 1)
-        want_with_human = ratio_with < 0.5
-
-        # Round-robin amenity : on parcourt AMENITY_PRIORITY en commençant par l'index courant
-        chosen = None
-        for i in range(len(AMENITY_PRIORITY)):
-            amenity = AMENITY_PRIORITY[(amenity_round_idx + i) % len(AMENITY_PRIORITY)]
+    def _try_pick(amenity_order: list[str], want_with_human: bool, allow_relax_human: bool):
+        """Cherche la meilleure photo dispo dans l'ordre donné. Retourne (entry, amenity) ou None."""
+        nonlocal amenity_round_idx
+        for i in range(len(amenity_order)):
+            amenity = amenity_order[(amenity_round_idx + i) % len(amenity_order)]
             if amenity == last_amenity_used and consecutive_same_amenity >= 1:
-                continue  # évite 2 mêmes amenities à la suite
+                continue
             for entry in amenity_buckets[amenity]:
                 if entry["input"]["filename"] in used:
                     continue
                 if _has_human(entry) == want_with_human:
-                    chosen = (entry, amenity)
-                    break
-            if chosen:
-                break
-
-        # Si pas trouvé avec préférence humaine : on relâche la contrainte humaine
-        if not chosen:
-            for i in range(len(AMENITY_PRIORITY)):
-                amenity = AMENITY_PRIORITY[(amenity_round_idx + i) % len(AMENITY_PRIORITY)]
+                    return (entry, amenity)
+        if allow_relax_human:
+            for i in range(len(amenity_order)):
+                amenity = amenity_order[(amenity_round_idx + i) % len(amenity_order)]
                 for entry in amenity_buckets[amenity]:
                     if entry["input"]["filename"] not in used:
-                        chosen = (entry, amenity)
-                        break
-                if chosen:
-                    break
+                        return (entry, amenity)
+        return None
+
+    while placed_total < target_count_max:
+        ratio_with = placed_with_human / max(placed_total, 1)
+        want_with_human = ratio_with < 0.5
+
+        # Phase 1 : hero amenities (pool/cabana/rooftop/beach/spa)
+        chosen = _try_pick(HERO_AMENITY_ORDER, want_with_human, allow_relax_human=False)
+        # Phase 1 bis : relâche la contrainte humain si phase 1 ne trouve pas
+        if not chosen:
+            chosen = _try_pick(HERO_AMENITY_ORDER, want_with_human, allow_relax_human=True)
+        # Phase 2 : supplemental (bar/food) seulement si plus rien en phase 1
+        if not chosen:
+            chosen = _try_pick(SUPPLEMENTAL_AMENITY_ORDER, want_with_human, allow_relax_human=True)
 
         if chosen:
             entry, amenity = chosen

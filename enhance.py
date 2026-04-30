@@ -120,20 +120,28 @@ Negative prompt: aggressive cropping, lost elements, distortion, artistic filter
 PERSONA_TEMPLATES = {
     "couples": (
         "EITHER one couple (man + woman, mixed-race, 30s) wearing swimsuits/leisure attire, "
-        "naturally placed on existing seats in the scene (one each on adjacent loungers, "
-        "or sharing one daybed), mid-action (chatting, sharing a moment), "
-        "no eye contact with camera. "
-        "OR if only one good empty spot exists, ONE single person (woman or man, 30s) is better — "
-        "do not force a couple if it requires inventing a second seat."
+        "PLACED USING ONE OF THESE OPTIONS (pick the most plausible based on scene): "
+        "(a) on adjacent existing empty loungers if clearly visible in foreground, "
+        "(b) sharing one existing daybed/cabana sofa, "
+        "(c) standing/sitting on the existing pool deck/edge, feet in water, "
+        "(d) IN the water swimming together, partially submerged, water splashes around them. "
+        "Mid-action (chatting, sharing a moment), no eye contact with camera. "
+        "OR if only one good spot exists, ONE single person is better — do not force a couple if it requires inventing furniture."
     ),
     "solos": (
         "ONE single relaxed adult woman (late 20s/early 30s, mixed-race or any ethnicity that fits the scene), "
-        "wearing chic leisure attire (one-piece swimsuit, light dress, summer hat optional), "
-        "naturally placed on the SINGLE most prominent existing empty lounger or daybed in the foreground, "
-        "elegantly reclining or sitting, holding a glass / drink / sunglasses, "
-        "looking off-scene (away from camera, profile or 3/4 angle), "
-        "mid-action candid moment (sipping, contemplating the view), "
-        "warm afternoon golden-hour light on her, premium-accessible mood, lifestyle editorial feel."
+        "wearing chic leisure attire (one-piece swimsuit, bikini, light dress, summer hat optional). "
+        "\n\n"
+        "PLACEMENT — pick the OPTION that fits THIS exact scene best (priority order):\n"
+        "  (1) IF an empty lounger/daybed/cabana is CLEARLY visible in the foreground → reclining elegantly on it, holding a glass/drink/sunglasses.\n"
+        "  (2) IF the pool edge/deck is visible at the foreground → sitting at the edge with legs in the water (calves submerged), or standing on the deck holding a drink, looking at the view.\n"
+        "  (3) IF the pool water surface is visible and there is no clear lounger → IN the water: floating on her back (planking pose, arms relaxed, hair fanned in water), OR swimming gently breaststroke with head above water, OR emerging from the pool at the edge (water dripping, hair wet, leaning on the pool rim with elbows). Body partially submerged, water displacement around her, hair wet if applicable.\n"
+        "  (4) IF none of the above fit naturally, DO NOT add the subject — return the image unchanged rather than invent furniture or place subjects awkwardly.\n"
+        "\n"
+        "🔥 ABSOLUTE RULE — DO NOT INVENT any new lounger, daybed, raft, float, platform, or any furniture/object that is not clearly visible in the input image. If you cannot place the subject without inventing, choose option (3) IN the water, or do not add anyone.\n"
+        "\n"
+        "Looking off-scene (profile or 3/4 angle, never at camera), mid-action candid moment, "
+        "warm afternoon golden-hour light, premium-accessible mood, lifestyle editorial feel."
     ),
     "families": (
         "a young family of 3-4 (two parents mixed-race + 1-2 children ages 5-10) "
@@ -157,12 +165,13 @@ PERSONA_TEMPLATES = {
 
 # Action contextuelle selon catégorie photo
 CATEGORY_ACTION_HINT = {
-    "cabana":   "lounging on the daybed/cabana sofa, sunglasses on, relaxed posture",
-    "transat":  "reclining on the existing sun lounger(s), correct contact with the chair, natural weight",
-    "piscine":  "by the pool edge, on a lounger, OR realistically IN the water (swimming, wading waist-deep, on a pool float) — vary naturally, swimwear, relaxed mood",
-    "rooftop":  "standing at the rooftop with the view in background, holding a drink, looking at horizon",
+    "cabana":   "lounging on the existing daybed/cabana sofa, sunglasses on, relaxed posture (use existing furniture only)",
+    "transat":  "reclining on the existing sun lounger(s), correct contact with the chair, natural weight (use existing furniture only)",
+    "piscine":  "PREFER placements IN or AT THE EDGE of the water: floating on her back (planking pose), swimming gently breaststroke head above water, sitting at pool edge legs submerged, OR emerging from pool with wet hair leaning on rim. Use an existing lounger ONLY if clearly visible empty in foreground. Swimwear, relaxed mood. Never invent a raft/lounger/daybed.",
+    "piscine_vue_aerienne": "DO NOT add subjects (aerial view — added humans would be tiny). If the brief insists, return image unchanged.",
+    "rooftop":  "standing at the rooftop with view in background holding a drink, OR seated on existing rooftop lounger, OR if there's a rooftop pool: in/at the pool (cf. piscine rules)",
     "f_and_b":  "around the existing dining table, mid-meal moment (passing food, pouring drink), one or two glasses on the table",
-    "beach":    "on the existing sun lounger or beach chair, swimwear, relaxed beach moment",
+    "beach":    "on the existing sun lounger or beach chair, swimwear, relaxed beach moment, OR walking on the sand/at water edge",
     "exterieur": "naturally placed in the existing outdoor space, casual moment",
     "interieur_commun": "naturally placed in the existing interior space (seated on chairs/sofas, gathered near tables, walking through), casual conversation, fitting the venue type — leisure/business-casual attire, no formal black-tie",
 }
@@ -234,10 +243,19 @@ QUANTITY & SCALE (CRITICAL — bias toward LESS):
 - Place subjects in ONE coherent group. Do not scatter people in 2+ disconnected zones.
 
 PHYSICAL SAFETY & PLAUSIBILITY (CRITICAL — non-negotiable):
-- Subjects MUST be placed on plausible, safe supports: seated on chairs / loungers / sofas / daybeds **THAT ALREADY EXIST IN THE PHOTO**, OR standing on solid floor/ground/decking, OR realistically immersed IN water (swimming, wading waist-deep).
-- **DO NOT INVENT OR ADD any furniture, daybed, lounger, raft, platform, float, or any object that is not visibly present in the original input image.** If there is no plausible existing seat for a subject, place them standing on solid ground, OR swimming in the water, OR DO NOT add the subject in that area.
-- NEVER ON the water surface as if standing on it. NEVER walking on water. NEVER floating dry without a visible flotation device.
-- If a subject is IN the pool, ensure realistic immersion: body partially submerged (waist-deep or more), water displacement around them, wet hair/skin if relevant, splashes acceptable. The water surface MUST react to their presence.
+
+🔥 PRIORITY RULE FOR POOL/WATER SCENES — the most common failure mode:
+If the photo features a swimming pool and there is NO clearly visible empty lounger/daybed in the foreground, place the subject IN the water:
+  - Floating on her back (planking pose, arms relaxed, hair fanned in water around her head)
+  - Swimming gently breaststroke (head above water, calm wake)
+  - Emerging from the pool at the edge (water dripping, hair wet, elbows leaning on rim)
+  - OR sitting at the pool edge with legs/calves submerged in water
+This is FAR BETTER than inventing a lounger/raft/daybed. Body must be partially submerged, hair wet if in water, water displacement visible, splashes acceptable.
+
+- Subjects MUST be placed on plausible, safe supports: seated on chairs / loungers / sofas / daybeds **THAT ALREADY EXIST IN THE PHOTO**, OR standing on solid floor/ground/decking, OR realistically immersed IN water (swimming, floating, wading waist-deep, sitting at pool edge).
+- **DO NOT INVENT OR ADD any furniture, daybed, lounger, raft, platform, float, or any object that is not visibly present in the original input image.** If there is no plausible existing seat for a subject AND the scene has water → place them IN the water (priority rule above). Otherwise, place them standing on solid ground, OR DO NOT add the subject at all.
+- NEVER ON the water surface as if standing on it. NEVER walking on water. NEVER floating dry without realistic immersion. NEVER on a fabricated raft/float that isn't in the original.
+- If a subject is IN the pool, ensure realistic immersion: body partially submerged (waist-deep, or fully reclining for floating pose), water displacement around them, wet hair/skin if relevant, splashes acceptable. The water surface MUST react to their presence.
 - NEVER standing or sitting ON TOP of furniture meant for lying (no standing on daybeds, sun loungers, or sofas).
 - NEVER on the wrong side of any safety barrier, railing, glass panel, or balustrade. Subjects must always be on the safe interior side of any rooftop/balcony/pool railing.
 - NEVER in physically dangerous, awkward, or improbable positions (no climbing, no leaning over edges, no unsupported balancing).

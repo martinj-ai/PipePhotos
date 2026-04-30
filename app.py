@@ -726,6 +726,12 @@ def api_run():
         gemini_trace = next((t for t in a.get("trace", []) if t.get("node") == "N2_analyze_gemini"), None)
         gemini_error = gemini_trace.get("error") if gemini_trace and gemini_trace.get("result") != "pass" else None
 
+        # Score components calculé en live pour TOUTES les photos (sélectionnées ou non)
+        try:
+            sc = coverage_mod.compute_score_components(a) if a.get("analysis") else None
+        except Exception:
+            sc = None
+
         photos_summary.append({
             "filename": filename,
             "url": f"/uploads/{slug}/{filename}",
@@ -734,6 +740,11 @@ def api_run():
             "ambiance": (analysis.get("technical_hints") or {}).get("ambiance"),
             "sensations": emotional.get("sensations"),
             "score_brand": int(scores.get("freedom", 0) + scores.get("wellness", 0) + scores.get("experience", 0)),
+            "score_brand_total": sc["total"] if sc else None,
+            "score_components": sc,
+            "amenity_dominance": analysis.get("amenity_dominance"),
+            "shot_type": analysis.get("shot_type"),
+            "hero_quality": analysis.get("hero_quality"),
             "ai_candidate": (analysis.get("ai_add_character_candidate") or {}).get("is_candidate"),
             "dedup_status": a["dedup_status"],
             "issues": analysis.get("issues") or [],

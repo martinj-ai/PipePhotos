@@ -21,10 +21,12 @@ TARGETS = {
     "rooftop":  {"min": 1, "max": 3, "required_amenity": "rooftop", "is_amenity": True},
     "spa":      {"min": 1, "max": 2, "required_amenity": "spa",     "is_amenity": True},
     "beach":    {"min": 1, "max": 3, "required_amenity": "beach",   "is_amenity": True},
-    "food":     {"min": 1, "max": 2, "required_amenity": "food",    "is_amenity": True},
-    "bar":      {"min": 0, "max": 2, "required_amenity": "bar",     "is_amenity": True},
-    "hero_ext": {"min": 1, "max": 2, "required_amenity": None,      "is_amenity": False},  # façade/vue extérieure
-    "detail":   {"min": 0, "max": 2, "required_amenity": None,      "is_amenity": False},  # intérieur en fallback uniquement (min=0)
+    # Martin: bar/food sont moins aspirationnels que pool/cabana/rooftop pour Day Pass.
+    # On limite à 1 max chacun dans le pack final.
+    "food":     {"min": 1, "max": 1, "required_amenity": "food",    "is_amenity": True},
+    "bar":      {"min": 0, "max": 1, "required_amenity": "bar",     "is_amenity": True},
+    "hero_ext": {"min": 1, "max": 2, "required_amenity": None,      "is_amenity": False},
+    "detail":   {"min": 0, "max": 2, "required_amenity": None,      "is_amenity": False},
 }
 
 
@@ -203,6 +205,78 @@ def _all_issues_are_removable(analysis: dict) -> bool:
     return True
 
 
+def compute_score_components(entry: dict) -> dict:
+    """Décompose le score d'une photo en composantes lisibles (debug + UI).
+
+    Top-level pour pouvoir l'importer dans app.py et l'exposer sur les photos non sélectionnées.
+    """
+    a = entry.get("analysis") or {}
+    factual = a.get("factual") or {}
+    scores = (a.get("emotional") or {}).get("pillar_scores") or {}
+    pillar = scores.get("wellness", 0) + scores.get("experience", 0) + scores.get("freedom", 0)
+
+    dominance = (a.get("amenity_dominance") or {}).get("primary_amenity_visible_pct") or 0
+    if not isinstance(dominance, (int, float)):
+        dominance = 0
+    hero = (a.get("hero_quality") or {}).get("score") or 0
+    if not isinstance(hero, (int, float)):
+        hero = 0
+    shot = ((a.get("shot_type") or {}).get("type") or "").lower()
+    human_count = factual.get("human_count") or 0
+
+    gemini_says_closeup = (shot == "close_up" and human_count > 0 and dominance < 30)
+    python_says_disguised = _is_lifestyle_disguised_closeup(a)
+    is_lifestyle_closeup = gemini_says_closeup or python_says_disguised
+
+    effective_dominance = dominance
+    if python_says_disguised:
+        effective_dominance = min(dominance, 20)
+
+    if effective_dominance >= 60:
+        dominance_mod = int((effective_dominance - 30) * 0.8)
+    elif effective_dominance < 30:
+        dominance_mod = -int((30 - effective_dominance) * 1.5)
+    else:
+        dominance_mod = 0
+
+    hero_bonus = 0 if python_says_disguised else int(hero * 0.3)
+    removable_bonus = 30 if _all_issues_are_removable(a) else 0
+    transformable_bonus = 40 if _is_transformable(a) else 0
+
+    subtotal = pillar + dominance_mod + hero_bonus + removable_bonus + transformable_bonus
+
+    if is_lifestyle_closeup:
+        total = int(subtotal * 0.45)
+        lifestyle_penalty = total - subtotal
+    else:
+        total = subtotal
+        lifestyle_penalty = 0
+
+    return {
+        "pillar": pillar,
+        "dominance_pct": dominance,
+        "effective_dominance_pct": effective_dominance,
+        "dominance_mod": dominance_mod,
+        "hero_score": hero,
+        "hero_bonus": hero_bonus,
+        "removable_bonus": removable_bonus,
+        "transformable_bonus": transformable_bonus,
+        "is_lifestyle_closeup": is_lifestyle_closeup,
+        "gemini_said_closeup": gemini_says_closeup,
+        "python_said_disguised": python_says_disguised,
+        "lifestyle_penalty": lifestyle_penalty,
+        "shot_type": shot,
+        "human_count": human_count,
+        "subtotal": subtotal,
+        "total": total,
+    }
+
+
+def score_of_entry(entry: dict) -> int:
+    """Score brand total d'une photo (utilisable hors compute_coverage)."""
+    return compute_score_components(entry)["total"]
+
+
 def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
     """
     Args:
@@ -237,90 +311,34 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
         else:
             unmapped.append(entry)
 
-    # 3) Sort par score brand décroissant. Le scoring intègre 6 composantes (cf score_components ci-dessous).
-    def compute_score_components(entry: dict) -> dict:
-        """Décompose le score d'une photo en composantes lisibles (debug + UI)."""
-        a = entry.get("analysis") or {}
-        factual = a.get("factual") or {}
-        scores = (a.get("emotional") or {}).get("pillar_scores") or {}
-        pillar = scores.get("wellness", 0) + scores.get("experience", 0) + scores.get("freedom", 0)
-
-        dominance = (a.get("amenity_dominance") or {}).get("primary_amenity_visible_pct") or 0
-        if not isinstance(dominance, (int, float)):
-            dominance = 0
-        hero = (a.get("hero_quality") or {}).get("score") or 0
-        if not isinstance(hero, (int, float)):
-            hero = 0
-        shot = ((a.get("shot_type") or {}).get("type") or "").lower()
-        human_count = factual.get("human_count") or 0
-
-        gemini_says_closeup = (shot == "close_up" and human_count > 0 and dominance < 30)
-        python_says_disguised = _is_lifestyle_disguised_closeup(a)
-        is_lifestyle_closeup = gemini_says_closeup or python_says_disguised
-
-        # Si Python a détecté un déguisement, on plafonne la dominance à 20%
-        effective_dominance = dominance
-        if python_says_disguised:
-            effective_dominance = min(dominance, 20)
-
-        # Composantes
-        if effective_dominance >= 60:
-            dominance_mod = int((effective_dominance - 30) * 0.8)
-        elif effective_dominance < 30:
-            dominance_mod = -int((30 - effective_dominance) * 1.5)
-        else:
-            dominance_mod = 0
-
-        hero_bonus = 0 if python_says_disguised else int(hero * 0.3)
-        removable_bonus = 30 if _all_issues_are_removable(a) else 0
-        transformable_bonus = 40 if _is_transformable(a) else 0
-
-        # Total avant pénalité multiplicative
-        subtotal = pillar + dominance_mod + hero_bonus + removable_bonus + transformable_bonus
-
-        # Pénalité forte si lifestyle closeup (×0.45)
-        if is_lifestyle_closeup:
-            total = int(subtotal * 0.45)
-            lifestyle_penalty = total - subtotal  # négatif
-        else:
-            total = subtotal
-            lifestyle_penalty = 0
-
-        return {
-            "pillar": pillar,
-            "dominance_pct": dominance,
-            "effective_dominance_pct": effective_dominance,
-            "dominance_mod": dominance_mod,
-            "hero_score": hero,
-            "hero_bonus": hero_bonus,
-            "removable_bonus": removable_bonus,
-            "transformable_bonus": transformable_bonus,
-            "is_lifestyle_closeup": is_lifestyle_closeup,
-            "gemini_said_closeup": gemini_says_closeup,
-            "python_said_disguised": python_says_disguised,
-            "lifestyle_penalty": lifestyle_penalty,
-            "shot_type": shot,
-            "human_count": human_count,
-            "subtotal": subtotal,
-            "total": total,
-        }
-
-    def score_of(entry):
-        return compute_score_components(entry)["total"]
+    # 3) Sort par score brand décroissant — utilise compute_score_components au top-level
+    score_of = score_of_entry
 
     rejected_low_score: list[dict] = []
-    rescued_transformable: list[dict] = []  # photos rescues du filtre car catégorie sous-couverte
+    rescued_transformable: list[dict] = []
     for cat in buckets:
-        # Filtre qualité : photos avec score >= seuil → bucket principal.
-        # Photos sous le seuil mais transformables (nuit/sombre) → bucket de rattrapage.
-        # Photos sous le seuil ET non-transformables → rejetées définitivement.
+        # 3 niveaux de tri dans chaque bucket :
+        #   ok : score >= seuil ET PAS un lifestyle closeup → top du bucket
+        #   lifestyle_supplemental : closeups bikini/torse/etc. → mis en queue (jamais top-N)
+        #   fallback : score sous seuil mais transformable (nuit/sombre)
+        #   rejected : score sous seuil et non transformable
         ok: list[dict] = []
+        lifestyle_supplemental: list[dict] = []
         fallback: list[dict] = []
         for entry in buckets[cat]:
+            a = entry.get("analysis") or {}
             score = score_of(entry)
-            if score >= MIN_BRAND_SCORE:
+            is_closeup = _is_lifestyle_disguised_closeup(a) or (
+                ((a.get("shot_type") or {}).get("type") or "").lower() == "close_up"
+                and (a.get("factual") or {}).get("human_count", 0) > 0
+            )
+
+            if is_closeup:
+                # Photos lifestyle close-up : on les garde mais en queue de bucket (jamais top-N)
+                lifestyle_supplemental.append(entry)
+            elif score >= MIN_BRAND_SCORE:
                 ok.append(entry)
-            elif _is_transformable(entry.get("analysis") or {}):
+            elif _is_transformable(a):
                 fallback.append(entry)
             else:
                 rejected_low_score.append({
@@ -330,6 +348,7 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
                     "reason": "score brand < %d (hors-scope, non transformable)" % MIN_BRAND_SCORE,
                 })
         ok.sort(key=score_of, reverse=True)
+        lifestyle_supplemental.sort(key=score_of, reverse=True)
         fallback.sort(key=score_of, reverse=True)
 
         # Si on n'a pas atteint le min de la catégorie, on pioche dans les transformables
@@ -344,7 +363,6 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
                     "score": score_of(e),
                     "reason": "rattrapage : catégorie sous-couverte, photo nuit/sombre récupérée (sera transformée par IA)",
                 })
-            # Le reste des transformables est mis à part (ni gardé, ni rejeté définitivement)
             for e in fallback[n_rescue:]:
                 rejected_low_score.append({
                     "filename": e["input"]["filename"],
@@ -353,7 +371,6 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
                     "reason": "transformable mais cat. %s déjà couverte au min" % cat,
                 })
         else:
-            # Catégorie déjà OK sans rescue, ou pas de min requis : transformables non utilisées sont rejetées
             for e in fallback:
                 rejected_low_score.append({
                     "filename": e["input"]["filename"],
@@ -361,6 +378,14 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
                     "score": score_of(e),
                     "reason": "score brand < %d (transformable mais non requise)" % MIN_BRAND_SCORE,
                 })
+
+        # ━ Lifestyle closeups en QUEUE de bucket : disponibles seulement si pas assez de "vraies" photos ━
+        # Si ok a déjà ≥ target_min, les closeups ne sont pas ajoutés au bucket (filtrés out).
+        # Si ok est sous-couvert et qu'il n'y a pas de transformable, on pioche dans les closeups en dernier recours.
+        if target_min > 0 and len(ok) < target_min and lifestyle_supplemental:
+            n_closeup_rescue = min(target_min - len(ok), len(lifestyle_supplemental))
+            for e in lifestyle_supplemental[:n_closeup_rescue]:
+                ok.append(e)  # ils seront en fin de tri grâce à leur score plombé
 
         buckets[cat] = ok
 
