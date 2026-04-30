@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DayAccess — Outil photo</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Manrope, sans-serif; }
+    .dropzone { border: 2px dashed #d1d5db; transition: all .15s; }
+    .dropzone.drag { border-color: #f97316; background: #fff7ed; }
+    .pill { display:inline-flex; align-items:center; padding:.15rem .55rem; font-size:.75rem; border-radius:9999px; background:#f3f4f6; color:#374151; }
+    .pill-on { background:#dcfce7; color:#166534; }
+    .pill-off { background:#f3f4f6; color:#9ca3af; text-decoration:line-through; }
+    .pill-vibe { background:linear-gradient(135deg,#fb923c,#f59e0b); color:white; }
+    .progress-bar { height: 6px; background: #f3f4f6; border-radius: 9999px; overflow: hidden; }
+    .progress-fill { height: 100%; background: linear-gradient(90deg, #fb923c, #f59e0b); transition: width .3s; }
+    /* Slider avant/après — drag direct sur le conteneur */
+    .compare { position: relative; width: 100%; aspect-ratio: 16/9; overflow: hidden; user-select: none; cursor: ew-resize; touch-action: none; }
+    .compare img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+    .compare .after-wrap { position: absolute; inset: 0; clip-path: inset(0 0 0 50%); pointer-events: none; }
+    .compare .divider { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; background: white; box-shadow: 0 0 8px rgba(0,0,0,.5); pointer-events: none; transform: translateX(-1px); }
+    .compare .handle { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 36px; height: 36px; border-radius: 50%; background: white; box-shadow: 0 2px 8px rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #555; pointer-events: none; }
+    .compare .label { position: absolute; top: 8px; padding: 3px 10px; background: rgba(0,0,0,.65); color: white; font-size: 11px; border-radius: 4px; pointer-events: none; font-weight: 500; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <div class="max-w-5xl mx-auto p-8">
+
+    <header class="mb-8">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-orange-400 to-amber-500"></div>
+        <h1 class="text-2xl font-bold">DayAccess Photo Tool</h1>
+      </div>
+      <p class="text-sm text-gray-500 mt-1">Validation et retouche batch des photos par hôtel — pour le déploiement DayAccess.</p>
+    </header>
+
+    <!-- Étape 1 — URL RP -->
+    <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+      <h2 class="text-base font-semibold mb-1">1. Fiche ResortPass de l'hôtel</h2>
+      <p class="text-sm text-gray-500 mb-4">Source de vérité pour les amenities, vibes et personas autorisés en ajout IA.</p>
+      <div class="flex gap-2">
+        <input id="rp-url" type="url" placeholder="https://www.resortpass.com/hotels/..."
+               class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-orange-300 focus:border-orange-400 outline-none">
+        <button id="btn-scrape" class="px-4 py-2 bg-gray-900 text-white text-sm rounded-md hover:bg-gray-700 disabled:opacity-50">
+          Scraper
+        </button>
+      </div>
+      <div id="rp-result" class="hidden mt-5 pt-5 border-t border-gray-100"></div>
+    </section>
+
+    <!-- Étape 2 — Sources photos (multi-sources avec cases à cocher) -->
+    <section id="step-upload" class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6 opacity-50 pointer-events-none">
+      <h2 class="text-base font-semibold mb-1">2. Sources de photos</h2>
+      <p class="text-sm text-gray-500 mb-4">Coche les sources à utiliser. Dédup pHash inter-sources automatique.</p>
+
+      <div class="space-y-3 mb-4">
+        <!-- Source : Site officiel -->
+        <label class="flex items-start gap-3 border border-gray-200 rounded-lg p-3 cursor-pointer hover:bg-gray-50">
+          <input type="checkbox" id="src-official" checked class="mt-0.5 w-4 h-4 accent-orange-500">
+          <div class="flex-1">
+            <div class="text-sm font-semibold">⭐ Site officiel de l'hôtel</div>
+            <div class="text-xs text-gray-500">Auto-discovery via Gemini. Photos HD souvent les plus pro. Échoue silencieusement sur les chaînes (Hyatt/Hilton/Marriott protégées Cloudflare).</div>
+          </div>
+        </label>
+
+        <!-- Source : Booking -->
+        <label class="flex items-start gap-3 border border-gray-200 rounded-lg p-3 cursor-pointer hover:bg-gray-50">
+          <input type="checkbox" id="src-booking" checked class="mt-0.5 w-4 h-4 accent-orange-500">
+          <div class="flex-1">
+            <div class="text-sm font-semibold">Booking.com (galerie complète HD)</div>
+            <div class="text-xs text-gray-500 mb-2">Headless browser + scraping galerie modale. 50-150 photos en max1024.</div>
+            <input id="booking-url" type="url" placeholder="URL fiche hôtel Booking — colle l'URL même longue, on nettoie"
+                   class="w-full px-2 py-1 text-xs border border-gray-300 rounded">
+          </div>
+        </label>
+
+        <!-- Source : RP -->
+        <label class="flex items-start gap-3 border border-gray-200 rounded-lg p-3 cursor-pointer hover:bg-gray-50">
+          <input type="checkbox" id="src-rp" checked class="mt-0.5 w-4 h-4 accent-orange-500">
+          <div class="flex-1">
+            <div class="text-sm font-semibold">ResortPass <span id="rp-photo-count" class="text-gray-500 font-normal"></span></div>
+            <div class="text-xs text-gray-500">Photos issues du scrape RP de l'étape 1. Source fiable, fallback automatique.</div>
+          </div>
+        </label>
+      </div>
+
+      <button id="btn-fetch-all" class="w-full px-4 py-2.5 bg-gradient-to-br from-orange-500 to-amber-500 text-white text-sm rounded-md hover:from-orange-600 disabled:opacity-50 font-medium">
+        Récupérer les photos depuis les sources cochées
+      </button>
+
+      <details class="mt-3 border border-gray-200 rounded-lg">
+        <summary class="cursor-pointer px-4 py-3 text-sm font-medium text-gray-700">Ou uploade tes propres photos</summary>
+        <div class="px-4 pb-4">
+          <div id="dropzone" class="dropzone rounded-lg p-8 text-center cursor-pointer">
+            <p class="text-sm text-gray-500">Glisse des photos ici ou <span class="text-orange-600 font-medium">clique pour choisir</span></p>
+            <input type="file" id="file-input" multiple accept=".jpg,.jpeg,.png,.webp" class="hidden">
+          </div>
+        </div>
+      </details>
+
+      <div id="upload-summary" class="hidden mt-4 text-sm text-gray-600"></div>
+      <div id="sources-summary" class="hidden mt-4"></div>
+      <div id="upload-preview" class="hidden mt-4"></div>
+    </section>
+
+    <!-- Étape 3 — Run -->
+    <section id="step-run" class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6 opacity-50 pointer-events-none">
+      <h2 class="text-base font-semibold mb-1">3. Lancer l'analyse</h2>
+      <p class="text-sm text-gray-500 mb-4">Pipeline complet : analyse Gemini → couverture → sélection → retouche → ajout IA → rapport.</p>
+      <button id="btn-run" class="px-5 py-2.5 bg-gradient-to-br from-orange-500 to-amber-500 text-white font-medium text-sm rounded-md hover:from-orange-600 hover:to-amber-600 disabled:opacity-50">
+        Lancer le pipeline
+      </button>
+      <div id="run-result" class="hidden mt-5 pt-5 border-t border-gray-100"></div>
+    </section>
+
+  </div>
+
+  <script>
+    const state = { slug: null, rp: null, uploaded: 0 };
+
+    const $ = (id) => document.getElementById(id);
+    const btnScrape = $("btn-scrape"), btnRun = $("btn-run");
+    const rpResult = $("rp-result"), runResult = $("run-result");
+    const dropzone = $("dropzone"), fileInput = $("file-input");
+    const uploadSummary = $("upload-summary"), uploadPreview = $("upload-preview");
+
+    // ----- Scrape RP -----
+    btnScrape.onclick = async () => {
+      const url = $("rp-url").value.trim();
+      if (!url) return;
+      btnScrape.disabled = true;
+      btnScrape.textContent = "Scraping...";
+      try {
+        const r = await fetch("/api/scrape", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || "Erreur");
+        state.slug = data.slug;
+        state.rp = data.data;
+        renderRP(data.data);
+        // débloque l'étape 2
+        $("step-upload").classList.remove("opacity-50", "pointer-events-none");
+      } catch (e) {
+        rpResult.classList.remove("hidden");
+        rpResult.innerHTML = `<div class="text-red-600 text-sm">${e.message}</div>`;
+      } finally {
+        btnScrape.disabled = false;
+        btnScrape.textContent = "Scraper";
+      }
+    };
+
+    function renderRP(d) {
+      const allCats = ["pool", "cabana", "food", "bar", "spa", "beach", "rooftop", "gym"];
+      const ameniteHTML = allCats.map(c => {
+        const on = d.amenities_normalized?.[c];
+        return `<span class="pill ${on ? 'pill-on' : 'pill-off'}">${c}</span>`;
+      }).join(" ");
+      const personasHTML = (d.personas_allowed || []).map(p => `<span class="pill">${p}</span>`).join(" ");
+
+      rpResult.classList.remove("hidden");
+      rpResult.innerHTML = `
+        <div class="flex items-start justify-between mb-3">
+          <div>
+            <div class="text-base font-semibold">${d.name}</div>
+            <div class="text-xs text-gray-500">${d.city || ''} · ${d.country || ''} · ${d.star_classification || '?'}★ · ${d.image_count} photos sur RP</div>
+          </div>
+          <span class="pill pill-vibe">Vibe: ${d.vibe_primary || '—'}</span>
+        </div>
+        <div class="mb-3">
+          <div class="text-xs text-gray-500 mb-1">Amenities détectées (vert = présent, gris barré = absent)</div>
+          <div>${ameniteHTML}</div>
+        </div>
+        <div>
+          <div class="text-xs text-gray-500 mb-1">Personas autorisés en ajout IA</div>
+          <div>${personasHTML}</div>
+        </div>
+      `;
+      // met à jour le compteur dans le bouton "Télécharger depuis RP"
+      $("rp-photo-count").textContent = d.image_count ? `(${d.image_count} dispo)` : "";
+    }
+
+    // ----- Polling progress générique -----
+    // Anti-zombie : si on voit "done: true" AVANT d'avoir vu un état in-progress, on ignore
+    // (c'est un résidu d'un run précédent — le serveur n'a pas encore appelé progress.init).
+    function pollProgress(slug, jobSuffix, onUpdate) {
+      let stopped = false;
+      let sawInProgress = false;
+      const startedAt = Date.now() / 1000;
+      const tick = async () => {
+        if (stopped) return;
+        try {
+          const r = await fetch(`/api/progress?slug=${encodeURIComponent(slug + jobSuffix)}`);
+          const s = await r.json();
+
+          // Détection zombie : done=true mais updated_at antérieur au démarrage du poll
+          const isZombie = s.done && s.updated_at && s.updated_at < startedAt - 1;
+          if (isZombie || (s.done && !sawInProgress)) {
+            // On ignore et on retry — le serveur va bientôt réinitialiser
+            setTimeout(tick, 600);
+            return;
+          }
+
+          if (!s.done && (s.current > 0 || s.total > 0 || s.step === "starting" || s.step === "analyzing" || s.step === "downloading" || s.step === "scraping_booking" || s.step === "enhancing" || s.step === "dedup" || s.step === "dedup_vlm" || s.step === "amenity_verify" || s.step === "official_finding" || s.step === "official_extracting" || s.step === "booking" || s.step === "rp")) {
+            sawInProgress = true;
+          }
+          onUpdate(s);
+          if (s.done && sawInProgress) { stopped = true; return; }
+        } catch (e) { /* ignore */ }
+        setTimeout(tick, 500);
+      };
+      tick();
+      return () => { stopped = true; };
+    }
+
+    function renderProgressBar(target, current, total, message, costUsd) {
+      const pct = total ? Math.round(100 * current / total) : 0;
+      const cost = costUsd ? `· $${costUsd.toFixed(4)} cumulés` : '';
+      target.innerHTML = `
+        <div class="text-xs text-gray-600 mb-2">${message || ''} ${cost}</div>
+        <div class="progress-bar"><div class="progress-fill" style="width: ${pct}%"></div></div>
+        <div class="text-[11px] text-gray-500 mt-1">${current}/${total} (${pct}%)</div>
+      `;
+    }
+
+    // ----- Sélection photos par toggle (cochées par défaut, décocher au clic) -----
+    state.deselected = new Set();  // filenames désélectionnés
+
+    function renderUploadGrid(files) {
+      // files = [{name, source}]
+      uploadPreview.classList.remove("hidden");
+      const SOURCE_BADGE = {
+        official: { label: "officiel", color: "bg-orange-500" },
+        booking:  { label: "booking",  color: "bg-blue-500" },
+        rp:       { label: "RP",       color: "bg-purple-500" },
+      };
+      uploadPreview.innerHTML = `
+        <div class="text-xs text-gray-600 mb-2">
+          <span id="select-count">${files.length} / ${files.length}</span> photos sélectionnées pour analyse
+          <span class="text-gray-400">— clique sur une photo pour la désélectionner</span>
+          <button id="btn-select-all" class="ml-2 text-orange-600 underline text-[11px]">tout (re)cocher</button>
+        </div>
+        <div class="grid grid-cols-6 gap-2">${files.map(f => {
+          const cfg = SOURCE_BADGE[f.source] || { label: f.source, color: "bg-gray-500" };
+          return `
+            <div class="photo-tile relative aspect-square bg-gray-100 rounded overflow-hidden cursor-pointer group" data-name="${f.name}">
+              <img src="/uploads/${state.slug}/${f.name}" class="w-full h-full object-cover transition" loading="lazy">
+              <div class="absolute top-1 left-1 ${cfg.color} text-white text-[9px] px-1 py-0.5 rounded">${cfg.label}</div>
+              <div class="check-mark absolute top-1 right-1 w-5 h-5 rounded-full bg-green-500 text-white flex items-center justify-center text-xs font-bold">✓</div>
+              <div class="deselect-overlay absolute inset-0 bg-red-500/30 opacity-0 transition flex items-center justify-center"><span class="bg-white rounded-full w-8 h-8 flex items-center justify-center text-red-600 font-bold text-sm">✗</span></div>
+            </div>
+          `;
+        }).join("")}</div>
+      `;
+
+      const updateCount = () => {
+        const total = files.length;
+        const kept = total - state.deselected.size;
+        const el = document.getElementById("select-count");
+        if (el) el.textContent = `${kept} / ${total}`;
+      };
+
+      uploadPreview.querySelectorAll(".photo-tile").forEach(tile => {
+        tile.onclick = () => {
+          const name = tile.dataset.name;
+          const isDeselected = state.deselected.has(name);
+          if (isDeselected) {
+            state.deselected.delete(name);
+            tile.classList.remove("opacity-40", "grayscale");
+            tile.querySelector(".check-mark").style.display = "flex";
+            tile.querySelector(".deselect-overlay").style.opacity = "0";
+          } else {
+            state.deselected.add(name);
+            tile.classList.add("opacity-40", "grayscale");
+            tile.querySelector(".check-mark").style.display = "none";
+            tile.querySelector(".deselect-overlay").style.opacity = "1";
+          }
+          updateCount();
+        };
+      });
+
+      const btnReset = document.getElementById("btn-select-all");
+      if (btnReset) {
+        btnReset.onclick = (e) => {
+          e.preventDefault();
+          state.deselected.clear();
+          uploadPreview.querySelectorAll(".photo-tile").forEach(tile => {
+            tile.classList.remove("opacity-40", "grayscale");
+            tile.querySelector(".check-mark").style.display = "flex";
+            tile.querySelector(".deselect-overlay").style.opacity = "0";
+          });
+          updateCount();
+        };
+      }
+    }
+
+    // ----- Fetch ALL sources (orchestre official + booking + rp) -----
+    $("btn-fetch-all").onclick = async () => {
+      if (!state.slug) { alert("Scrape d'abord la fiche RP (étape 1)"); return; }
+      const sources = {
+        official: $("src-official").checked,
+        booking: $("src-booking").checked,
+        rp: $("src-rp").checked,
+      };
+      if (!sources.official && !sources.booking && !sources.rp) {
+        alert("Coche au moins une source.");
+        return;
+      }
+      const bookingUrl = $("booking-url").value.trim();
+      if (sources.booking && !bookingUrl.startsWith("https://www.booking.com/hotel/")) {
+        alert("Source Booking cochée → colle une URL Booking valide.");
+        return;
+      }
+      const btn = $("btn-fetch-all");
+      btn.disabled = true;
+      btn.textContent = "Récupération en cours...";
+      uploadSummary.classList.remove("hidden");
+      uploadSummary.classList.remove("text-red-600");
+
+      const stopPoll = pollProgress(state.slug, "_fetch_all", (s) => {
+        renderProgressBar(uploadSummary, s.current || 0, s.total || 100, s.message || "Initialisation...");
+      });
+
+      try {
+        const r = await fetch("/api/fetch-all-sources", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ slug: state.slug, booking_url: bookingUrl, sources }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || "Erreur");
+        stopPoll();
+        state.uploaded = data.downloaded;
+        state.deselected.clear();
+        uploadSummary.innerHTML = `<span class="text-green-700">✓ ${data.downloaded} photo(s) prêtes (après dédup pHash inter-sources)</span>`;
+
+        // Récap sources
+        renderSourcesSummary(data.sources_summary);
+
+        // Grille interactive
+        renderUploadGrid(data.files);
+
+        $("step-run").classList.remove("opacity-50", "pointer-events-none");
+      } catch (e) {
+        stopPoll();
+        uploadSummary.innerHTML = `<span class="text-red-600">Erreur : ${e.message}</span>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Récupérer les photos depuis les sources cochées";
+      }
+    };
+
+    function renderSourcesSummary(sources) {
+      const el = $("sources-summary");
+      if (!sources) { el.classList.add("hidden"); return; }
+      el.classList.remove("hidden");
+      const rows = [];
+      const SOURCE_LABELS = { official: "Site officiel", booking: "Booking.com", rp: "ResortPass" };
+      for (const [key, info] of Object.entries(sources)) {
+        const label = SOURCE_LABELS[key] || key;
+        if (info.error) {
+          rows.push(`<tr><td class="py-1 pr-3 font-medium">✗ ${label}</td><td class="py-1 text-red-600 text-xs">${info.error}</td></tr>`);
+        } else if (info.photos_downloaded != null) {
+          const detail = info.url ? `<a href="${info.url}" target="_blank" class="text-orange-600 text-xs underline">${info.url.substring(0, 60)}…</a>` : '';
+          rows.push(`<tr><td class="py-1 pr-3 font-medium">✓ ${label}</td><td class="py-1 text-xs">${info.photos_downloaded} photos ${detail}</td></tr>`);
+        }
+      }
+      el.innerHTML = `
+        <div class="bg-slate-50 border border-slate-200 rounded-lg p-3">
+          <div class="text-xs font-semibold text-slate-700 mb-2">Sources utilisées</div>
+          <table class="text-xs"><tbody>${rows.join("")}</tbody></table>
+        </div>
+      `;
+    }
+
+    // ----- Fetch Booking photos (legacy, gardé pour rétrocompat) -----
+    $("btn-fetch-booking") && ($("btn-fetch-booking").onclick = async () => {
+      if (!state.slug) { alert("Scrape d'abord la fiche RP (étape 1)"); return; }
+      const url = $("booking-url").value.trim();
+      if (!url.startsWith("https://www.booking.com/hotel/")) {
+        alert("Colle une vraie URL fiche Booking (https://www.booking.com/hotel/...)");
+        return;
+      }
+      const btn = $("btn-fetch-booking");
+      btn.disabled = true;
+      btn.textContent = "Scraping...";
+      uploadSummary.classList.remove("hidden");
+      uploadSummary.classList.remove("text-red-600");
+
+      const stopPoll = pollProgress(state.slug, "_fetch_booking", (s) => {
+        renderProgressBar(uploadSummary, s.current || 0, s.total || 100, s.message || "Scraping Booking...");
+      });
+
+      try {
+        const r = await fetch("/api/fetch-booking-photos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ slug: state.slug, booking_url: url }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || "Erreur");
+        stopPoll();
+        state.uploaded = data.downloaded;
+        uploadSummary.innerHTML = `<span class="text-green-700">✓ ${data.downloaded}/${data.total} photo(s) Booking téléchargée(s) (max1024 HD)</span>`;
+
+        uploadPreview.classList.remove("hidden");
+        const okFiles = data.files.filter(f => f.status === "ok");
+        uploadPreview.innerHTML = okFiles.map(f =>
+          `<div class="aspect-square bg-gray-100 rounded overflow-hidden">
+            <img src="/uploads/${state.slug}/${f.name}" class="w-full h-full object-cover" loading="lazy">
+          </div>`
+        ).join("");
+
+        $("step-run").classList.remove("opacity-50", "pointer-events-none");
+      } catch (e) {
+        stopPoll();
+        uploadSummary.innerHTML = `<span class="text-red-600">Erreur : ${e.message}</span>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Récupérer";
+      }
+    });  // close btn-fetch-booking guard
+
+    // ----- Fetch RP photos (legacy, gardé pour rétrocompat) -----
+    $("btn-fetch-rp") && ($("btn-fetch-rp").onclick = async () => {
+      if (!state.slug) return;
+      const btn = $("btn-fetch-rp");
+      btn.disabled = true;
+      btn.textContent = "Téléchargement...";
+      uploadSummary.classList.remove("hidden");
+      uploadSummary.classList.remove("text-red-600");
+
+      const stopPoll = pollProgress(state.slug, "_fetch", (s) => {
+        renderProgressBar(uploadSummary, s.current || 0, s.total || 1, s.message || "Téléchargement RP...");
+      });
+
+      try {
+        const r = await fetch("/api/fetch-rp-photos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ slug: state.slug }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || "Erreur");
+        stopPoll();
+        state.uploaded = data.downloaded;
+        uploadSummary.innerHTML = `<span class="text-green-700">✓ ${data.downloaded}/${data.total} photo(s) RP téléchargée(s) en haute résolution</span>`;
+
+        uploadPreview.classList.remove("hidden");
+        uploadPreview.innerHTML = data.files.filter(f => f.status === "ok").slice(0, 30).map(f =>
+          `<div class="aspect-square bg-gray-100 rounded overflow-hidden">
+            <img src="/uploads/${state.slug}/${f.name}" class="w-full h-full object-cover" loading="lazy">
+          </div>`
+        ).join("");
+
+        $("step-run").classList.remove("opacity-50", "pointer-events-none");
+      } catch (e) {
+        stopPoll();
+        uploadSummary.innerHTML = `<span class="text-red-600">Erreur : ${e.message}</span>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Télécharger";
+      }
+    });  // close btn-fetch-rp guard
+
+    // ----- Upload photos -----
+    dropzone.onclick = () => fileInput.click();
+    dropzone.ondragover = (e) => { e.preventDefault(); dropzone.classList.add("drag"); };
+    dropzone.ondragleave = () => dropzone.classList.remove("drag");
+    dropzone.ondrop = (e) => {
+      e.preventDefault();
+      dropzone.classList.remove("drag");
+      handleFiles(e.dataTransfer.files);
+    };
+    fileInput.onchange = () => handleFiles(fileInput.files);
+
+    async function handleFiles(files) {
+      if (!state.slug) { alert("Scrape la fiche RP d'abord"); return; }
+      if (!files.length) return;
+
+      const fd = new FormData();
+      fd.append("slug", state.slug);
+      for (const f of files) fd.append("files", f);
+
+      uploadSummary.classList.remove("hidden");
+      uploadSummary.textContent = `Upload de ${files.length} photo(s)...`;
+
+      try {
+        const r = await fetch("/api/upload", { method: "POST", body: fd });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || "Erreur");
+        state.uploaded = data.uploaded;
+        uploadSummary.textContent = `✓ ${data.uploaded} photo(s) uploadée(s)`;
+
+        // preview
+        uploadPreview.classList.remove("hidden");
+        uploadPreview.innerHTML = data.files.map(f =>
+          `<div class="aspect-square bg-gray-100 rounded overflow-hidden">
+            <img src="/uploads/${state.slug}/${f.name}" class="w-full h-full object-cover" loading="lazy">
+          </div>`
+        ).join("");
+
+        // débloque l'étape 3
+        $("step-run").classList.remove("opacity-50", "pointer-events-none");
+      } catch (e) {
+        uploadSummary.textContent = `Erreur : ${e.message}`;
+        uploadSummary.classList.add("text-red-600");
+      }
+    }
+
+    // ----- Run pipeline -----
+    btnRun.onclick = async () => {
+      btnRun.disabled = true;
+      btnRun.textContent = "Analyse en cours...";
+      runResult.classList.remove("hidden");
+
+      // Container pour la progress bar live
+      const progBox = document.createElement("div");
+      progBox.className = "mb-4 bg-orange-50 border border-orange-200 rounded-lg p-4";
+      runResult.innerHTML = '';
+      runResult.appendChild(progBox);
+
+      const stopPoll = pollProgress(state.slug, "_analyze", (s) => {
+        renderProgressBar(progBox, s.current || 0, s.total || state.uploaded, s.message || "Analyse Gemini en cours...", s.cost_usd_cumulated);
+      });
+
+      try {
+        const r = await fetch("/api/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            slug: state.slug,
+            deselected: [...(state.deselected || [])],
+          }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || "Erreur");
+        stopPoll();
+        runResult.innerHTML = renderResults(data);
+        // Init sliders APRÈS injection HTML (le DOM est garanti d'être à jour ici)
+        requestAnimationFrame(() => {
+          requestAnimationFrame(initCompareSliders);  // double RAF = paint terminé
+        });
+      } catch (e) {
+        stopPoll();
+        runResult.innerHTML = `<div class="text-red-600 text-sm">${e.message}</div>`;
+      } finally {
+        btnRun.disabled = false;
+        btnRun.textContent = "Lancer le pipeline";
+      }
+    };
+
+    // Panneau "Comment ça marche" — explique le scoring, la sélection, l'ordering, les retouches
+    function renderScoringPanel() {
+      return `
+        <details class="mb-5 bg-gradient-to-br from-slate-50 to-orange-50 border border-slate-200 rounded-lg">
+          <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700 select-none">
+            ⓘ Comment l'outil sélectionne et retouche les photos (cliquer pour déplier)
+          </summary>
+          <div class="px-5 pb-5 space-y-5 text-xs leading-relaxed text-slate-700">
+
+            <div>
+              <div class="font-semibold text-slate-900 mb-1.5">1. Analyse de chaque photo (Gemini Flash)</div>
+              <p>Chaque photo passe par un modèle vision qui extrait :</p>
+              <ul class="list-disc list-inside ml-2 mt-1 space-y-0.5">
+                <li><strong>Catégorie principale + secondaires</strong> (multi-tag : ex. "rooftop avec piscine" → compte dans pool ET rooftop)</li>
+                <li><strong>Sujets visibles</strong>, nombre d'humains, heure du jour, ambiance lumière, alignement palette</li>
+                <li><strong>Sensations & mots-clés brand</strong> (paisibilité, soleil, joie, chaleur douce…)</li>
+                <li><strong>Issues</strong> (sombre, cadrage off, ne correspond pas aux DO Dayuse…)</li>
+                <li><strong>Recommandation de recadrage</strong> si pertinent (box précise + raison)</li>
+              </ul>
+            </div>
+
+            <div>
+              <div class="font-semibold text-slate-900 mb-1.5">2. Score brand /300 — 3 piliers Dayuse</div>
+              <div class="grid grid-cols-3 gap-2 mt-2">
+                <div class="bg-white rounded p-2 border border-slate-200">
+                  <div class="font-semibold text-orange-600">FREEDOM /100</div>
+                  <div class="text-[11px] text-slate-600">liberté d'usage, contrôle du temps, dépaysement accessible</div>
+                </div>
+                <div class="bg-white rounded p-2 border border-slate-200">
+                  <div class="font-semibold text-cyan-600">WELLNESS /100</div>
+                  <div class="text-[11px] text-slate-600">détente, soleil, eau, calme, ritual self-care</div>
+                </div>
+                <div class="bg-white rounded p-2 border border-slate-200">
+                  <div class="font-semibold text-amber-600">EXPERIENCE /100</div>
+                  <div class="text-[11px] text-slate-600">mémorable, partageable, instagrammable, aspirationnel</div>
+                </div>
+              </div>
+              <p class="mt-2 italic text-slate-500">Chaque photo reçoit 3 sous-scores (Gemini juge selon le PDF brand DayPass). Score total = somme = max 300.</p>
+            </div>
+
+            <div>
+              <div class="font-semibold text-slate-900 mb-1.5">3. Dédup d'angles (perceptual hash)</div>
+              <p>Si 2 photos sont quasi-identiques (cadrage très proche), on garde celle qui a le meilleur score brand et on écarte l'autre. Évite d'avoir 3 fois la même piscine sous des angles voisins.</p>
+            </div>
+
+            <div>
+              <div class="font-semibold text-slate-900 mb-1.5">4. Sélection top-N par catégorie (shopping list RP)</div>
+              <p class="mb-2">Les amenities listées sur la fiche RP de l'hôtel définissent la "shopping list". On cible <strong>12-18 photos finales</strong> avec ces seuils min-max par catégorie :</p>
+              <div class="grid grid-cols-3 gap-1.5 text-[11px]">
+                <div class="bg-white rounded px-2 py-1 border border-slate-200"><strong>Pool</strong> 3-4 (si RP a pool)</div>
+                <div class="bg-white rounded px-2 py-1 border border-slate-200"><strong>Cabana</strong> 2-4 (si RP a cabana)</div>
+                <div class="bg-white rounded px-2 py-1 border border-slate-200"><strong>Rooftop</strong> 1-3 (si RP a rooftop)</div>
+                <div class="bg-white rounded px-2 py-1 border border-slate-200"><strong>Beach</strong> 1-3 (si RP a beach)</div>
+                <div class="bg-white rounded px-2 py-1 border border-slate-200"><strong>Spa</strong> 1-2 (si RP a spa)</div>
+                <div class="bg-white rounded px-2 py-1 border border-slate-200"><strong>Food</strong> 1-2 (si RP a food)</div>
+                <div class="bg-white rounded px-2 py-1 border border-slate-200"><strong>Bar</strong> 0-2 (si RP a bar)</div>
+                <div class="bg-white rounded px-2 py-1 border border-slate-200"><strong>Hero ext.</strong> 1-2 (toujours)</div>
+                <div class="bg-white rounded px-2 py-1 border border-slate-200"><strong>Intérieur</strong> 0-2 (fallback)</div>
+              </div>
+              <p class="mt-2 italic text-slate-500">Dans chaque catégorie, on garde les photos avec le meilleur score brand. Les intérieurs ne sont retenus qu'en fallback si on n'a pas assez d'amenities/extérieurs.</p>
+            </div>
+
+            <div>
+              <div class="font-semibold text-slate-900 mb-1.5">5. Ordering du pack final (règles brand Dayuse)</div>
+              <ul class="list-disc list-inside ml-2 space-y-0.5">
+                <li><strong>Slot #1</strong> = meilleure photo amenity (priorité : pool &gt; cabana &gt; rooftop &gt; beach &gt; spa &gt; bar &gt; food). Jamais d'intérieur en photo de couverture.</li>
+                <li><strong>Alternance avec/sans humain</strong> : ratio cible ~50/50 sur tout le pack.</li>
+                <li><strong>Round-robin amenities</strong> : on évite 2 cabanas à la suite ; on tourne entre les amenities disponibles.</li>
+                <li><strong>Intérieurs en fin</strong> : ajoutés uniquement si on n'a pas atteint le minimum de 12 photos avec les amenities.</li>
+              </ul>
+            </div>
+
+            <div>
+              <div class="font-semibold text-slate-900 mb-1.5">6. Retouche par photo — décision automatique</div>
+              <div class="space-y-1 mt-1">
+                <div class="flex gap-2"><span class="bg-purple-600 text-white text-[10px] px-1.5 py-0.5 rounded h-fit">+ personnage IA</span><span>amenity vide candidate (cabana/transat/piscine/rooftop) + alternance demande un humain. Persona injecté selon vibe RP : Family-Friendly → familles, Party → groupes, Serene → couples, Luxe → couples/solos, Trendy → couples/solos/petits groupes</span></div>
+                <div class="flex gap-2"><span class="bg-rose-600 text-white text-[10px] px-1.5 py-0.5 rounded h-fit">− personnes IA</span><span>plus de 4 personnes sur la photo → suppression pour rester premium accessible</span></div>
+                <div class="flex gap-2"><span class="bg-indigo-600 text-white text-[10px] px-1.5 py-0.5 rounded h-fit">lumière IA</span><span>photo sombre, de nuit, ou palette off-brand → ENSOLEILLEMENT (transformation jour) ou ENHANCEMENT (ciel + soften shadows)</span></div>
+                <div class="flex gap-2"><span class="bg-cyan-600 text-white text-[10px] px-1.5 py-0.5 rounded h-fit">recadrage IA</span><span>issue cadrage détectée mais pas de box précise → recompose IA (rule of thirds)</span></div>
+                <div class="flex gap-2"><span class="bg-cyan-700 text-white text-[10px] px-1.5 py-0.5 rounded h-fit">recadrage Gemini</span><span>Gemini a recommandé une box précise → recadrage local Pillow (gratuit, déterministe, pas de régénération possible)</span></div>
+                <div class="flex gap-2"><span class="bg-gray-500 text-white text-[10px] px-1.5 py-0.5 rounded h-fit">warm local</span><span>photo déjà conforme brand → micro-ajustement Pillow (luminosité +5%, saturation +10%, warmth subtle) pour homogénéiser le pack</span></div>
+              </div>
+              <p class="mt-2 italic text-slate-500">Règle métier dure : photos de plats food → JAMAIS d'IA générative (risque d'inventer un plat inexistant), juste micro-warm local. Cocktails autorisés uniquement si le bar est listé sur RP.</p>
+            </div>
+
+            <div>
+              <div class="font-semibold text-slate-900 mb-1.5">7. Garde-fous</div>
+              <ul class="list-disc list-inside ml-2 space-y-0.5">
+                <li><strong>🚨 Cadrage altéré</strong> : si Nano Banana modifie l'aspect ratio sans qu'on lui ait demandé (zoom non voulu) → flag rouge, à rejeter manuellement</li>
+                <li><strong>Crop trop agressif</strong> : si Gemini propose un crop qui supprime + de 40% de l'image → on annule (probablement une hallucination)</li>
+                <li><strong>Pas de personnes sur l'eau / debout sur les meubles / de l'autre côté des barrières</strong> → règles physiques dans le prompt persona</li>
+                <li><strong>Pas de photo de nuit</strong> → soit transformée en jour via IA, soit rejetée</li>
+              </ul>
+            </div>
+
+          </div>
+        </details>
+      `;
+    }
+
+    function renderResults(d) {
+      const stats = d.stats;
+      const cov = d.coverage;
+
+      // Stats top + coût
+      const cost = d.cost || {};
+      const statsHTML = `
+        <div class="grid grid-cols-6 gap-2 mb-5">
+          <div class="bg-gray-50 rounded-lg p-3"><div class="text-2xl font-bold">${stats.uploaded}</div><div class="text-[11px] text-gray-500">uploadées</div></div>
+          <div class="bg-green-50 rounded-lg p-3"><div class="text-2xl font-bold text-green-700">${stats.analyzed_ok}</div><div class="text-[11px] text-gray-500">analysées</div></div>
+          <div class="bg-blue-50 rounded-lg p-3"><div class="text-2xl font-bold text-blue-700">${stats.kept_after_dedup}</div><div class="text-[11px] text-gray-500">uniques</div></div>
+          <div class="bg-amber-50 rounded-lg p-3"><div class="text-2xl font-bold text-amber-700">${stats.duplicates_dropped || 0}</div><div class="text-[11px] text-gray-500">doublons${stats.vlm_dedup_same_scene_count ? ` (dont ${stats.vlm_dedup_same_scene_count} via VLM)` : ''}</div></div>
+          <div class="bg-pink-50 rounded-lg p-3"><div class="text-2xl font-bold text-pink-700">${stats.enhanced || 0}</div><div class="text-[11px] text-gray-500">retouchées<br>+pers ${stats.ai_add_character || 0} · −pers ${stats.ai_remove_people || 0}<br>lum ${stats.ai_lighting || 0} · recadr ${stats.ai_recompose || 0} · loc ${stats.local_enhanced || 0}</div></div>
+          <div class="bg-purple-50 rounded-lg p-3"><div class="text-lg font-bold text-purple-700">$${(cost.total_usd || 0).toFixed(4)}</div><div class="text-[11px] text-gray-500">analyse $${(cost.analysis_usd || 0).toFixed(4)} + retouche $${(cost.enhancement_usd || 0).toFixed(4)}</div></div>
+        </div>
+      `;
+
+      // Couverture
+      const catsHTML = Object.entries(cov.by_category).map(([cat, info]) => {
+        const color = info.status === 'ok' ? 'green' : info.status === 'missing' ? 'red' : 'amber';
+        return `
+          <div class="border border-${color}-200 bg-${color}-50 rounded-lg p-3">
+            <div class="flex items-center justify-between mb-1">
+              <span class="font-semibold text-sm capitalize">${cat}</span>
+              <span class="text-xs text-${color}-700">${info.found}/${info.target_min}-${info.target_max}</span>
+            </div>
+            <div class="text-xs text-gray-600">${info.message}</div>
+          </div>
+        `;
+      }).join("");
+
+      const alertsHTML = (cov.global.alerts || []).length
+        ? `<div class="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+            <div class="text-xs uppercase font-medium text-red-700 mb-1">⚠ Alertes</div>
+            <ul class="text-sm text-red-800 list-disc list-inside">${cov.global.alerts.map(a => `<li>${a.message}</li>`).join('')}</ul>
+          </div>`
+        : '';
+
+      // Grille de photos — sélectionnées en premier, badges renforcés
+      const sortedPhotos = [...d.photos].sort((a, b) => {
+        if (a.selected !== b.selected) return b.selected - a.selected;  // sélectionnées d'abord
+        return (b.score_brand || 0) - (a.score_brand || 0);
+      });
+
+      const cardsHTML = sortedPhotos.map(p => {
+        const dedupBadge = p.dedup_status === 'duplicate_dropped'
+          ? `<span class="bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded">doublon</span>`
+          : '';
+        const aiBadge = p.ai_candidate
+          ? `<span class="bg-purple-500 text-white text-[10px] px-1.5 py-0.5 rounded">IA cible</span>`
+          : '';
+        const selectedBadge = p.selected
+          ? `<span class="bg-green-600 text-white text-[10px] px-1.5 py-0.5 rounded font-medium">✓ TOP ${p.selection_rank} ${p.selection_category}</span>`
+          : '';
+        const errorBadge = !p.trace_ok
+          ? `<span class="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded" title="${(p.gemini_error || '').replace(/"/g, "'")}">analyse échouée</span>`
+          : '';
+        const errorDetail = (!p.trace_ok && p.gemini_error)
+          ? `<div class="text-[10px] text-red-700 italic mt-1 px-1.5">${p.gemini_error.substring(0, 200)}</div>`
+          : '';
+        const sensations = (p.sensations || []).slice(0, 3).join(", ");
+        const issues = (p.issues || []).length ? `<div class="text-[11px] text-red-600 mt-1">⚠ ${p.issues.join(', ')}</div>` : '';
+
+        const containerClasses = [
+          "border rounded-lg overflow-hidden bg-white",
+          p.selected ? "border-green-500 border-2 shadow-md" : "border-gray-200",
+          p.dedup_status === 'duplicate_dropped' ? 'opacity-60' : '',
+          !p.trace_ok ? 'opacity-70 border-red-300' : '',
+        ].filter(Boolean).join(" ");
+
+        return `
+          <div class="${containerClasses}">
+            <div class="relative aspect-video bg-gray-100">
+              <img src="${p.url}" class="w-full h-full object-cover" loading="lazy">
+              <div class="absolute top-1 left-1 right-1 flex flex-wrap gap-1">${selectedBadge}${aiBadge}${dedupBadge}${errorBadge}</div>
+            </div>
+            <div class="p-3">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-xs font-semibold uppercase text-orange-600">${p.category || (p.trace_ok ? 'autre' : '—')}</span>
+                <span class="text-xs text-gray-500">${p.score_brand}/300</span>
+              </div>
+              <div class="text-xs text-gray-500 mb-1">${p.human_count != null ? p.human_count : '?'} humain(s) · ${p.ambiance || ''}</div>
+              <div class="text-xs text-gray-600 italic">${sensations}</div>
+              ${issues}
+              ${errorDetail}
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      // Section "Photos finales (slider avant/après)"
+      const ACTION_BADGES = {
+        "ai_add_character": { label: "+ personnage IA", color: "bg-purple-600" },
+        "ai_remove_people": { label: "− personnes IA",  color: "bg-rose-600" },
+        "ai_remove_clutter":{ label: "nettoyage IA",    color: "bg-emerald-600" },
+        "ai_lighting":      { label: "lumière IA",      color: "bg-indigo-600" },
+        "ai_recompose":     { label: "recadrage IA",    color: "bg-cyan-600" },
+        "local_smart_crop": { label: "recadrage Gemini", color: "bg-cyan-700" },
+        "local_warm_boost": { label: "LUT brand",       color: "bg-gray-500" },
+      };
+      const enhancedHTML = (d.enhanced || []).map((e, i) => {
+        // Si chaîne d'actions (steps), on affiche tous les badges. Sinon, juste l'action principale.
+        const stepActions = (e.steps && e.steps.length > 1) ? e.steps.map(s => s.action) : [e.action];
+        const actionBadge = stepActions.map(a => {
+          const cfg = ACTION_BADGES[a] || { label: a, color: "bg-gray-500" };
+          return `<span class="${cfg.color} text-white text-[10px] px-1.5 py-0.5 rounded">${cfg.label}</span>`;
+        }).join(' <span class="text-gray-400 text-[10px]">+</span> ');
+        if (!e.after_url) {
+          return `<div class="border border-red-200 bg-red-50 rounded-lg p-3 text-xs">
+            <div class="font-semibold">${e.filename}</div>
+            <div class="text-red-700 mt-1">Erreur : ${e.error || 'pas de sortie'}</div>
+          </div>`;
+        }
+
+        const j = e.justification || {};
+        const sensations = (j.sensations || []).slice(0, 3).join(", ");
+        const issues = (j.issues || []).length
+          ? `<div class="text-[11px] text-amber-700 mt-1">⚠ ${j.issues.join(' · ')}</div>`
+          : '';
+        const noChangeNote = e.action === 'local_warm_boost'
+          ? `<div class="text-[10px] text-gray-400 mt-1 italic">Retouche très subtile (déjà conforme brand). Le slider montre quand même la diff micro-warm.</div>`
+          : '';
+        // framing_changed avec warning = altération non voulue (red flag)
+        // framing_changed sans warning = recadrage volontaire (info bénigne)
+        const framingWarn = e.framing_changed && e.framing_warning && e.action !== 'local_smart_crop' && e.action !== 'ai_recompose'
+          ? `<div class="text-[11px] text-red-700 mt-1 font-medium">🚨 Cadrage altéré par l'IA : ${e.framing_warning}. À rejeter manuellement.</div>`
+          : '';
+
+        // Validation post-IA — Gemini a comparé avant/après et détecté des violations
+        const v = e.ai_validation;
+        const VIOLATION_LABELS = {
+          invented_furniture: "Mobilier inventé (daybed/raft/etc.)",
+          subject_on_water: "Personne sur l'eau",
+          subject_on_furniture_top: "Personne debout sur meuble",
+          subject_wrong_side_barrier: "Personne du mauvais côté barrière",
+          scene_regenerated: "Scène quasi-régénérée",
+          inconsistent_scale: "Échelles incohérentes",
+          architecture_changed: "Architecture/décor modifié",
+          lighting_break: "Lumière incohérente",
+        };
+        // 4 états possibles après le retry+fallback :
+        //   1) Pas d'IA → pas de bandeau
+        //   2) IA validée du 1er coup → pas de bandeau
+        //   3) IA en échec, retry réussi → bandeau ambre "Auto-corrigée après retry"
+        //   4) IA en échec après retry → fallback original → bandeau bleu "Photo originale gardée"
+        //   5) IA en échec sans retry possible (action non actionable) → bandeau rouge violations
+        let validationWarn = '';
+        if (v) {
+          if (e.fallback_to_original) {
+            validationWarn = `<div class="text-[11px] text-blue-800 mt-1 font-medium bg-blue-50 rounded px-2 py-1 border border-blue-200">↩️ Validation IA échouée 2× → on a gardé la photo ORIGINALE non retouchée (mieux qu'une IA pétée). Violations rencontrées : ${(v.violations_before_retry || v.violations || []).map(viol => VIOLATION_LABELS[viol] || viol).join(', ')}</div>`;
+          } else if (v.retry_attempted && v.ok) {
+            validationWarn = `<div class="text-[11px] text-amber-800 mt-1 font-medium bg-amber-50 rounded px-2 py-1 border border-amber-200">✓ Auto-corrigée après retry (1ère IA pétée : ${(v.violations_before_retry || []).map(viol => VIOLATION_LABELS[viol] || viol).join(', ')})</div>`;
+          } else if (!v.ok && (v.violations || []).length) {
+            validationWarn = `<div class="text-[11px] text-red-700 mt-1 font-medium bg-red-50 rounded px-2 py-1 border border-red-200">🚨 Violations détectées par validation post-IA :<ul class="list-disc list-inside mt-0.5">${v.violations.map(viol => `<li>${VIOLATION_LABELS[viol] || viol}</li>`).join('')}</ul><div class="italic text-red-600 font-normal mt-0.5">${v.summary || ''}</div></div>`;
+          }
+        }
+
+        return `
+          <div class="border border-gray-200 rounded-lg overflow-hidden bg-white">
+            <div class="compare" data-idx="${i}">
+              <img src="${e.before_url}" alt="avant">
+              <div class="after-wrap"><img src="${e.after_url}" alt="après"></div>
+              <div class="divider"></div>
+              <div class="handle">⇆</div>
+              <span class="label" style="left:8px">avant</span>
+              <span class="label" style="right:8px; background:rgba(34,197,94,.85)">après</span>
+            </div>
+            <div class="p-3 space-y-2">
+              <div class="flex items-start justify-between gap-2">
+                <div class="flex-1">
+                  <div class="flex items-center gap-2 mb-0.5 flex-wrap">
+                    <span class="bg-gradient-to-br from-orange-500 to-amber-500 text-white text-[11px] font-bold px-2 py-0.5 rounded">#${e.final_order_pos || '?'}</span>
+                    ${e.is_fully_generated ? `<span class="bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide">📌 PHOTO 100% IA</span>` : ''}
+                    <span class="text-xs font-semibold">${e.filename.length > 26 ? e.filename.substring(0, 24) + '…' : e.filename}</span>
+                  </div>
+                  <div class="text-[10px] text-gray-500">${j.category || '?'} → top ${j.selection_rank || '?'} de "${j.selection_category || '?'}"</div>
+                  ${(() => {
+                    // Tags multi-catégories : principale + secondaires + tous les buckets shopping list où la photo compte
+                    const allTags = new Set();
+                    if (j.category) allTags.add(j.category);
+                    (j.categories_secondary || []).forEach(c => allTags.add(c));
+                    (j.coverage_targets || []).forEach(c => allTags.add(c + '*'));  // * indique bucket shopping list
+                    const tags = [...allTags].slice(0, 6);
+                    if (!tags.length) return '';
+                    return `<div class="flex flex-wrap gap-1 mt-1">${tags.map(t => {
+                      const isCoverage = t.endsWith('*');
+                      const cleanTag = t.replace(/\*$/, '');
+                      const isPrimary = cleanTag === j.category;
+                      const cls = isCoverage
+                        ? 'bg-orange-100 text-orange-800 border border-orange-300'
+                        : (isPrimary ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600');
+                      const label = isCoverage ? `🛒 ${cleanTag}` : cleanTag;
+                      return `<span class="text-[10px] px-1.5 py-0.5 rounded ${cls}">${label}</span>`;
+                    }).join('')}</div>`;
+                  })()}
+                </div>
+                ${actionBadge}
+              </div>
+
+              <div class="grid grid-cols-3 gap-1 text-[10px]">
+                <div class="bg-gray-50 rounded px-1.5 py-1"><span class="text-gray-500">Score</span> <strong>${j.score_brand_total || 0}/300</strong></div>
+                <div class="bg-gray-50 rounded px-1.5 py-1"><span class="text-gray-500">Lum</span> ${j.ambiance || '—'}</div>
+                <div class="bg-gray-50 rounded px-1.5 py-1"><span class="text-gray-500">Hum</span> ${j.human_count != null ? j.human_count : '?'} · ${j.time_of_day || '?'}</div>
+              </div>
+
+              ${(() => {
+                const sc = j.score_components;
+                if (!sc) return '';
+                const fmtSign = n => (n > 0 ? `+${n}` : `${n}`);
+                const dom = j.amenity_dominance || {};
+                const shot = j.shot_type || {};
+                const hero = j.hero_quality || {};
+                const flags = [];
+                if (sc.is_lifestyle_closeup) flags.push(`<span class="text-red-700 font-semibold">⚠ lifestyle closeup détecté${sc.python_said_disguised ? ' (Python)' : ''}${sc.gemini_said_closeup ? ' (Gemini)' : ''}</span>`);
+                if (sc.transformable_bonus > 0) flags.push(`<span class="text-blue-700">🌙→☀ transformable</span>`);
+                if (sc.removable_bonus > 0) flags.push(`<span class="text-emerald-700">🧹 issues nettoyables</span>`);
+                return `
+                  <details class="text-[10px] text-gray-600 bg-gray-50 rounded px-2 py-1.5 mt-1">
+                    <summary class="cursor-pointer font-medium text-gray-700 select-none">📊 Décomposition du score (${sc.total})</summary>
+                    <div class="mt-1.5 space-y-0.5 font-mono">
+                      <div>Pillar (freedom+wellness+exp) : <strong>${sc.pillar}</strong></div>
+                      <div>Amenity dominance : ${sc.dominance_pct}%${sc.effective_dominance_pct !== sc.dominance_pct ? ` <span class="text-red-600">→ plafonné ${sc.effective_dominance_pct}%</span>` : ''} → <strong>${fmtSign(sc.dominance_mod)}</strong></div>
+                      <div>Hero quality : ${sc.hero_score}/100 → <strong>${fmtSign(sc.hero_bonus)}</strong>${sc.python_said_disguised ? ' <span class="text-red-600">(ignoré: disguised)</span>' : ''}</div>
+                      ${sc.removable_bonus ? `<div>Issues removables : <strong>+${sc.removable_bonus}</strong></div>` : ''}
+                      ${sc.transformable_bonus ? `<div>Transformable nuit/sombre : <strong>+${sc.transformable_bonus}</strong></div>` : ''}
+                      <div class="border-t border-gray-300 pt-0.5">Sous-total : <strong>${sc.subtotal}</strong></div>
+                      ${sc.lifestyle_penalty ? `<div class="text-red-700">Pénalité lifestyle (×0.45) : <strong>${sc.lifestyle_penalty}</strong></div>` : ''}
+                      <div class="border-t border-gray-300 pt-0.5 font-bold">TOTAL : <strong>${sc.total}</strong></div>
+                      <div class="pt-1 text-gray-500 normal-case">shot_type=${sc.shot_type || '?'} · humans=${sc.human_count}</div>
+                      ${flags.length ? `<div class="pt-0.5">${flags.join(' · ')}</div>` : ''}
+                      ${dom.verifier_reason ? `<div class="pt-1 italic text-gray-500">verifier: ${dom.verifier_reason}</div>` : ''}
+                    </div>
+                  </details>
+                `;
+              })()}
+
+              <div class="text-[11px] text-gray-700"><span class="text-gray-400">Pourquoi gardée :</span> meilleure photo "${j.selection_category || '?'}" disponible (rang ${j.selection_rank || '?'})</div>
+              <div class="text-[11px] text-gray-700"><span class="text-gray-400">Retouche :</span> ${e.reason}</div>
+              ${sensations ? `<div class="text-[11px] text-gray-500 italic">${sensations}</div>` : ''}
+              ${issues}
+              ${framingWarn}
+              ${validationWarn}
+              ${noChangeNote}
+
+              <div class="text-[10px] text-gray-400">${e.duration_ms}ms · $${(e.cost_usd || 0).toFixed(4)}</div>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      const enhancedSection = (d.enhanced || []).length
+        ? `
+          <div class="flex items-center justify-between mt-6 mb-2">
+            <h3 class="text-sm font-semibold text-gray-700">Photos finales (slider avant / après)</h3>
+            <a href="/api/download-zip/${d.slug}" class="px-3 py-1.5 bg-gradient-to-br from-orange-500 to-amber-500 text-white text-xs font-medium rounded-md hover:from-orange-600">
+              ⬇ Télécharger le pack ZIP
+            </a>
+          </div>
+          <div class="grid grid-cols-2 gap-3 mb-6">${enhancedHTML}</div>
+        `
+        : '';
+
+      // (init des sliders fait par le caller APRÈS innerHTML — voir btnRun.onclick)
+      return `
+        <div class="mb-4">
+          <div class="text-base font-semibold">${d.hotel.name}</div>
+          <div class="text-xs text-gray-500">${d.hotel.city} · ${d.hotel.stars}★ · vibe ${d.hotel.vibe} · personas: ${(d.hotel.personas_allowed || []).join(', ')}</div>
+        </div>
+        ${renderScoringPanel()}
+        ${statsHTML}
+        ${alertsHTML}
+        <h3 class="text-sm font-semibold text-gray-700 mb-2">Couverture par catégorie</h3>
+        <div class="grid grid-cols-3 gap-2 mb-6">${catsHTML}</div>
+        ${enhancedSection}
+        <h3 class="text-sm font-semibold text-gray-700 mb-2">Toutes les photos analysées <span class="text-xs font-normal text-gray-500">(✓ vert = sélectionnée pour le pack final)</span></h3>
+        <div class="grid grid-cols-3 gap-3">${cardsHTML}</div>
+      `;
+    }
+
+    // Slider drag avant/après — event delegation globale (robuste à tous les rendus dynamiques)
+    let _activeCompare = null;
+
+    function _comparePctFromClientX(compare, clientX) {
+      const rect = compare.getBoundingClientRect();
+      if (rect.width === 0) return 50;
+      const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
+      return (x / rect.width) * 100;
+    }
+
+    function _applyComparePos(compare, pct) {
+      const after = compare.querySelector('.after-wrap');
+      const divider = compare.querySelector('.divider');
+      const handle = compare.querySelector('.handle');
+      if (after) after.style.clipPath = `inset(0 0 0 ${pct}%)`;
+      if (divider) divider.style.left = pct + '%';
+      if (handle) handle.style.left = pct + '%';
+    }
+
+    // Handlers globaux UNE SEULE FOIS (au chargement) — fonctionnent pour tous les .compare présents et futurs
+    document.addEventListener('mousedown', e => {
+      const compare = e.target.closest && e.target.closest('.compare');
+      console.log('[slider] mousedown', {
+        targetTag: e.target.tagName,
+        targetClass: e.target.className,
+        foundCompare: !!compare,
+      });
+      if (!compare) return;
+      _activeCompare = compare;
+      const pct = _comparePctFromClientX(compare, e.clientX);
+      console.log('[slider] activeCompare set, pct=', pct.toFixed(1));
+      _applyComparePos(compare, pct);
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', e => {
+      if (!_activeCompare) return;
+      _applyComparePos(_activeCompare, _comparePctFromClientX(_activeCompare, e.clientX));
+    });
+    document.addEventListener('mouseup', () => {
+      if (_activeCompare) console.log('[slider] mouseup, releasing');
+      _activeCompare = null;
+    });
+    document.addEventListener('mouseleave', () => { _activeCompare = null; });
+
+    document.addEventListener('touchstart', e => {
+      const compare = e.target.closest && e.target.closest('.compare');
+      if (!compare) return;
+      _activeCompare = compare;
+      _applyComparePos(compare, _comparePctFromClientX(compare, e.touches[0].clientX));
+    }, {passive: true});
+    document.addEventListener('touchmove', e => {
+      if (!_activeCompare) return;
+      _applyComparePos(_activeCompare, _comparePctFromClientX(_activeCompare, e.touches[0].clientX));
+      e.preventDefault();
+    }, {passive: false});
+    document.addEventListener('touchend', () => { _activeCompare = null; });
+
+    function initCompareSliders() {
+      const all = document.querySelectorAll('.compare');
+      console.log('[slider] init found', all.length, 'compare elements');
+      all.forEach(compare => {
+        if (compare.dataset.initialized === '1') return;
+        compare.dataset.initialized = '1';
+        _applyComparePos(compare, 50);
+      });
+    }
+  </script>
+</body>
+</html>

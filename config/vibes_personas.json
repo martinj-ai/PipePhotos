@@ -1,0 +1,9 @@
+{
+  "_doc": "Mapping vibe ResortPass → personas autorisés en ajout personnage IA. L'ORDRE compte : le 1er persona est utilisé en priorité.",
+  "Family friendly": ["families", "couples", "solos"],
+  "Party": ["groups", "couples"],
+  "Serene": ["solos", "couples"],
+  "Luxe": ["solos", "couples"],
+  "Trendy": ["solos", "couples", "small_groups"],
+  "_default": ["solos", "couples"]
+}

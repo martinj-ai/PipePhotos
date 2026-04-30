@@ -1,0 +1,926 @@
+"""Front Flask pour l'outil DayAccess.
+
+Routes :
+    GET  /                : page principale (form URL RP + upload photos)
+    POST /api/scrape      : scrape une URL RP, retourne JSON
+    POST /api/upload      : upload d'un dossier de photos pour un hôtel
+    POST /api/run         : lance le pipeline complet (analyse + sélection)
+                            → pour V0 : retourne RP + liste photos uploadées
+
+Usage :
+    source .venv/bin/activate
+    python app.py
+    → http://localhost:5050
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+from pathlib import Path
+from flask import Flask, jsonify, render_template, request, send_from_directory
+
+import rp_scraper
+import booking_scraper
+import hotel_site_finder
+import hotel_gallery_extractor
+import analyze
+import dedup_angles
+import coverage as coverage_mod
+import enhance
+import ordering
+import photo_generator
+import progress
+import spend
+import dedup_vlm
+import amenity_verifier
+
+ROOT = Path(__file__).parent
+UPLOADS_DIR = ROOT / "data" / "uploads"
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
+app = Flask(__name__, static_folder="static", template_folder="templates")
+app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200 MB par batch
+
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+@app.route("/api/scrape", methods=["POST"])
+def api_scrape():
+    """Reçoit {url}, scrape RP, sauvegarde dans data/rp/, retourne le JSON."""
+    payload = request.get_json(silent=True) or {}
+    url = (payload.get("url") or "").strip()
+    if not url.startswith("https://www.resortpass.com/hotels/"):
+        return jsonify({"error": "URL doit être une fiche hôtel ResortPass."}), 400
+
+    try:
+        result = rp_scraper.scrape(url)
+    except Exception as e:
+        return jsonify({"error": f"Échec scraping : {e}"}), 500
+
+    # Sauvegarde
+    slug = url.rstrip("/").split("/")[-1]
+    rp_dir = ROOT / "data" / "rp"
+    rp_dir.mkdir(parents=True, exist_ok=True)
+    out_path = rp_dir / f"{slug}.json"
+    with open(out_path, "w") as f:
+        json.dump(result, f, indent=2, ensure_ascii=False)
+
+    return jsonify({"slug": slug, "data": result})
+
+
+@app.route("/api/fetch-rp-photos", methods=["POST"])
+def api_fetch_rp_photos():
+    """Télécharge directement les photos haute résolution depuis RP dans data/uploads/{slug}/."""
+    payload = request.get_json(silent=True) or {}
+    slug = (payload.get("slug") or "").strip()
+    if not slug:
+        return jsonify({"error": "slug manquant"}), 400
+
+    rp_path = ROOT / "data" / "rp" / f"{slug}.json"
+    if not rp_path.exists():
+        return jsonify({"error": "Hôtel non scrapé. Scrape RP d'abord."}), 400
+
+    with open(rp_path) as f:
+        rp_data = json.load(f)
+
+    image_urls = rp_data.get("image_urls", [])
+    if not image_urls:
+        return jsonify({"error": "Aucune URL d'image dans le scrape RP."}), 400
+
+    hotel_dir = UPLOADS_DIR / slug
+    if hotel_dir.exists():
+        shutil.rmtree(hotel_dir)
+    hotel_dir.mkdir(parents=True)
+
+    # Init progress
+    progress.init(f"{slug}_fetch", total=len(image_urls), step="downloading")
+
+    results = []
+    for i, url in enumerate(image_urls, 1):
+        downloaded = rp_scraper.download_photos([url], hotel_dir, max_photos=1)
+        results.extend(downloaded)
+        progress.increment(f"{slug}_fetch", current=i, message=f"Photo {i}/{len(image_urls)}")
+
+    progress.finish(f"{slug}_fetch", message="Téléchargement terminé")
+    ok_count = sum(1 for r in results if r["status"] == "ok")
+
+    return jsonify({
+        "slug": slug,
+        "downloaded": ok_count,
+        "total": len(image_urls),
+        "files": [
+            {"name": r["filename"], "size": r["size"], "status": r["status"]}
+            for r in results
+        ],
+    })
+
+
+@app.route("/api/fetch-all-sources", methods=["POST"])
+def api_fetch_all_sources():
+    """Orchestre la récupération depuis les 3 sources cochées (officiel/booking/rp).
+    Dédup pHash inter-sources. Stocke tout dans data/uploads/{slug}/.
+
+    Body : {slug, booking_url?, sources: {official, booking, rp}}
+    """
+    payload = request.get_json(silent=True) or {}
+    slug = (payload.get("slug") or "").strip()
+    booking_url = (payload.get("booking_url") or "").strip()
+    sources = payload.get("sources") or {"official": True, "booking": True, "rp": True}
+
+    if not slug:
+        return jsonify({"error": "slug manquant (scrape RP d'abord)"}), 400
+
+    rp_path = ROOT / "data" / "rp" / f"{slug}.json"
+    if not rp_path.exists():
+        return jsonify({"error": "Hôtel RP non scrapé. Étape 1 d'abord."}), 400
+    with open(rp_path) as f:
+        rp_data = json.load(f)
+
+    progress.init(f"{slug}_fetch_all", total=100, step="starting")
+
+    hotel_dir = UPLOADS_DIR / slug
+    if hotel_dir.exists():
+        shutil.rmtree(hotel_dir)
+    hotel_dir.mkdir(parents=True)
+
+    sources_summary = {}  # par source : {url, photos_downloaded, error?}
+    all_files = []  # liste cumulative des fichiers téléchargés (avec source taggée)
+
+    # ━━━ SOURCE 1 : Site officiel ━━━
+    if sources.get("official"):
+        progress.update(f"{slug}_fetch_all", step="official_finding", current=5, total=100,
+                        message="Recherche site officiel via Gemini…")
+        site_result = hotel_site_finder.find_hotel_site(
+            name=rp_data.get("name", ""),
+            city=rp_data.get("city", ""),
+            country=rp_data.get("country", ""),
+        )
+        if site_result and site_result.get("url"):
+            site_url = site_result["url"]
+            progress.update(f"{slug}_fetch_all", step="official_extracting", current=15, total=100,
+                            message=f"Extraction galerie depuis {site_url}…")
+            extract = hotel_gallery_extractor.extract_gallery_photos(site_url, max_total_photos=80)
+            urls = extract.get("photos") or []
+            results = booking_scraper.download_photos_to_dir(urls, hotel_dir / "_official_temp", max_photos=80) if urls else []
+            ok = [r for r in results if r["status"] == "ok"]
+            # Renomme avec préfixe official_
+            for i, r in enumerate(ok, 1):
+                old = hotel_dir / "_official_temp" / r["filename"]
+                new_name = f"official_{i:03d}_{r['filename'].split('_', 2)[-1] if '_' in r['filename'] else r['filename']}"
+                new_path = hotel_dir / new_name
+                if old.exists():
+                    old.rename(new_path)
+                    all_files.append({"name": new_name, "size": r["size"], "source": "official"})
+            (hotel_dir / "_official_temp").rmdir() if (hotel_dir / "_official_temp").exists() and not list((hotel_dir / "_official_temp").iterdir()) else None
+            sources_summary["official"] = {
+                "url": site_url,
+                "title": site_result.get("title"),
+                "photos_downloaded": len(ok),
+                "photos_found": len(urls),
+                "pages_visited": len(extract.get("pages_visited") or []),
+            }
+        else:
+            sources_summary["official"] = {
+                "url": None,
+                "error": (site_result or {}).get("error", "site officiel introuvable"),
+                "url_attempted": (site_result or {}).get("url_attempted"),
+                "photos_downloaded": 0,
+            }
+
+    # ━━━ SOURCE 2 : Booking ━━━
+    if sources.get("booking") and booking_url:
+        progress.update(f"{slug}_fetch_all", step="booking", current=45, total=100,
+                        message="Scraping Booking (Playwright stealth)…")
+        try:
+            urls = booking_scraper.scrape_booking_photos(booking_url)
+            results = booking_scraper.download_photos_to_dir(urls, hotel_dir / "_booking_temp", max_photos=120)
+            ok = [r for r in results if r["status"] == "ok"]
+            for i, r in enumerate(ok, 1):
+                old = hotel_dir / "_booking_temp" / r["filename"]
+                new_name = f"booking_{i:03d}_{r['filename'].split('_', 2)[-1] if '_' in r['filename'] else r['filename']}"
+                new_path = hotel_dir / new_name
+                if old.exists():
+                    old.rename(new_path)
+                    all_files.append({"name": new_name, "size": r["size"], "source": "booking"})
+            (hotel_dir / "_booking_temp").rmdir() if (hotel_dir / "_booking_temp").exists() and not list((hotel_dir / "_booking_temp").iterdir()) else None
+            sources_summary["booking"] = {"url": booking_url, "photos_downloaded": len(ok), "photos_found": len(urls)}
+        except Exception as e:
+            sources_summary["booking"] = {"url": booking_url, "error": str(e)[:200], "photos_downloaded": 0}
+
+    # ━━━ SOURCE 3 : RP photos (fallback ou complément) ━━━
+    if sources.get("rp"):
+        progress.update(f"{slug}_fetch_all", step="rp", current=75, total=100,
+                        message="Téléchargement photos ResortPass…")
+        urls = rp_data.get("image_urls") or []
+        results = rp_scraper.download_photos(urls, hotel_dir / "_rp_temp")
+        ok = [r for r in results if r["status"] == "ok"]
+        for i, r in enumerate(ok, 1):
+            old = hotel_dir / "_rp_temp" / r["filename"]
+            new_name = f"rp_{i:03d}_{r['filename'].split('_', 2)[-1] if '_' in r['filename'] else r['filename']}"
+            new_path = hotel_dir / new_name
+            if old.exists():
+                old.rename(new_path)
+                all_files.append({"name": new_name, "size": r["size"], "source": "rp"})
+        (hotel_dir / "_rp_temp").rmdir() if (hotel_dir / "_rp_temp").exists() and not list((hotel_dir / "_rp_temp").iterdir()) else None
+        sources_summary["rp"] = {"photos_downloaded": len(ok)}
+
+    # ━━━ Dédup pHash inter-sources ━━━
+    progress.update(f"{slug}_fetch_all", step="dedup", current=92, total=100,
+                    message="Dédup pHash inter-sources…")
+    paths = sorted([Path(hotel_dir / f["name"]) for f in all_files])
+    if len(paths) > 1:
+        clusters = dedup_angles.find_duplicate_clusters(paths, threshold=16)
+        kept, dropped = dedup_angles.select_best_per_cluster(clusters)
+        kept_set = {p.resolve() for p in kept}
+        # Supprime les doublons (priorité : official > booking > rp pour conserver dans cet ordre)
+        priority = {"official": 3, "booking": 2, "rp": 1}
+        files_by_path = {(hotel_dir / f["name"]).resolve(): f for f in all_files}
+        for cluster in clusters:
+            if len(cluster) <= 1:
+                continue
+            # Prend celui de plus haute priorité comme "winner"
+            cluster_files = [files_by_path[p.resolve()] for p in cluster if p.resolve() in files_by_path]
+            cluster_files.sort(key=lambda f: priority.get(f["source"], 0), reverse=True)
+            winner = cluster_files[0]
+            for loser in cluster_files[1:]:
+                p = (hotel_dir / loser["name"]).resolve()
+                try:
+                    p.unlink()
+                except Exception:
+                    pass
+        # Recompose la liste finale après suppression
+        all_files = [f for f in all_files if (hotel_dir / f["name"]).exists()]
+
+    progress.finish(f"{slug}_fetch_all",
+                    message=f"{len(all_files)} photos prêtes (sources: {sum(1 for s in sources_summary.values() if s.get('photos_downloaded', 0) > 0)})")
+
+    return jsonify({
+        "slug": slug,
+        "downloaded": len(all_files),
+        "sources_summary": sources_summary,
+        "files": all_files,
+    })
+
+
+@app.route("/api/fetch-booking-photos", methods=["POST"])
+def api_fetch_booking_photos():
+    """Scrape les photos haute résolution depuis Booking via Playwright headless.
+    Stocke dans data/uploads/{slug}/ (slug de RP). Demande RP scrapé d'abord."""
+    payload = request.get_json(silent=True) or {}
+    slug = (payload.get("slug") or "").strip()
+    booking_url = (payload.get("booking_url") or "").strip()
+
+    if not slug:
+        return jsonify({"error": "slug manquant (scrape RP d'abord)"}), 400
+    if not booking_url.startswith("https://www.booking.com/hotel/"):
+        return jsonify({"error": "URL Booking invalide (doit commencer par https://www.booking.com/hotel/)"}), 400
+
+    # Étape 1 : scrape (~15-30s avec Playwright)
+    progress.init(f"{slug}_fetch_booking", total=100, step="scraping_booking")
+    progress.update(f"{slug}_fetch_booking", message="Lance Playwright + ouvre la galerie Booking...")
+
+    try:
+        photo_urls = booking_scraper.scrape_booking_photos(booking_url)
+    except Exception as e:
+        progress.finish(f"{slug}_fetch_booking", message=f"Erreur scraping: {e}")
+        return jsonify({"error": f"Échec scraping Booking : {e}"}), 500
+
+    if not photo_urls:
+        progress.finish(f"{slug}_fetch_booking", message="Aucune photo trouvée")
+        return jsonify({"error": "Aucune photo trouvée sur la fiche Booking. URL correcte ?"}), 400
+
+    # Étape 2 : download dans data/uploads/{slug}/
+    progress.update(f"{slug}_fetch_booking", step="downloading", current=0, total=len(photo_urls), message=f"Téléchargement de {len(photo_urls)} photos...")
+
+    hotel_dir = UPLOADS_DIR / slug
+    if hotel_dir.exists():
+        shutil.rmtree(hotel_dir)
+    hotel_dir.mkdir(parents=True)
+
+    results = []
+    for i, url in enumerate(photo_urls, 1):
+        downloaded = booking_scraper.download_photos_to_dir([url], hotel_dir)
+        results.extend(downloaded)
+        progress.increment(f"{slug}_fetch_booking", current=i, total=len(photo_urls),
+                           message=f"Photo {i}/{len(photo_urls)}")
+
+    progress.finish(f"{slug}_fetch_booking", message=f"{len([r for r in results if r['status'] == 'ok'])} photos prêtes")
+    ok_count = sum(1 for r in results if r["status"] == "ok")
+
+    return jsonify({
+        "slug": slug,
+        "downloaded": ok_count,
+        "total": len(photo_urls),
+        "source": "booking",
+        "files": [
+            {"name": r["filename"], "size": r["size"], "status": r["status"]}
+            for r in results
+        ],
+    })
+
+
+@app.route("/api/spend")
+def api_spend():
+    """Cumul des dépenses Gemini + Nano Banana sur tous les runs."""
+    return jsonify(spend.read_summary())
+
+
+@app.route("/api/progress")
+def api_progress():
+    """Lit l'état d'une opération en cours (poll par le front).
+    Toujours 200 même si pas de state ou erreur transitoire — laisse le client retry."""
+    slug = request.args.get("slug", "").strip()
+    if not slug:
+        return jsonify({"error": "slug manquant"}), 400
+    try:
+        state = progress.read(slug)
+    except Exception as e:
+        # Filet de sécurité ultime — on ne crashe jamais le poll côté serveur
+        return jsonify({"step": "transient_error", "current": 0, "total": 0, "done": False, "_err": str(e)[:200]}), 200
+    if not state:
+        return jsonify({"step": "none", "current": 0, "total": 0, "done": False}), 200
+    return jsonify(state)
+
+
+@app.route("/api/upload", methods=["POST"])
+def api_upload():
+    """Upload de photos pour un hôtel. Form-data : slug + files[]."""
+    slug = request.form.get("slug", "").strip()
+    if not slug:
+        return jsonify({"error": "slug manquant"}), 400
+
+    files = request.files.getlist("files")
+    if not files:
+        return jsonify({"error": "aucun fichier"}), 400
+
+    hotel_dir = UPLOADS_DIR / slug
+    # On nettoie pour ne pas mélanger des batchs précédents
+    if hotel_dir.exists():
+        shutil.rmtree(hotel_dir)
+    hotel_dir.mkdir(parents=True)
+
+    saved = []
+    for f in files:
+        if not f.filename:
+            continue
+        ext = Path(f.filename).suffix.lower()
+        if ext not in (".jpg", ".jpeg", ".png", ".webp"):
+            continue
+        dest = hotel_dir / f.filename
+        f.save(dest)
+        saved.append({"name": f.filename, "size": dest.stat().st_size})
+
+    return jsonify({"slug": slug, "uploaded": len(saved), "files": saved})
+
+
+@app.route("/api/run", methods=["POST"])
+def api_run():
+    """Pipeline analyse complet :
+    1. Charge le RP scrapé
+    2. Liste les photos uploadées
+    3. Analyse Gemini en parallèle (5 workers)
+    4. Dédup d'angles (pHash)
+    5. Coverage vs shopping list RP
+    6. Renvoie tout pour affichage front
+    """
+    payload = request.get_json(silent=True) or {}
+    slug = (payload.get("slug") or "").strip()
+    if not slug:
+        return jsonify({"error": "slug manquant"}), 400
+
+    rp_path = ROOT / "data" / "rp" / f"{slug}.json"
+    if not rp_path.exists():
+        return jsonify({"error": "Hôtel non scrapé. Scrape RP d'abord."}), 400
+
+    with open(rp_path) as f:
+        rp_data = json.load(f)
+
+    hotel_dir = UPLOADS_DIR / slug
+    if not hotel_dir.exists():
+        return jsonify({"error": "Aucune photo uploadée pour cet hôtel."}), 400
+
+    photo_paths = sorted(p for p in hotel_dir.iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"))
+    if not photo_paths:
+        return jsonify({"error": "Dossier upload vide."}), 400
+
+    # Filtrage manuel : photos désélectionnées par l'utilisateur dans la grille
+    deselected = set((payload or {}).get("deselected") or [])
+    if deselected:
+        photo_paths = [p for p in photo_paths if p.name not in deselected]
+        if not photo_paths:
+            return jsonify({"error": "Toutes les photos désélectionnées. Coche au moins une photo."}), 400
+
+    # === Étape 1 : Analyse Gemini en parallèle ===
+    try:
+        model = analyze.get_model()
+    except Exception as e:
+        return jsonify({"error": f"Gemini non configuré : {e}"}), 500
+
+    progress.init(f"{slug}_analyze", total=len(photo_paths), step="analyzing")
+
+    def _progress_cb(done, total, last_filename):
+        # Récupère le payload du dernier traité pour cumuler le coût
+        # Note : on n'a pas accès direct au payload ici, on cumule a posteriori après le batch
+        progress.increment(f"{slug}_analyze", current=done, message=f"Photo {done}/{total} : {last_filename}")
+
+    analyses_dir = ROOT / "data" / "analyses" / slug
+    # parallel=3 (vs 5 avant) pour ne pas saturer le paid tier 1 sur les gros volumes
+    analyses = analyze.analyze_batch(photo_paths, model, parallel=3, output_dir=analyses_dir, progress_callback=_progress_cb)
+
+    # Cumul tokens & coût
+    total_input_tokens = 0
+    total_output_tokens = 0
+    total_cost_usd = 0.0
+    for a in analyses:
+        for t in a.get("trace", []):
+            if t.get("node") == "N2_analyze_gemini" and t.get("result") == "pass":
+                u = t.get("usage", {})
+                total_input_tokens += u.get("input_tokens", 0)
+                total_output_tokens += u.get("output_tokens", 0)
+                total_cost_usd += u.get("cost_usd", 0)
+    progress.update(
+        f"{slug}_analyze",
+        cost_usd_cumulated=round(total_cost_usd, 6),
+        input_tokens_cumulated=total_input_tokens,
+        output_tokens_cumulated=total_output_tokens,
+        step="dedup",
+    )
+
+    # === Étape 2 : Dédup d'angles ===
+    # 2a) pHash strict (seuil 12) → clusters certains
+    clusters = dedup_angles.find_duplicate_clusters(photo_paths, threshold=12)
+
+    # 2b) Calcul des distances pHash pour TOUTES les paires en zone grise (13-28)
+    #     → ces paires seront vérifiées par Gemini Vision (sémantique)
+    import imagehash as _ih
+    from PIL import Image as _Image
+    phash_distances: dict[tuple[str, str], int] = {}
+    hashes_by_name = {}
+    for p in photo_paths:
+        try:
+            with _Image.open(p) as im:
+                hashes_by_name[p.name] = _ih.phash(im)
+        except Exception:
+            continue
+    names = list(hashes_by_name.keys())
+    for i, n1 in enumerate(names):
+        for n2 in names[i + 1:]:
+            d = hashes_by_name[n1] - hashes_by_name[n2]
+            if dedup_vlm.GREY_ZONE_MIN <= d <= dedup_vlm.GREY_ZONE_MAX:
+                phash_distances[(n1, n2)] = d
+    # Score par photo (pour choisir la meilleure de chaque cluster)
+    scores = {}
+    by_path = {Path(a["input"]["path_absolute"]): a for a in analyses}
+    for path, a in by_path.items():
+        analysis = a.get("analysis") or {}
+        ps = (analysis.get("emotional") or {}).get("pillar_scores") or {}
+        scores[path] = ps.get("freedom", 0) + ps.get("wellness", 0) + ps.get("experience", 0)
+
+    kept, dropped = dedup_angles.select_best_per_cluster(clusters, scores)
+    kept_set = {p.resolve() for p in kept}
+
+    # 2c) Dédup sémantique VLM sur les paires en zone grise (Gemini Vision)
+    # On a maintenant les analyses Gemini → on peut pré-filtrer puis appeler VLM
+    analyses_by_filename = {a["input"]["filename"]: a.get("analysis") for a in analyses}
+    vlm_dedup_results = []
+    if phash_distances:
+        # Indique au front qu'on entre dans la phase dedup_vlm (sinon il reste figé sur "100% analyze")
+        progress.update(
+            f"{slug}_analyze",
+            step="dedup_vlm",
+            current=0,
+            total=min(len(phash_distances), dedup_vlm.MAX_PAIRS_TO_CHECK),
+            message=f"Dédup sémantique VLM ({min(len(phash_distances), dedup_vlm.MAX_PAIRS_TO_CHECK)} paires à vérifier)…",
+        )
+
+        def _vlm_cb(done, total, label):
+            progress.update(
+                f"{slug}_analyze",
+                step="dedup_vlm",
+                current=done,
+                total=total,
+                message=f"VLM dedup {done}/{total} : {label}",
+            )
+
+        try:
+            vlm_dedup_results = dedup_vlm.find_semantic_duplicates(
+                photo_paths, analyses_by_filename, phash_distances,
+                progress_callback=_vlm_cb,
+            )
+            # Pour chaque paire same_scene=True : on garde la meilleure (best score), l'autre est duplicate
+            for pair in vlm_dedup_results:
+                if not pair.get("same_scene"):
+                    continue
+                f1, f2 = pair["a"], pair["b"]
+                p1 = next((p for p in photo_paths if p.name == f1), None)
+                p2 = next((p for p in photo_paths if p.name == f2), None)
+                if not (p1 and p2):
+                    continue
+                # Score : on garde celle qui a déjà été marquée kept par pHash, sinon best score
+                p1_kept = p1.resolve() in kept_set
+                p2_kept = p2.resolve() in kept_set
+                if p1_kept and not p2_kept:
+                    kept_set.discard(p2.resolve())
+                elif p2_kept and not p1_kept:
+                    kept_set.discard(p1.resolve())
+                else:
+                    # Les 2 sont kept (ou les 2 sont dropped) — on choisit par score
+                    s1 = scores.get(p1, 0)
+                    s2 = scores.get(p2, 0)
+                    if s1 >= s2:
+                        kept_set.discard(p2.resolve())
+                    else:
+                        kept_set.discard(p1.resolve())
+        except Exception as e:
+            # Si VLM dedup échoue, on continue avec juste pHash
+            print(f"VLM dedup error (non-blocking): {e}")
+
+    # Tag chaque analyse avec son statut dédup final
+    for a in analyses:
+        ap = Path(a["input"]["path_absolute"])
+        a["dedup_status"] = "kept" if ap in kept_set else "duplicate_dropped"
+
+    # === Étape 3 : Coverage vs shopping list RP ===
+    # On utilise SEULEMENT les photos kept (post-dédup) pour le coverage
+    kept_analyses = [a for a in analyses if a["dedup_status"] == "kept"]
+    cov_initial = coverage_mod.compute_coverage(rp_data, kept_analyses)
+
+    # ━━ 3b) Re-vérification amenity_dominance via 2e passe Gemini Vision (Q4 Martin) ━━
+    # On re-vérifie les top-3 candidats de chaque bucket amenity. Si Gemini constate qu'une
+    # photo est en réalité un close-up lifestyle (pas l'amenity comme sujet), on plombe
+    # sa dominance → la photo est rétrogradée dans le tri suivant.
+    progress.update(f"{slug}_analyze", step="amenity_verify",
+                    message="Vérification amenity (2e passe Gemini sur toutes les photos amenity)…")
+    try:
+        # n_per_bucket=None : on vérifie TOUTES les photos d'un bucket amenity, pas juste top-3
+        # (Gemini hallucine régulièrement → on doit tout vérifier pour ne pas laisser passer
+        # un closeup bikini scoré 240/300 par Gemini).
+        verifier_results = amenity_verifier.verify_top_candidates(
+            kept_analyses, cov_initial, n_per_bucket=None, parallel=4,
+        )
+        verifier_cost_usd = round(sum(r.get("cost_usd", 0) for r in verifier_results), 6)
+        print(f"[amenity_verifier] {len(verifier_results)} photos vérifiées, "
+              f"{sum(1 for r in verifier_results if not r.get('is_focused'))} rétrogradées, "
+              f"coût ${verifier_cost_usd}")
+    except Exception as e:
+        verifier_results = []
+        verifier_cost_usd = 0.0
+        import traceback
+        print(f"[amenity_verifier] ERROR (non-blocking): {e}")
+        traceback.print_exc()
+
+    # Re-compute coverage avec les dominances corrigées
+    cov = coverage_mod.compute_coverage(rp_data, kept_analyses)
+
+    # === Étape 4 : Sélection top-N + Ordering + Retouche ===
+    by_filename = {a["input"]["filename"]: a for a in analyses}
+
+    # 4.a Collecte des photos retenues par le coverage (kept_estimate=True dans by_category)
+    selected_filenames = set()
+    selection_meta = {}  # filename → {category, rank, score}
+    photo_targets = {}   # filename → list[target_category] (multi-tagging)
+    for cat, info in cov["by_category"].items():
+        for rank, ph in enumerate(info["photos"], 1):
+            if ph.get("selected_in_top"):
+                selected_filenames.add(ph["filename"])
+                # Une photo peut être sélectionnée dans plusieurs catégories (multi-tagging) ;
+                # on enregistre la 1ère catégorie atteinte, et on accumule les tags.
+                if ph["filename"] not in selection_meta:
+                    selection_meta[ph["filename"]] = {
+                        "category": cat,
+                        "rank": rank,
+                        "score_brand_total": ph.get("score_brand_total"),
+                        "score_components": ph.get("score_components"),
+                    }
+                photo_targets.setdefault(ph["filename"], []).append(cat)
+
+    # 4.a-bis : Génération full IA pour amenities manquantes (spa, bar — règle métier stricte)
+    generated_photos = []  # liste des photos générées full IA, à injecter dans le pack
+    for cat, info in cov["by_category"].items():
+        if info["status"] != "missing":
+            continue
+        if not photo_generator.can_generate(cat):
+            continue  # food, pool, cabana etc. : pas de génération autorisée
+        # On a un manque ET la catégorie peut être générée
+        gen_dir = ROOT / "data" / "uploads" / slug
+        gen_path = gen_dir / f"_generated_{cat}.png"
+        gen_result = photo_generator.generate_photo_for_amenity(cat, gen_path)
+        if gen_result.get("output_path"):
+            generated_photos.append({
+                "category": cat,
+                "filename": gen_path.name,
+                "cost_usd": gen_result["cost_usd"],
+            })
+            # On l'ajoute à la liste des photos analysées avec une analyse minimale
+            fake_analysis = {
+                "factual": {"category": cat, "human_count": 0, "subjects": [f"{cat} (généré IA)"], "time_of_day": "jour"},
+                "technical_hints": {"ambiance": "lumineux-chaud", "palette_alignment": "aligned-warm"},
+                "emotional": {"sensations": ["sérénité", "bien-être"], "pillar_scores": {"freedom": 70, "wellness": 90, "experience": 70}},
+                "hero_quality": {"score": 60, "is_slot1_worthy": False},
+                "issues": [],
+                "is_fully_generated": True,
+            }
+            fake_entry = {
+                "input": {
+                    "filename": gen_path.name,
+                    "path_absolute": str(gen_path.resolve()),
+                    "width": 1024, "height": 1024,
+                    "file_url": f"file://{gen_path.resolve()}",
+                },
+                "trace": [{"node": "N0_full_generation", "result": "pass", "duration_ms": gen_result["duration_ms"], "cost_usd": gen_result["cost_usd"]}],
+                "analysis": fake_analysis,
+                "dedup_status": "kept",
+                "is_fully_generated": True,
+            }
+            analyses.append(fake_entry)
+            by_filename[gen_path.name] = fake_entry
+            # On l'ajoute dans le bucket coverage approprié
+            info["photos"].insert(0, {
+                "filename": gen_path.name,
+                "score_brand_total": 230,
+                "selected_in_top": True,
+            })
+            info["found"] = info.get("found", 0) + 1
+            info["kept_estimate"] = info.get("kept_estimate", 0) + 1
+            info["status"] = "ok"
+            info["message"] = f"1 photo {cat} générée IA (catégorie initialement manquante)"
+            selected_filenames.add(gen_path.name)
+            selection_meta[gen_path.name] = {"category": cat, "rank": 1, "score_brand_total": 230}
+            photo_targets.setdefault(gen_path.name, []).append(cat)
+
+    # 4.b Ordering : règles brand (slot 1 = meilleure amenity hors intérieur, alternance gens/sans, round-robin)
+    selected_analyses_objs = [by_filename[f] for f in selected_filenames if f in by_filename and by_filename[f].get("analysis")]
+    ordered_pack = ordering.order_final_pack(
+        selected_analyses_objs,
+        photo_targets,
+        target_count_min=12,
+        target_count_max=18,
+    )
+    final_order = {entry["input"]["filename"]: idx + 1 for idx, entry in enumerate(ordered_pack)}
+
+    progress.update(f"{slug}_analyze", step="enhancing", current=0, total=len(selected_filenames))
+
+    enhanced_dir = ROOT / "data" / "output" / slug / "enhanced"
+    enhanced_results = []
+    enhancement_cost_usd = 0.0
+
+    # === Logique alternance STRICTE par position : slot pair = humain forcé ===
+    # On force chaque slot pair (#2, #4, #6...) du pack ordonné à avoir un humain.
+    # Si la photo en slot pair n'a pas d'humain natif ET est candidate (cabana/transat vide,
+    # rooftop, piscine zoomée…), on déclenche un ajout personnage IA.
+    # Le slot 1 garde sa règle "meilleure amenity peu importe humain".
+    personas_allowed = rp_data.get("personas_allowed") or []
+    vibe = rp_data.get("vibe_primary")
+
+    add_character_filenames = set()
+    if personas_allowed:
+        for idx, entry in enumerate(ordered_pack, 1):
+            has_human = enhance.has_narrative_human(entry["analysis"])
+            is_candidate = enhance.is_add_character_candidate(entry["analysis"])
+            # ━━ Règle slot 1 : photo de couverture DOIT avoir un humain ━━
+            if idx == 1 and not has_human and is_candidate:
+                add_character_filenames.add(entry["input"]["filename"])
+                continue
+            # Règle slots pairs : alternance avec/sans
+            is_even_slot = (idx % 2 == 0)
+            if is_even_slot and not has_human and is_candidate:
+                add_character_filenames.add(entry["input"]["filename"])
+
+    # === Boucle de retouche : on itère dans l'ORDRE FINAL du pack (slot 1, 2, ...) ===
+    ordered_filenames = [e["input"]["filename"] for e in ordered_pack]
+    for i, filename in enumerate(ordered_filenames, 1):
+        a = by_filename.get(filename)
+        if not a or not a.get("analysis"):
+            continue
+        strategy = enhance.pick_strategy(
+            a["analysis"],
+            personas_allowed=personas_allowed,
+            vibe=vibe,
+            add_character=(filename in add_character_filenames),
+        )
+        input_path = Path(a["input"]["path_absolute"])
+        result = enhance.enhance_one(input_path, strategy, enhanced_dir)
+        enhanced_results.append({"filename": filename, "final_order_pos": i, **result})
+        enhancement_cost_usd += result.get("cost_usd", 0)
+        progress.update(
+            f"{slug}_analyze",
+            current=i,
+            total=len(ordered_filenames),
+            message=f"Retouche {i}/{len(ordered_filenames)} : {filename} ({strategy['action']})",
+        )
+
+    # === Réponse ===
+    photos_summary = []
+    for a in analyses:
+        filename = a["input"]["filename"]
+        analysis = a.get("analysis") or {}
+        factual = analysis.get("factual") or {}
+        emotional = analysis.get("emotional") or {}
+        scores = emotional.get("pillar_scores") or {}
+        sel = selection_meta.get(filename)
+        # Récupère l'erreur Gemini si analyse échouée (debug front)
+        gemini_trace = next((t for t in a.get("trace", []) if t.get("node") == "N2_analyze_gemini"), None)
+        gemini_error = gemini_trace.get("error") if gemini_trace and gemini_trace.get("result") != "pass" else None
+
+        photos_summary.append({
+            "filename": filename,
+            "url": f"/uploads/{slug}/{filename}",
+            "category": factual.get("category"),
+            "human_count": factual.get("human_count"),
+            "ambiance": (analysis.get("technical_hints") or {}).get("ambiance"),
+            "sensations": emotional.get("sensations"),
+            "score_brand": int(scores.get("freedom", 0) + scores.get("wellness", 0) + scores.get("experience", 0)),
+            "ai_candidate": (analysis.get("ai_add_character_candidate") or {}).get("is_candidate"),
+            "dedup_status": a["dedup_status"],
+            "issues": analysis.get("issues") or [],
+            "trace_ok": any(t.get("result") == "pass" and t.get("node") == "N2_analyze_gemini" for t in a.get("trace", [])),
+            "gemini_error": gemini_error,
+            "selected": sel is not None,
+            "selection_category": sel["category"] if sel else None,
+            "selection_rank": sel["rank"] if sel else None,
+        })
+
+    # Map cluster_id pour debug front
+    cluster_map = {}
+    for cid, cluster in enumerate(clusters):
+        for p in cluster:
+            cluster_map[p.name] = cid
+    for ph in photos_summary:
+        ph["cluster_id"] = cluster_map.get(ph["filename"])
+
+    progress.finish(f"{slug}_analyze", message="Pipeline terminé")
+
+    # Cumul des dépenses sur tous les runs (data/spend.json)
+    spend.add_run(slug, {
+        "analysis_usd": total_cost_usd,
+        "enhancement_usd": enhancement_cost_usd,
+        "ai_lighting": sum(1 for r in enhanced_results if r.get("action") == "ai_lighting"),
+        "ai_add_character": sum(1 for r in enhanced_results if r.get("action") == "ai_add_character"),
+        "ai_remove_people": sum(1 for r in enhanced_results if r.get("action") == "ai_remove_people"),
+        "ai_recompose": sum(1 for r in enhanced_results if r.get("action") == "ai_recompose"),
+        "local_smart_crop": sum(1 for r in enhanced_results if r.get("action") == "local_smart_crop"),
+        "local_warm_boost": sum(1 for r in enhanced_results if r.get("action") == "local_warm_boost"),
+    })
+
+    # Construit la liste enhanced pour le front : avant/après + justification
+    enhanced_summary = []
+    for r in enhanced_results:
+        filename = r["filename"]
+        # Récup analyse + sélection meta pour la justification
+        a = by_filename.get(filename) or {}
+        analysis = a.get("analysis") or {}
+        factual = analysis.get("factual") or {}
+        emotional = analysis.get("emotional") or {}
+        scores = emotional.get("pillar_scores") or {}
+        score_total = int(scores.get("freedom", 0) + scores.get("wellness", 0) + scores.get("experience", 0))
+        sel = selection_meta.get(filename, {})
+
+        justification = {
+            "category": factual.get("category"),
+            "categories_secondary": factual.get("categories_secondary") or [],
+            "coverage_targets": photo_targets.get(filename, []),
+            "selection_category": sel.get("category"),
+            "selection_rank": sel.get("rank"),
+            "score_brand_total": sel.get("score_brand_total", score_total),
+            "score_components": sel.get("score_components"),  # détail breakdown pour debug
+            "score_freedom": scores.get("freedom", 0),
+            "score_wellness": scores.get("wellness", 0),
+            "score_experience": scores.get("experience", 0),
+            "amenity_dominance": analysis.get("amenity_dominance"),
+            "shot_type": analysis.get("shot_type"),
+            "hero_quality": analysis.get("hero_quality"),
+            "ambiance": (analysis.get("technical_hints") or {}).get("ambiance"),
+            "palette": (analysis.get("technical_hints") or {}).get("palette_alignment"),
+            "human_count": factual.get("human_count"),
+            "human_presence_type": factual.get("human_presence_type"),
+            "time_of_day": factual.get("time_of_day"),
+            "sensations": emotional.get("sensations") or [],
+            "issues": analysis.get("issues") or [],
+        }
+
+        if r.get("output_path"):
+            is_fully_gen = bool((a or {}).get("is_fully_generated"))
+            enhanced_summary.append({
+                "filename": filename,
+                "final_order_pos": r.get("final_order_pos"),
+                "before_url": f"/uploads/{slug}/{filename}",
+                "after_url": f"/output/{slug}/enhanced/{filename}",
+                "action": r["action"],
+                "reason": r["reason"],
+                "method": r.get("method"),
+                "cost_usd": r.get("cost_usd", 0),
+                "duration_ms": r.get("duration_ms", 0),
+                "framing_changed": r.get("framing_changed", False),
+                "framing_warning": r.get("framing_warning"),
+                "steps": r.get("steps") or [],
+                "ai_validation": r.get("ai_validation"),
+                "justification": justification,
+                "is_fully_generated": is_fully_gen,
+            })
+        else:
+            enhanced_summary.append({
+                "filename": filename,
+                "final_order_pos": r.get("final_order_pos"),
+                "before_url": f"/uploads/{slug}/{filename}",
+                "after_url": None,
+                "action": r["action"],
+                "reason": r["reason"],
+                "error": r.get("error"),
+                "justification": justification,
+            })
+
+    total_enhancement_usd = enhancement_cost_usd
+    total_all_usd = total_cost_usd + total_enhancement_usd
+
+    return jsonify({
+        "slug": slug,
+        "hotel": {
+            "name": rp_data["name"],
+            "city": rp_data["city"],
+            "stars": rp_data["star_classification"],
+            "vibe": rp_data["vibe_primary"],
+            "personas_allowed": rp_data["personas_allowed"],
+        },
+        "photos": photos_summary,
+        "coverage": cov,
+        "enhanced": enhanced_summary,
+        "stats": {
+            "uploaded": len(photo_paths),
+            "analyzed_ok": sum(1 for p in photos_summary if p["trace_ok"]),
+            "kept_after_dedup": sum(1 for a in analyses if a.get("dedup_status") == "kept"),
+            "duplicates_dropped": sum(1 for a in analyses if a.get("dedup_status") == "duplicate_dropped"),
+            "vlm_dedup_pairs_checked": len(vlm_dedup_results),
+            "vlm_dedup_same_scene_count": sum(1 for p in vlm_dedup_results if p.get("same_scene")),
+            "vlm_dedup_cost_usd": round(sum(p.get("cost_usd", 0) for p in vlm_dedup_results), 6),
+            "amenity_verifier_checked": len(verifier_results),
+            "amenity_verifier_rejected": sum(1 for r in verifier_results if not r.get("is_focused")),
+            "amenity_verifier_cost_usd": verifier_cost_usd,
+            "enhanced": len([e for e in enhanced_summary if e.get("after_url")]),
+            "ai_lighting": len([e for e in enhanced_summary if e.get("action") == "ai_lighting"]),
+            "ai_add_character": len([e for e in enhanced_summary if e.get("action") == "ai_add_character"]),
+            "ai_remove_people": len([e for e in enhanced_summary if e.get("action") == "ai_remove_people"]),
+            "ai_recompose": len([e for e in enhanced_summary if e.get("action") == "ai_recompose"]),
+            "local_enhanced": len([e for e in enhanced_summary if e.get("action") == "local_warm_boost"]),
+        },
+        "cost": {
+            "analysis_input_tokens": total_input_tokens,
+            "analysis_output_tokens": total_output_tokens,
+            "analysis_usd": round(total_cost_usd, 6),
+            "enhancement_usd": round(total_enhancement_usd, 6),
+            "vlm_dedup_usd": round(sum(p.get("cost_usd", 0) for p in vlm_dedup_results), 6),
+            "amenity_verifier_usd": verifier_cost_usd,
+            "total_usd": round(total_all_usd + sum(p.get("cost_usd", 0) for p in vlm_dedup_results) + verifier_cost_usd, 6),
+            "total_eur": round((total_all_usd + sum(p.get("cost_usd", 0) for p in vlm_dedup_results) + verifier_cost_usd) * 0.92, 6),
+        },
+        "vlm_dedup_results": vlm_dedup_results,
+        "amenity_verifier_results": verifier_results,
+    })
+
+
+@app.route("/output/<slug>/enhanced/<filename>")
+def serve_enhanced(slug, filename):
+    """Sert les photos retouchées pour preview avant/après dans l'UI."""
+    return send_from_directory(ROOT / "data" / "output" / slug / "enhanced", filename)
+
+
+@app.route("/api/download-zip/<slug>")
+def api_download_zip(slug):
+    """Pack les photos retouchées finales en ZIP pour téléchargement."""
+    import zipfile
+    import io as _io
+
+    enhanced_dir = ROOT / "data" / "output" / slug / "enhanced"
+    if not enhanced_dir.exists():
+        return jsonify({"error": "Aucune photo retouchée. Lance le pipeline d'abord."}), 404
+
+    files = sorted([p for p in enhanced_dir.iterdir() if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")])
+    if not files:
+        return jsonify({"error": "Dossier de retouches vide"}), 404
+
+    buf = _io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in files:
+            zf.write(f, arcname=f.name)
+    buf.seek(0)
+
+    from flask import send_file
+    return send_file(
+        buf,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=f"{slug}_dayaccess_final_pack.zip",
+    )
+
+
+@app.route("/uploads/<slug>/<filename>")
+def serve_upload(slug, filename):
+    """Sert les photos uploadées pour preview dans l'UI."""
+    return send_from_directory(UPLOADS_DIR / slug, filename)
+
+
+if __name__ == "__main__":
+    app.run(host="127.0.0.1", port=5050, debug=True)

@@ -1,0 +1,9 @@
+{
+  "_doc": "LUT brand Dayuse — appliquée en post-traitement à toutes les photos finales pour cohérence colorimétrique inter-photos et inter-hôtels. Modifie ces valeurs pour ajuster le ton brand sans toucher au code.",
+
+  "saturation": 1.12,
+  "contrast": 1.06,
+  "brightness": 1.02,
+  "warmth_r": 1.04,
+  "warmth_b": 0.97
+}
