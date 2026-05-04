@@ -4,17 +4,168 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DayAccess — Outil photo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // ━━ Dayuse design tokens injected into Tailwind ━━
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            dayuse: {
+              ink:    '#292935',  // primary text
+              ink2:   '#54545D',  // secondary text
+              ink3:   '#8E8E93',  // tertiary text
+              ink4:   '#999999',  // muted/disabled
+              border: '#EAEAEB',
+              border2:'#D4D4D7',
+              bg:     '#F9F9F9',  // page bg
+              bg2:    '#F5F5F7',  // info panels
+              bg3:    '#EEEEF0',  // user msg bg
+              primary:'#FFAF36',  // CTA primary
+              primary2:'#FFC536', // CTA secondary stop
+              amber:  '#FFB800',
+              gold:   '#FFC34C',
+              orange: '#F66236',
+              orange2:'#FE7335',
+              coral:  '#F45C5A',
+              purple: '#6E69AC',
+              purple2:'#635CBA',
+              teal:   '#51B0B0',
+              pool:   '#3597C8',
+              success:'#4CAF50',
+              successbg:'#E8F5E9',
+              info:   '#2196F3',
+              infobg: '#E3F2FD',
+              warn:   '#FF9800',
+              warnbg: '#FFF3E0',
+            },
+          },
+          fontFamily: {
+            sans: ['Manrope', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+          },
+        },
+      },
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Manrope, sans-serif; }
-    .dropzone { border: 2px dashed #d1d5db; transition: all .15s; }
-    .dropzone.drag { border-color: #f97316; background: #fff7ed; }
-    .pill { display:inline-flex; align-items:center; padding:.15rem .55rem; font-size:.75rem; border-radius:9999px; background:#f3f4f6; color:#374151; }
-    .pill-on { background:#dcfce7; color:#166534; }
-    .pill-off { background:#f3f4f6; color:#9ca3af; text-decoration:line-through; }
-    .pill-vibe { background:linear-gradient(135deg,#fb923c,#f59e0b); color:white; }
-    .progress-bar { height: 6px; background: #f3f4f6; border-radius: 9999px; overflow: hidden; }
-    .progress-fill { height: 100%; background: linear-gradient(90deg, #fb923c, #f59e0b); transition: width .3s; }
+    /* ━━ Global font + base ━━ */
+    html, body { font-family: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #292935; }
+    body { background: #F9F9F9; }
+
+    /* ━━ Hero gradient title ━━ */
+    .gradient-title {
+      background: linear-gradient(90deg, #FEB900 0%, #FD7030 33%, #FDAA9A 67%, #B7D5D5 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      letter-spacing: -0.5px;
+    }
+
+    /* ━━ Glass morphism header (frosted glass) ━━ */
+    .glass {
+      background: rgba(255, 255, 255, 0.72);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    }
+
+    /* ━━ CTA Primary (golden gradient pill) ━━ */
+    .btn-dayuse-primary {
+      background: linear-gradient(62deg, #FFAF36 0%, #FFC536 100%);
+      color: #292935;
+      font-weight: 600;
+      font-size: 14px;
+      padding: 12px 24px;
+      border-radius: 100px;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 2px 12px rgba(255, 175, 54, 0.25);
+    }
+    .btn-dayuse-primary:hover { background: linear-gradient(62deg, #FF9F26 0%, #FFB526 100%); transform: translateY(-1px); box-shadow: 0 4px 16px rgba(255, 175, 54, 0.35); }
+    .btn-dayuse-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    /* ━━ CTA Secondary (ghost pill) ━━ */
+    .btn-dayuse-ghost {
+      background: rgba(255, 255, 255, 0.82);
+      border: 1px solid rgba(41, 41, 53, 0.14);
+      color: #292935;
+      font-weight: 500;
+      font-size: 14px;
+      padding: 12px 24px;
+      border-radius: 100px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .btn-dayuse-ghost:hover { border-color: rgba(41, 41, 53, 0.26); background: white; }
+
+    /* ━━ Small button (chip) ━━ */
+    .btn-dayuse-small {
+      padding: 4px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 100px;
+      transition: all 0.2s ease;
+    }
+
+    /* ━━ Input pill (Dayuse style) ━━ */
+    .input-dayuse {
+      padding: 12px 20px;
+      border: 1px solid #EAEAEB;
+      border-radius: 100px;
+      font-family: 'Manrope', sans-serif;
+      font-size: 14px;
+      color: #292935;
+      background: #FFFFFF;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      width: 100%;
+    }
+    .input-dayuse:focus { border-color: #FFAF36; outline: none; box-shadow: 0 0 0 4px rgba(255, 175, 54, 0.12); }
+
+    /* ━━ Card Dayuse ━━ */
+    .card-dayuse {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+      border: 1px solid rgba(0, 0, 0, 0.04);
+    }
+
+    /* ━━ Dropzone ━━ */
+    .dropzone { border: 2px dashed #D4D4D7; border-radius: 12px; transition: all .15s; background: rgba(255,255,255,0.6); }
+    .dropzone.drag { border-color: #FFAF36; background: linear-gradient(135deg, #FFF8ED 0%, #FFFBF5 100%); }
+
+    /* ━━ Pills ━━ */
+    .pill { display:inline-flex; align-items:center; padding:.2rem .65rem; font-size:.75rem; font-weight:500; border-radius:100px; background:#F5F5F7; color:#54545D; }
+    .pill-on { background:#E8F5E9; color:#2E7D32; }
+    .pill-off { background:#F5F5F7; color:#999999; text-decoration:line-through; }
+    .pill-vibe {
+      background: linear-gradient(62deg, #FFAF36 0%, #FFC536 100%);
+      color:#292935;
+      font-weight: 600;
+    }
+
+    /* ━━ Progress bar ━━ */
+    .progress-bar { height: 6px; background: #F5F5F7; border-radius: 100px; overflow: hidden; }
+    .progress-fill { height: 100%; background: linear-gradient(90deg, #FFAF36 0%, #FFC536 100%); transition: width .3s; }
+    /* ━━ Tabs nav (Dayuse) ━━ */
+    .tab-btn { padding: .65rem 1rem; border-bottom: 2px solid transparent; color: #54545D; font-size: .875rem; font-weight: 600; cursor: pointer; transition: all .2s ease; letter-spacing: 0.01em; }
+    .tab-btn:hover { color: #FFAF36; }
+    .tab-btn.active { color: #292935; border-bottom-color: #FFAF36; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    /* ━━ Sub-tabs (Dayuse pill style) ━━ */
+    .subtab-btn { padding: .5rem 1rem; border: 1px solid #EAEAEB; border-radius: 100px; color: #54545D; font-size: .8rem; font-weight: 600; cursor: pointer; transition: all .2s ease; background: white; }
+    .subtab-btn:hover { background: rgba(255, 175, 54, 0.08); color: #292935; border-color: #FFAF36; }
+    .subtab-btn.active { background: linear-gradient(62deg, #FFAF36 0%, #FFC536 100%); color: #292935; border-color: transparent; box-shadow: 0 2px 8px rgba(255, 175, 54, 0.25); }
+    .subtab-panel { display: none; }
+    .subtab-panel.active { display: block; }
+    /* Mermaid container */
+    .mermaid { font-size: 13px; }
+    .mermaid svg { max-width: 100%; height: auto; }
     /* Slider avant/après — drag direct sur le conteneur */
     .compare { position: relative; width: 100%; aspect-ratio: 16/9; overflow: hidden; user-select: none; cursor: ew-resize; touch-action: none; }
     .compare img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
@@ -29,20 +180,33 @@
 
     <header class="mb-8">
       <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-orange-400 to-amber-500"></div>
-        <h1 class="text-2xl font-bold">DayAccess Photo Tool</h1>
+        <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg" style="background: linear-gradient(135deg, #FFAF36 0%, #FFC536 50%, #FF9F26 100%); box-shadow: 0 4px 16px rgba(255, 175, 54, 0.3);">
+          <span class="text-white text-lg font-bold">D</span>
+        </div>
+        <div>
+          <h1 class="text-2xl font-extrabold tracking-tight gradient-title">Day Access Photo Tool</h1>
+          <p class="text-sm text-dayuse-ink2 mt-0.5">Validation et retouche batch des photos par hôtel — pipeline IA Dayuse.</p>
+        </div>
       </div>
-      <p class="text-sm text-gray-500 mt-1">Validation et retouche batch des photos par hôtel — pour le déploiement DayAccess.</p>
     </header>
 
+    <!-- Tabs nav -->
+    <nav class="flex gap-1 border-b border-gray-200 mb-6">
+      <button class="tab-btn active" data-tab="pipeline">🔧 Pipeline</button>
+      <button class="tab-btn" data-tab="doc">📚 Documentation</button>
+    </nav>
+
+    <!-- ━━━━━━━━━━━━━━━━━━━━ Tab Pipeline (contenu original) ━━━━━━━━━━━━━━━━━━━━ -->
+    <div id="tab-pipeline" class="tab-panel active">
+
     <!-- Étape 1 — URL RP -->
-    <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+    <section class="card-dayuse p-6 mb-6">
       <h2 class="text-base font-semibold mb-1">1. Fiche ResortPass de l'hôtel</h2>
       <p class="text-sm text-gray-500 mb-4">Source de vérité pour les amenities, vibes et personas autorisés en ajout IA.</p>
       <div class="flex gap-2">
         <input id="rp-url" type="url" placeholder="https://www.resortpass.com/hotels/..."
-               class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-orange-300 focus:border-orange-400 outline-none">
-        <button id="btn-scrape" class="px-4 py-2 bg-gray-900 text-white text-sm rounded-md hover:bg-gray-700 disabled:opacity-50">
+               class="input-dayuse flex-1">
+        <button id="btn-scrape" class="btn-dayuse-primary disabled:opacity-50">
           Scraper
         </button>
       </div>
@@ -50,14 +214,14 @@
     </section>
 
     <!-- Étape 2 — Sources photos (multi-sources avec cases à cocher) -->
-    <section id="step-upload" class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6 opacity-50 pointer-events-none">
+    <section id="step-upload" class="card-dayuse p-6 mb-6 opacity-50 pointer-events-none">
       <h2 class="text-base font-semibold mb-1">2. Sources de photos</h2>
       <p class="text-sm text-gray-500 mb-4">Coche les sources à utiliser. Dédup pHash inter-sources automatique.</p>
 
       <div class="space-y-3 mb-4">
         <!-- Source : Site officiel -->
         <label class="flex items-start gap-3 border border-gray-200 rounded-lg p-3 cursor-pointer hover:bg-gray-50">
-          <input type="checkbox" id="src-official" checked class="mt-0.5 w-4 h-4 accent-orange-500">
+          <input type="checkbox" id="src-official" checked class="mt-0.5 w-4 h-4 accent-dayuse-primary">
           <div class="flex-1">
             <div class="text-sm font-semibold">⭐ Site officiel de l'hôtel</div>
             <div class="text-xs text-gray-500">Auto-discovery via Gemini. Photos HD souvent les plus pro. Échoue silencieusement sur les chaînes (Hyatt/Hilton/Marriott protégées Cloudflare).</div>
@@ -66,18 +230,18 @@
 
         <!-- Source : Booking -->
         <label class="flex items-start gap-3 border border-gray-200 rounded-lg p-3 cursor-pointer hover:bg-gray-50">
-          <input type="checkbox" id="src-booking" checked class="mt-0.5 w-4 h-4 accent-orange-500">
+          <input type="checkbox" id="src-booking" checked class="mt-0.5 w-4 h-4 accent-dayuse-primary">
           <div class="flex-1">
             <div class="text-sm font-semibold">Booking.com (galerie complète HD)</div>
             <div class="text-xs text-gray-500 mb-2">Headless browser + scraping galerie modale. 50-150 photos en max1024.</div>
             <input id="booking-url" type="url" placeholder="URL fiche hôtel Booking — colle l'URL même longue, on nettoie"
-                   class="w-full px-2 py-1 text-xs border border-gray-300 rounded">
+                   class="input-dayuse w-full text-xs" style="padding: 8px 16px;">
           </div>
         </label>
 
         <!-- Source : RP -->
         <label class="flex items-start gap-3 border border-gray-200 rounded-lg p-3 cursor-pointer hover:bg-gray-50">
-          <input type="checkbox" id="src-rp" checked class="mt-0.5 w-4 h-4 accent-orange-500">
+          <input type="checkbox" id="src-rp" checked class="mt-0.5 w-4 h-4 accent-dayuse-primary">
           <div class="flex-1">
             <div class="text-sm font-semibold">ResortPass <span id="rp-photo-count" class="text-gray-500 font-normal"></span></div>
             <div class="text-xs text-gray-500">Photos issues du scrape RP de l'étape 1. Source fiable, fallback automatique.</div>
@@ -85,7 +249,7 @@
         </label>
       </div>
 
-      <button id="btn-fetch-all" class="w-full px-4 py-2.5 bg-gradient-to-br from-orange-500 to-amber-500 text-white text-sm rounded-md hover:from-orange-600 disabled:opacity-50 font-medium">
+      <button id="btn-fetch-all" class="btn-dayuse-primary w-full disabled:opacity-50">
         Récupérer les photos depuis les sources cochées
       </button>
 
@@ -93,7 +257,7 @@
         <summary class="cursor-pointer px-4 py-3 text-sm font-medium text-gray-700">Ou uploade tes propres photos</summary>
         <div class="px-4 pb-4">
           <div id="dropzone" class="dropzone rounded-lg p-8 text-center cursor-pointer">
-            <p class="text-sm text-gray-500">Glisse des photos ici ou <span class="text-orange-600 font-medium">clique pour choisir</span></p>
+            <p class="text-sm text-gray-500">Glisse des photos ici ou <span class="text-dayuse-orange font-medium">clique pour choisir</span></p>
             <input type="file" id="file-input" multiple accept=".jpg,.jpeg,.png,.webp" class="hidden">
           </div>
         </div>
@@ -105,16 +269,488 @@
     </section>
 
     <!-- Étape 3 — Run -->
-    <section id="step-run" class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6 opacity-50 pointer-events-none">
+    <section id="step-run" class="card-dayuse p-6 mb-6 opacity-50 pointer-events-none">
       <h2 class="text-base font-semibold mb-1">3. Lancer l'analyse</h2>
       <p class="text-sm text-gray-500 mb-4">Pipeline complet : analyse Gemini → couverture → sélection → retouche → ajout IA → rapport.</p>
-      <button id="btn-run" class="px-5 py-2.5 bg-gradient-to-br from-orange-500 to-amber-500 text-white font-medium text-sm rounded-md hover:from-orange-600 hover:to-amber-600 disabled:opacity-50">
+      <button id="btn-run" class="btn-dayuse-primary disabled:opacity-50">
         Lancer le pipeline
       </button>
       <div id="run-result" class="hidden mt-5 pt-5 border-t border-gray-100"></div>
     </section>
 
+    </div><!-- /tab-pipeline -->
+
+    <!-- ━━━━━━━━━━━━━━━━━━━━ Tab Documentation ━━━━━━━━━━━━━━━━━━━━ -->
+    <div id="tab-doc" class="tab-panel">
+
+      <!-- Sous-onglets Documentation -->
+      <nav class="flex gap-2 mb-6 flex-wrap">
+        <button class="subtab-btn active" data-subtab="workflow">📊 Workflow</button>
+        <button class="subtab-btn" data-subtab="scoring">🎯 Scoring</button>
+        <button class="subtab-btn" data-subtab="rules">📜 Règles métier</button>
+      </nav>
+
+      <!-- ━━━ Sous-onglet Workflow ━━━ -->
+      <div id="subtab-workflow" class="subtab-panel active">
+
+      <section class="card-dayuse p-6 mb-6">
+        <h2 class="text-base font-semibold mb-1">Workflow de traitement photo</h2>
+        <p class="text-sm text-gray-500 mb-4">Pipeline complet : ingestion multi-source → analyse → dédup → sélection → retouches IA → pack final.</p>
+
+        <!-- Diagramme stocké en text/plain pour éviter tout parsing HTML, injecté via JS -->
+        <script type="text/plain" id="mermaid-source">
+flowchart TD
+    A[Sources photos]
+    A --> A1[RP scraper]
+    A --> A2[Booking scraper Playwright]
+    A --> A3[Site officiel Gemini + Playwright]
+    A1 --> B
+    A2 --> B
+    A3 --> B
+    B[Dedup pHash inter-sources seuil 16]
+    B --> C[Photos uniques 30 a 100]
+    C --> D[Analyse Gemini Flash 3 workers parallel]
+    D --> D1[category shot_type hero_quality amenity_dominance safe_zones clutter issues]
+    D --> E[Dedup pHash strict + VLM Gemini]
+    E --> F[Photos kept]
+    F --> G[Coverage matching amenities RP]
+    G --> G1[Buckets actifs]
+    G1 --> H[Verifier amenity 2e passe Gemini]
+    H --> H1[dominance plombee si non focus]
+    H --> H2[dominance confirmee si focus]
+    H1 --> I
+    H2 --> I
+    I[Scoring et selection top-N]
+    I --> I1[pillar + dominance + hero + bonus + penalite lifestyle]
+    I1 --> J[Ordering regles brand]
+    J --> J1[Slot 1 Tier 1 pool cabana rooftop beach]
+    J --> J2[Slots 2 a N round-robin alternance humain]
+    J --> J3[Bar Food Gym en queue max 1]
+    J1 --> K
+    J2 --> K
+    J3 --> K
+    K[Retouches Nano Banana 2]
+    K --> K1[clutter removal cameras AC logos tiers]
+    K --> K2[ai_lighting nuit vers jour]
+    K --> K3[ai_add_character persona selon vibe]
+    K --> K4[local_smart_crop skip si humain visible]
+    K1 --> L
+    K2 --> L
+    K3 --> L
+    K4 --> L
+    L[Validation post-IA]
+    L --> L1[Retry prompt durci si violations]
+    L1 --> L2[Re-validation]
+    L2 --> L3[Fallback original si encore echec]
+    L --> M[Photo retouchee OK]
+    L2 --> M
+    L3 --> M
+    M --> N[LUT brand Dayuse]
+    N --> O[Pack final ZIP 12 a 18 photos]
+
+    style A fill:#fed7aa,stroke:#f97316
+    style C fill:#fef3c7,stroke:#f59e0b
+    style F fill:#dcfce7,stroke:#16a34a
+    style M fill:#dcfce7,stroke:#16a34a
+    style O fill:#fbcfe8,stroke:#db2777
+    style D fill:#dbeafe,stroke:#2563eb
+    style K fill:#e9d5ff,stroke:#9333ea
+    style L fill:#fee2e2,stroke:#dc2626
+        </script>
+        <div id="mermaid-target" class="bg-slate-50 rounded-lg p-4 border border-slate-200 overflow-x-auto min-h-[200px]">
+          <div class="text-xs text-gray-400 italic">Chargement du diagramme…</div>
+        </div>
+      </section>
+
+      </div><!-- /subtab-workflow -->
+
+      <!-- ━━━ Sous-onglet Scoring ━━━ -->
+      <div id="subtab-scoring" class="subtab-panel">
+
+      <!-- Détail des scorings -->
+      <section class="card-dayuse p-6 mb-6">
+        <h2 class="text-base font-semibold mb-1">🎯 Détail du scoring photo</h2>
+        <p class="text-xs text-gray-500 mb-4">Formule complète appliquée à chaque photo pour décider si elle entre dans la sélection finale.</p>
+
+        <h3 class="text-sm font-semibold mt-4 mb-2">Formule de score brand</h3>
+        <div class="bg-slate-50 rounded p-3 text-[12px] font-mono text-slate-800 border border-slate-200">
+          base = pillar + dominance_mod + hero_bonus + removable_bonus + transformable_bonus<br>
+          si lifestyle_closeup → total = base × 0.45<br>
+          sinon → total = base
+        </div>
+
+        <h3 class="text-sm font-semibold mt-4 mb-2">Composantes</h3>
+        <table class="w-full text-xs">
+          <thead class="bg-slate-50 text-left text-slate-600 uppercase">
+            <tr><th class="px-3 py-2 font-semibold">Composante</th><th class="px-3 py-2 font-semibold">Plage</th><th class="px-3 py-2 font-semibold">Calcul</th><th class="px-3 py-2 font-semibold">Source</th></tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            <tr>
+              <td class="px-3 py-2 font-medium">pillar</td>
+              <td class="px-3 py-2">0-300</td>
+              <td class="px-3 py-2 font-mono text-[11px]">freedom + wellness + experience</td>
+              <td class="px-3 py-2 text-gray-600">Gemini analyse, score sur 100 par pilier brand Dayuse</td>
+            </tr>
+            <tr>
+              <td class="px-3 py-2 font-medium">dominance_mod</td>
+              <td class="px-3 py-2">−45 à +56</td>
+              <td class="px-3 py-2 font-mono text-[11px]">
+                ≥60% → +(dom−30)×0.8<br>
+                30-60% → 0<br>
+                &lt;30% → −(30−dom)×1.5
+              </td>
+              <td class="px-3 py-2 text-gray-600">Modulation par amenity_dominance (Gemini + verifier 2e passe)</td>
+            </tr>
+            <tr>
+              <td class="px-3 py-2 font-medium">hero_bonus</td>
+              <td class="px-3 py-2">0 à +30</td>
+              <td class="px-3 py-2 font-mono text-[11px]">hero_quality.score × 0.3<br>(0 si lifestyle déguisé)</td>
+              <td class="px-3 py-2 text-gray-600">WOW factor évalué par Gemini (0-100)</td>
+            </tr>
+            <tr>
+              <td class="px-3 py-2 font-medium">removable_bonus</td>
+              <td class="px-3 py-2">0 ou +30</td>
+              <td class="px-3 py-2 font-mono text-[11px]">+30 si toutes les issues sont nettoyables IA</td>
+              <td class="px-3 py-2 text-gray-600">Caméras, logos, clutter, etc. — clutter step va les enlever</td>
+            </tr>
+            <tr>
+              <td class="px-3 py-2 font-medium">transformable_bonus</td>
+              <td class="px-3 py-2">0 ou +40</td>
+              <td class="px-3 py-2 font-mono text-[11px]">+40 si nuit / sombre / off-brand palette</td>
+              <td class="px-3 py-2 text-gray-600">ai_lighting va remettre en jour ensoleillé</td>
+            </tr>
+            <tr class="bg-red-50">
+              <td class="px-3 py-2 font-medium text-red-700">lifestyle_penalty</td>
+              <td class="px-3 py-2 text-red-700">×0.45</td>
+              <td class="px-3 py-2 font-mono text-[11px] text-red-700">total = base × 0.45 si flag déclenché</td>
+              <td class="px-3 py-2 text-red-700 font-medium">Photos lifestyle déguisées → reléguées en queue</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3 class="text-sm font-semibold mt-5 mb-2">Détection "lifestyle disguised closeup"</h3>
+        <div class="bg-slate-50 rounded p-3 text-[12px] text-slate-800 border border-slate-200 space-y-1">
+          <div><strong>Pattern A — Body focus :</strong> subjects contient bikini/maillot/torse/swimmer/portrait/selfie/underwater + human_count ≤ 2 + pas de mots "vue d'ensemble/skyline/loungers/deck"</div>
+          <div><strong>Pattern B — Aerial swimmer :</strong> shot_type = aerial + human_count ≤ 2 + dominance &lt; 50 + pas de contexte amenity</div>
+          <div class="text-gray-600 italic mt-1">Si un des 2 patterns matche → lifestyle = true → score × 0.45 + dominance plafonnée à 20% + hero_bonus ignoré</div>
+        </div>
+
+        <h3 class="text-sm font-semibold mt-5 mb-2">Hard requirements slot 1 (photo de couverture)</h3>
+        <ul class="text-[12px] text-slate-700 space-y-1 ml-4 list-disc">
+          <li>Tier 1 amenity uniquement (pool / cabana / rooftop / beach) → fallback Tier 2 (spa) → Tier 3 (bar/food/gym)</li>
+          <li><strong>amenity_dominance ≥ 50%</strong> (vraie amenity en sujet, pas un humain en gros plan avec amenity floue derrière)</li>
+          <li><strong>shot_type ≠ close_up</strong> avec humain</li>
+          <li><strong>hero_quality.score ≥ 50</strong></li>
+          <li>Pas un disguised closeup (Python heuristique)</li>
+          <li>Tri par hero_score puis amenity_dominance puis is_slot1_worthy</li>
+          <li>Humain natif <strong>NON discriminant</strong> — on ajoute en IA si manque</li>
+        </ul>
+
+        <h3 class="text-sm font-semibold mt-5 mb-2">Filtre seuil minimum</h3>
+        <div class="bg-slate-50 rounded p-3 text-[12px] text-slate-800 border border-slate-200">
+          <div>Photos avec <strong>score &lt; 80</strong> sont rejetées sauf 2 cas :</div>
+          <ul class="ml-4 list-disc mt-1">
+            <li>Photo <strong>transformable</strong> (nuit / sombre) ET catégorie sous-couverte → rescue</li>
+            <li>Photo <strong>lifestyle closeup</strong> → mise en queue, utilisée seulement si bucket sous-couvert</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- Volumes par catégorie -->
+      <section class="card-dayuse p-6 mb-6">
+        <h2 class="text-base font-semibold mb-3">📐 Volumes & règles par catégorie</h2>
+        <table class="w-full text-xs">
+          <thead class="bg-slate-50 text-left text-slate-600 uppercase">
+            <tr>
+              <th class="px-3 py-2 font-semibold">Catégorie</th>
+              <th class="px-3 py-2 font-semibold">Min</th>
+              <th class="px-3 py-2 font-semibold">Max</th>
+              <th class="px-3 py-2 font-semibold">Tier slot 1</th>
+              <th class="px-3 py-2 font-semibold">Notes</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            <tr><td class="px-3 py-2 font-medium">pool</td><td class="px-3 py-2">3</td><td class="px-3 py-2">4</td><td class="px-3 py-2"><span class="pill" style="background:#fed7aa;color:#9a3412">⭐ T1</span></td><td class="px-3 py-2 text-gray-600">Hero amenity. Persona en swimwear, IN water priorité.</td></tr>
+            <tr><td class="px-3 py-2 font-medium">cabana</td><td class="px-3 py-2">2</td><td class="px-3 py-2">4</td><td class="px-3 py-2"><span class="pill" style="background:#fed7aa;color:#9a3412">⭐ T1</span></td><td class="px-3 py-2 text-gray-600">Hero. Persona sur daybed existant.</td></tr>
+            <tr><td class="px-3 py-2 font-medium">rooftop</td><td class="px-3 py-2">1</td><td class="px-3 py-2">3</td><td class="px-3 py-2"><span class="pill" style="background:#fed7aa;color:#9a3412">⭐ T1</span></td><td class="px-3 py-2 text-gray-600">Hero. Skyline + drink en main.</td></tr>
+            <tr><td class="px-3 py-2 font-medium">beach</td><td class="px-3 py-2">1</td><td class="px-3 py-2">3</td><td class="px-3 py-2"><span class="pill" style="background:#fed7aa;color:#9a3412">⭐ T1</span></td><td class="px-3 py-2 text-gray-600">Hero. Sand + lounger ou marche au bord.</td></tr>
+            <tr><td class="px-3 py-2 font-medium">spa</td><td class="px-3 py-2">1</td><td class="px-3 py-2">2</td><td class="px-3 py-2"><span class="pill" style="background:#dbeafe;color:#1e40af">T2</span></td><td class="px-3 py-2 text-gray-600">Wellness. Génération IA possible si manquant.</td></tr>
+            <tr><td class="px-3 py-2 font-medium">food</td><td class="px-3 py-2">1</td><td class="px-3 py-2">1</td><td class="px-3 py-2"><span class="pill" style="background:#f3f4f6;color:#6b7280">T3</span></td><td class="px-3 py-2 text-gray-600">⛔ Pas de retouche IA (risque inventer plat). Close-ups OK.</td></tr>
+            <tr><td class="px-3 py-2 font-medium">bar</td><td class="px-3 py-2">0</td><td class="px-3 py-2">1</td><td class="px-3 py-2"><span class="pill" style="background:#f3f4f6;color:#6b7280">T3</span></td><td class="px-3 py-2 text-gray-600">Génération IA possible si manquant.</td></tr>
+            <tr><td class="px-3 py-2 font-medium">gym</td><td class="px-3 py-2">0</td><td class="px-3 py-2">1</td><td class="px-3 py-2"><span class="pill" style="background:#f3f4f6;color:#6b7280">T3</span></td><td class="px-3 py-2 text-gray-600">Persona yoga / dumbbell léger.</td></tr>
+            <tr><td class="px-3 py-2 font-medium">hero_ext</td><td class="px-3 py-2">1</td><td class="px-3 py-2">2</td><td class="px-3 py-2 text-gray-400">—</td><td class="px-3 py-2 text-gray-600">Façade / extérieur. Toujours actif.</td></tr>
+            <tr><td class="px-3 py-2 font-medium">detail</td><td class="px-3 py-2">0</td><td class="px-3 py-2">2</td><td class="px-3 py-2 text-gray-400">—</td><td class="px-3 py-2 text-gray-600">Intérieur en fallback uniquement.</td></tr>
+            <tr><td class="px-3 py-2 font-medium text-red-600">chambre</td><td class="px-3 py-2 text-red-600" colspan="4">🚫 EXCLUE — Day Pass n'inclut pas la chambre</td></tr>
+            <tr><td class="px-3 py-2 font-medium text-red-600">staff</td><td class="px-3 py-2 text-red-600" colspan="4">🚫 EXCLUE — non aspirationnel</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- Coût par étape -->
+      <section class="card-dayuse p-6 mb-6">
+        <h2 class="text-base font-semibold mb-3">💸 Coût indicatif par étape (par hôtel)</h2>
+        <table class="w-full text-xs">
+          <thead class="bg-slate-50 text-left text-slate-600 uppercase">
+            <tr>
+              <th class="px-3 py-2 font-semibold">Étape</th>
+              <th class="px-3 py-2 font-semibold">Modèle</th>
+              <th class="px-3 py-2 font-semibold">Coût unitaire</th>
+              <th class="px-3 py-2 font-semibold">Volume / hôtel</th>
+              <th class="px-3 py-2 font-semibold">Total</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            <tr><td class="px-3 py-2">Scraping (RP/Booking/Officiel)</td><td class="px-3 py-2">—</td><td class="px-3 py-2">$0</td><td class="px-3 py-2">~30-100 photos</td><td class="px-3 py-2 font-medium">$0</td></tr>
+            <tr><td class="px-3 py-2">Analyse Gemini</td><td class="px-3 py-2">gemini-2.5-flash</td><td class="px-3 py-2">~$0.0006</td><td class="px-3 py-2">~30 photos</td><td class="px-3 py-2 font-medium">~$0.018</td></tr>
+            <tr><td class="px-3 py-2">Dédup VLM (zone grise)</td><td class="px-3 py-2">gemini-2.5-flash</td><td class="px-3 py-2">~$0.0006/paire</td><td class="px-3 py-2">≤30 paires</td><td class="px-3 py-2 font-medium">~$0.018</td></tr>
+            <tr><td class="px-3 py-2">Verifier amenity</td><td class="px-3 py-2">gemini-2.5-flash</td><td class="px-3 py-2">~$0.0003</td><td class="px-3 py-2">~10-20 photos</td><td class="px-3 py-2 font-medium">~$0.005</td></tr>
+            <tr><td class="px-3 py-2">Retouches IA (clutter/lighting/persona)</td><td class="px-3 py-2">nano-banana-2</td><td class="px-3 py-2">$0.067/edit</td><td class="px-3 py-2">~10 photos × 1-2 steps</td><td class="px-3 py-2 font-medium">~$1.00</td></tr>
+            <tr><td class="px-3 py-2">Validation post-IA</td><td class="px-3 py-2">gemini-2.5-flash</td><td class="px-3 py-2">~$0.0006</td><td class="px-3 py-2">~10 photos</td><td class="px-3 py-2 font-medium">~$0.006</td></tr>
+            <tr class="bg-orange-50"><td class="px-3 py-2 font-semibold" colspan="4">Total typique par hôtel</td><td class="px-3 py-2 font-bold text-orange-700">≈ $1.05</td></tr>
+            <tr class="bg-amber-50"><td class="px-3 py-2 text-xs italic" colspan="5">Pour 100 hôtels : ~$105 (sans retry/fallback). Avec ~10% de retries : ~$120. Largement budget marketing.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      </div><!-- /subtab-scoring -->
+
+      <!-- ━━━ Sous-onglet Règles métier ━━━ -->
+      <div id="subtab-rules" class="subtab-panel">
+
+      <!-- Règles métier brand -->
+      <section class="card-dayuse p-6 mb-6">
+        <h2 class="text-base font-semibold mb-3">📜 Règles métier appliquées</h2>
+        <p class="text-xs text-gray-500 mb-4">Toutes les lois brand qui régissent la sélection et la retouche. Tout changement de règle doit être validé par Martin.</p>
+
+        <div class="space-y-4">
+
+          <!-- Règle 1 : taille du pack -->
+          <div class="border-l-4 border-orange-400 pl-3 py-1 bg-orange-50/50 rounded-r">
+            <div class="text-sm font-semibold text-orange-900">📦 Taille du pack final</div>
+            <div class="text-xs text-gray-700 mt-1">
+              <strong>Cible : 15 photos</strong>. Min 12, max 18. On accepte un pack plus petit si l'hôtel n'a pas assez d'amenities pour atteindre 12.
+              On ne dépasse jamais 18 (cap dur).
+            </div>
+          </div>
+
+          <!-- Règle 2 : Slot 1 -->
+          <div class="border-l-4 border-orange-400 pl-3 py-1 bg-orange-50/50 rounded-r">
+            <div class="text-sm font-semibold text-orange-900">⭐ Slot 1 (photo de couverture)</div>
+            <ul class="text-xs text-gray-700 mt-1 ml-4 list-disc space-y-0.5">
+              <li><strong>Tier strict</strong> : tier 1 (pool/cabana/rooftop/beach) > tier 2 (spa) > tier 3 (bar/food/gym, fallback ultime)</li>
+              <li><strong>Hard requirements</strong> : amenity_dominance ≥ 50%, shot_type ≠ close_up, hero_quality ≥ 50</li>
+              <li>Humain natif <strong>NON discriminant</strong> — si la photo n'a pas d'humain, l'IA en ajoute un (ajout forcé)</li>
+              <li>Tri parmi les éligibles : hero_score → amenity_dominance → score brand</li>
+            </ul>
+          </div>
+
+          <!-- Règle 3 : Ajout humain -->
+          <div class="border-l-4 border-orange-400 pl-3 py-1 bg-orange-50/50 rounded-r">
+            <div class="text-sm font-semibold text-orange-900">👤 Quand on ajoute un humain (alternance stricte)</div>
+            <ul class="text-xs text-gray-700 mt-1 ml-4 list-disc space-y-0.5">
+              <li><strong>Slot 1 obligatoire</strong> : ajout IA si pas d'humain natif (et photo candidate)</li>
+              <li><strong>Alternance 1 sur 2</strong> : jamais 2 photos sans humain à la suite. Si la précédente n'a pas d'humain → la suivante DOIT en avoir un (natif ou ajouté IA)</li>
+              <li><strong>Catégories autorisées</strong> pour ajout : pool, cabana, rooftop, beach, exterieur, interieur_commun, gym</li>
+              <li><strong>Catégories interdites</strong> pour ajout : f_and_b plats, chambre, staff, piscine_vue_aerienne (drone — humain serait minuscule)</li>
+              <li><strong>Rotation des personas</strong> selon vibe RP : Trendy → solos/couples/small_groups en alternance</li>
+              <li><strong>Bonus lifestyle</strong> : gardent leur humain natif, jamais d'ajout IA additionnel</li>
+            </ul>
+          </div>
+
+          <!-- Règle 4 : Exclusions absolues -->
+          <div class="border-l-4 border-red-500 pl-3 py-1 bg-red-50/50 rounded-r">
+            <div class="text-sm font-semibold text-red-900">🚫 Exclusions absolues du pack</div>
+            <ul class="text-xs text-gray-700 mt-1 ml-4 list-disc space-y-0.5">
+              <li><strong>Pas de chambre</strong> (Day Pass n'inclut PAS la nuitée — on n'utilise jamais une photo de chambre, peu importe les secondaires)</li>
+              <li><strong>Pas de staff</strong> (employés en uniforme = non aspirationnel)</li>
+              <li><strong>Pas de focus body / décapité</strong> (face_visibility ≠ complete → photo rejetée)</li>
+              <li><strong>Pas de close-up portrait sur amenity</strong> (torse en bikini avec piscine en fond flou = lifestyle déguisé)</li>
+              <li><strong>Pas de vue aérienne avec humain plein cadre</strong> sans contexte amenity (drone shot focus nageuse seule)</li>
+              <li><strong>Pas de F&B plats avec retouche IA</strong> (risque d'inventer un plat inexistant)</li>
+              <li><strong>Pas d'immeuble urbain banal en hero_ext</strong> (pillar &lt; 130 OU issue "absence d'amenity" → rejeté)</li>
+            </ul>
+          </div>
+
+          <!-- Règle 5 : Photos de nuit -->
+          <div class="border-l-4 border-blue-400 pl-3 py-1 bg-blue-50/50 rounded-r">
+            <div class="text-sm font-semibold text-blue-900">🌙 → ☀️ Photos nuit / sombres</div>
+            <ul class="text-xs text-gray-700 mt-1 ml-4 list-disc space-y-0.5">
+              <li><strong>Toujours acceptées</strong> : bonus +40 au score (transformable)</li>
+              <li><strong>Forcées en jour</strong> via ai_lighting (transformation Nano Banana)</li>
+              <li>Si la photo doit aussi avoir un humain → <strong>chaînage</strong> ai_lighting + ai_add_character (2 IA en série)</li>
+              <li><strong>Validation post-IA whitelist</strong> les violations légitimes (scene_regenerated, architecture_changed, lighting_break)</li>
+            </ul>
+          </div>
+
+          <!-- Règle 6 : Clutter removal -->
+          <div class="border-l-4 border-emerald-500 pl-3 py-1 bg-emerald-50/50 rounded-r">
+            <div class="text-sm font-semibold text-emerald-900">🧹 Clutter removal IA</div>
+            <ul class="text-xs text-gray-700 mt-1 ml-4 list-disc space-y-0.5">
+              <li>Objets retirés : câbles, gobelets, jouets de plage (sceau, ballon), serviettes/sandales abandonnées</li>
+              <li>Eyesores techniques : caméras de surveillance, escaliers de secours, antennes, climatiseurs extérieurs, ventilation</li>
+              <li>Logos tiers (sur parasols, coussins, panneaux — sauf branding sobre de l'hôtel)</li>
+              <li><strong>Règle ADDITION-FREE</strong> : ne JAMAIS ajouter d'éléments (grues, scaffolding, plantes, décor, personnes)</li>
+              <li>Si add_character + clutter détecté → chaînage clutter puis perso (sur scène propre)</li>
+            </ul>
+          </div>
+
+          <!-- Règle 7 : Volumes par catégorie -->
+          <div class="border-l-4 border-purple-400 pl-3 py-1 bg-purple-50/50 rounded-r">
+            <div class="text-sm font-semibold text-purple-900">📐 Volumes par catégorie</div>
+            <div class="text-xs text-gray-700 mt-1">
+              Pool 3-4 · Cabana 2-4 · Rooftop 1-3 · Beach 1-3 · Spa 1-2 · Food <strong>max 1</strong> · Bar <strong>max 1</strong> · Gym <strong>max 1</strong> · Hero_ext 1-2 · Detail 0-2.
+              <span class="block mt-1 italic">Les buckets non-amenity (bar/food/gym) sont en queue de pack après les hero amenities.</span>
+            </div>
+          </div>
+
+          <!-- Règle 8 : Génération full IA -->
+          <div class="border-l-4 border-fuchsia-500 pl-3 py-1 bg-fuchsia-50/50 rounded-r">
+            <div class="text-sm font-semibold text-fuchsia-900">🎯 Génération photo 100% IA (catégorie manquante)</div>
+            <ul class="text-xs text-gray-700 mt-1 ml-4 list-disc space-y-0.5">
+              <li><strong>Spa</strong> : ✅ génération autorisée (massage table avec face cradle, jamais une chambre)</li>
+              <li><strong>Bar</strong> : ✅ génération autorisée (cocktail générique sur comptoir)</li>
+              <li><strong>Food / Pool / Cabana / Rooftop / Beach / Gym</strong> : ❌ génération INTERDITE (risque d'inventer une amenity inexistante)</li>
+              <li>Photo générée IA est marquée explicitement dans le pack avec un badge dédié</li>
+            </ul>
+          </div>
+
+          <!-- Règle 9 : Bonus lifestyle -->
+          <div class="border-l-4 border-fuchsia-500 pl-3 py-1 bg-fuchsia-50/50 rounded-r">
+            <div class="text-sm font-semibold text-fuchsia-900">✨ Photos bonus lifestyle</div>
+            <ul class="text-xs text-gray-700 mt-1 ml-4 list-disc space-y-0.5">
+              <li>Photos focus humain (close-up bikini, dans l'eau, etc.) avec face_visibility = complete</li>
+              <li><strong>Max 2 par hôtel</strong>, en queue de pack (slots N-1 et N)</li>
+              <li>Ne comptent pas dans les buckets piscine/spa/etc. — bucket dédié bonus</li>
+              <li>Passent la pipeline retouche normale (LUT brand, clutter), mais PAS d'ajout perso IA additionnel</li>
+            </ul>
+          </div>
+
+          <!-- Règle 10 : Validation post-IA -->
+          <div class="border-l-4 border-rose-500 pl-3 py-1 bg-rose-50/50 rounded-r">
+            <div class="text-sm font-semibold text-rose-900">🔬 Validation post-IA + retry/fallback</div>
+            <ul class="text-xs text-gray-700 mt-1 ml-4 list-disc space-y-0.5">
+              <li>Toutes les photos retouchées IA sont comparées avant/après par Gemini Vision</li>
+              <li>Violations détectées : invented_furniture, subject_on_water, scene_regenerated, architecture_changed, etc.</li>
+              <li>Whitelist par action : ai_lighting accepte scene_regenerated/lighting_break/architecture_changed (effet voulu)</li>
+              <li>Si violation actionnable → <strong>retry 1×</strong> avec prompt durci ciblé</li>
+              <li>Si encore violation → <strong>fallback original</strong> (mieux qu'une IA pétée en publication)</li>
+            </ul>
+          </div>
+
+          <!-- Règle 11 : LUT brand -->
+          <div class="border-l-4 border-amber-500 pl-3 py-1 bg-amber-50/50 rounded-r">
+            <div class="text-sm font-semibold text-amber-900">🎨 LUT brand Dayuse (homogénéité)</div>
+            <ul class="text-xs text-gray-700 mt-1 ml-4 list-disc space-y-0.5">
+              <li>TOUTES les photos finales passent par la LUT brand (post-traitement Pillow déterministe)</li>
+              <li>Garantit cohérence inter-photos et inter-hôtels (même ton chaud, même saturation, même contraste)</li>
+              <li>Paramètres dans config/brand_lut.json</li>
+            </ul>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- Checks de sécurité (déplacés ici) -->
+      <section class="card-dayuse p-6 mb-6">
+        <h2 class="text-base font-semibold mb-3">🛡 Filets de sécurité (checks)</h2>
+        <ul class="text-xs space-y-2 text-gray-700">
+          <li><strong>Hard exclude</strong> chambre / staff dès le mapping (jamais dans aucun bucket, peu importe les secondaires)</li>
+          <li><strong>Pré-filtre dédup VLM</strong> : si time_of_day ou ambiance différents (jour/nuit) → garde les 2 photos</li>
+          <li><strong>Verifier amenity</strong> en 2e passe sur top-3 de chaque bucket amenity → corrige les hallucinations Gemini sur amenity_dominance</li>
+          <li><strong>Heuristique Python anti-lifestyle</strong> : closeup bikini/torse/portrait OU vue aérienne avec humain plein cadre → score ×0.45 + plombe la dominance à 20%</li>
+          <li><strong>Slot 1 hard requirements</strong> : amenity_dominance ≥ 50%, shot_type ≠ close_up, hero_quality ≥ 50</li>
+          <li><strong>Smart crop skip</strong> si human_count > 0 et presence=full_visible → évite couper la tête</li>
+          <li><strong>Validation post-IA</strong> : détecte invented_furniture, subject_on_water, scene_regenerated, architecture_changed → retry avec prompt durci → fallback original</li>
+          <li><strong>Whitelist par action</strong> : pour ai_lighting, on accepte scene_regenerated + lighting_break + architecture_changed (la transformation nuit→jour modifie inévitablement le décor perçu)</li>
+          <li><strong>LUT brand</strong> appliquée à TOUTES les photos finales pour cohérence inter-hôtels</li>
+        </ul>
+      </section>
+
+      <!-- Vibes & personas -->
+      <section class="card-dayuse p-6 mb-6">
+        <h2 class="text-base font-semibold mb-3">🎭 Vibes RP → personas autorisés en ajout IA</h2>
+        <table class="w-full text-xs">
+          <thead class="bg-slate-50 text-left text-slate-600 uppercase">
+            <tr>
+              <th class="px-3 py-2 font-semibold">Vibe RP</th>
+              <th class="px-3 py-2 font-semibold">Personas (ordre de priorité)</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            <tr><td class="px-3 py-2 font-medium">Family friendly</td><td class="px-3 py-2 text-gray-600">families → couples → solos</td></tr>
+            <tr><td class="px-3 py-2 font-medium">Party</td><td class="px-3 py-2 text-gray-600">groups → couples</td></tr>
+            <tr><td class="px-3 py-2 font-medium">Serene</td><td class="px-3 py-2 text-gray-600">solos → couples</td></tr>
+            <tr><td class="px-3 py-2 font-medium">Luxe</td><td class="px-3 py-2 text-gray-600">solos → couples</td></tr>
+            <tr><td class="px-3 py-2 font-medium">Trendy</td><td class="px-3 py-2 text-gray-600">solos → couples → small_groups</td></tr>
+            <tr><td class="px-3 py-2 font-medium text-gray-400 italic">(défaut)</td><td class="px-3 py-2 text-gray-500 italic">solos → couples</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      </div><!-- /subtab-rules -->
+
+    </div><!-- /tab-doc -->
+
   </div>
+
+  <script>
+    // ━━━ Tabs switching ━━━
+    async function renderMermaidOnce() {
+      if (window._mermaidRendered) return;
+      const target = document.getElementById('mermaid-target');
+      const source = document.getElementById('mermaid-source');
+      if (!target || !source || !window.mermaid) return;
+      const code = source.textContent.trim();
+      try {
+        window.mermaid.initialize({
+          startOnLoad: false,
+          theme: 'default',
+          securityLevel: 'loose',
+          flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: false }
+        });
+        const { svg } = await window.mermaid.render('mermaid-graph', code);
+        target.innerHTML = svg;
+        window._mermaidRendered = true;
+      } catch (err) {
+        console.error('[mermaid render error]', err);
+        target.innerHTML = `
+          <div class="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-3">
+            <strong>Erreur Mermaid :</strong> ${(err.message || err).toString().substring(0, 500)}
+            <details class="mt-2"><summary class="cursor-pointer">Code source</summary>
+              <pre class="mt-1 text-[10px] overflow-x-auto">${code.replace(/</g, '&lt;')}</pre>
+            </details>
+          </div>`;
+      }
+    }
+
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tab = btn.dataset.tab;
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + tab));
+        // Render mermaid si on entre dans Documentation ET sous-onglet Workflow visible
+        if (tab === 'doc') {
+          const activeSubtab = document.querySelector('.subtab-btn.active')?.dataset?.subtab;
+          if (activeSubtab === 'workflow') {
+            renderMermaidOnce();
+          }
+        }
+      });
+    });
+
+    // Sous-onglets dans Documentation
+    document.querySelectorAll('.subtab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const sub = btn.dataset.subtab;
+        document.querySelectorAll('.subtab-btn').forEach(b => b.classList.toggle('active', b.dataset.subtab === sub));
+        document.querySelectorAll('.subtab-panel').forEach(p => p.classList.toggle('active', p.id === 'subtab-' + sub));
+        // Render mermaid si on bascule sur le sous-onglet workflow
+        if (sub === 'workflow') {
+          renderMermaidOnce();
+        }
+      });
+    });
+  </script>
 
   <script>
     const state = { slug: null, rp: null, uploaded: 0 };
@@ -233,7 +869,7 @@
       // files = [{name, source}]
       uploadPreview.classList.remove("hidden");
       const SOURCE_BADGE = {
-        official: { label: "officiel", color: "bg-orange-500" },
+        official: { label: "officiel", color: "bg-dayuse-primary" },
         booking:  { label: "booking",  color: "bg-blue-500" },
         rp:       { label: "RP",       color: "bg-purple-500" },
       };
@@ -241,7 +877,7 @@
         <div class="text-xs text-gray-600 mb-2">
           <span id="select-count">${files.length} / ${files.length}</span> photos sélectionnées pour analyse
           <span class="text-gray-400">— clique sur une photo pour la désélectionner</span>
-          <button id="btn-select-all" class="ml-2 text-orange-600 underline text-[11px]">tout (re)cocher</button>
+          <button id="btn-select-all" class="ml-2 text-dayuse-orange underline text-[11px]">tout (re)cocher</button>
         </div>
         <div class="grid grid-cols-6 gap-2">${files.map(f => {
           const cfg = SOURCE_BADGE[f.source] || { label: f.source, color: "bg-gray-500" };
@@ -364,7 +1000,7 @@
         if (info.error) {
           rows.push(`<tr><td class="py-1 pr-3 font-medium">✗ ${label}</td><td class="py-1 text-red-600 text-xs">${info.error}</td></tr>`);
         } else if (info.photos_downloaded != null) {
-          const detail = info.url ? `<a href="${info.url}" target="_blank" class="text-orange-600 text-xs underline">${info.url.substring(0, 60)}…</a>` : '';
+          const detail = info.url ? `<a href="${info.url}" target="_blank" class="text-dayuse-orange text-xs underline">${info.url.substring(0, 60)}…</a>` : '';
           rows.push(`<tr><td class="py-1 pr-3 font-medium">✓ ${label}</td><td class="py-1 text-xs">${info.photos_downloaded} photos ${detail}</td></tr>`);
         }
       }
@@ -578,7 +1214,7 @@
               <div class="font-semibold text-slate-900 mb-1.5">2. Score brand /300 — 3 piliers Dayuse</div>
               <div class="grid grid-cols-3 gap-2 mt-2">
                 <div class="bg-white rounded p-2 border border-slate-200">
-                  <div class="font-semibold text-orange-600">FREEDOM /100</div>
+                  <div class="font-semibold text-dayuse-orange">FREEDOM /100</div>
                   <div class="text-[11px] text-slate-600">liberté d'usage, contrôle du temps, dépaysement accessible</div>
                 </div>
                 <div class="bg-white rounded p-2 border border-slate-200">
@@ -586,7 +1222,7 @@
                   <div class="text-[11px] text-slate-600">détente, soleil, eau, calme, ritual self-care</div>
                 </div>
                 <div class="bg-white rounded p-2 border border-slate-200">
-                  <div class="font-semibold text-amber-600">EXPERIENCE /100</div>
+                  <div class="font-semibold text-dayuse-amber">EXPERIENCE /100</div>
                   <div class="text-[11px] text-slate-600">mémorable, partageable, instagrammable, aspirationnel</div>
                 </div>
               </div>
@@ -699,13 +1335,13 @@
 
       const cardsHTML = sortedPhotos.map(p => {
         const dedupBadge = p.dedup_status === 'duplicate_dropped'
-          ? `<span class="bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded">doublon</span>`
+          ? `<span class="bg-dayuse-amber text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold">doublon</span>`
           : '';
         const aiBadge = p.ai_candidate
           ? `<span class="bg-purple-500 text-white text-[10px] px-1.5 py-0.5 rounded">IA cible</span>`
           : '';
         const selectedBadge = p.selected
-          ? `<span class="bg-green-600 text-white text-[10px] px-1.5 py-0.5 rounded font-medium">✓ TOP ${p.selection_rank} ${p.selection_category}</span>`
+          ? `<span class="bg-dayuse-success text-white text-[10px] px-2 py-0.5 rounded-full font-semibold">✓ TOP ${p.selection_rank} ${p.selection_category}</span>`
           : '';
         const errorBadge = !p.trace_ok
           ? `<span class="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded" title="${(p.gemini_error || '').replace(/"/g, "'")}">analyse échouée</span>`
@@ -731,7 +1367,7 @@
             </div>
             <div class="p-3">
               <div class="flex items-center justify-between mb-1">
-                <span class="text-xs font-semibold uppercase text-orange-600">${p.category || (p.trace_ok ? 'autre' : '—')}</span>
+                <span class="text-xs font-semibold uppercase text-dayuse-orange">${p.category || (p.trace_ok ? 'autre' : '—')}</span>
                 <span class="text-xs text-gray-500">${p.score_brand}/300</span>
               </div>
               <div class="text-xs text-gray-500 mb-1">${p.human_count != null ? p.human_count : '?'} humain(s) · ${p.ambiance || ''}</div>
@@ -850,11 +1486,12 @@
               <div class="flex items-start justify-between gap-2">
                 <div class="flex-1">
                   <div class="flex items-center gap-2 mb-0.5 flex-wrap">
-                    <span class="bg-gradient-to-br from-orange-500 to-amber-500 text-white text-[11px] font-bold px-2 py-0.5 rounded">#${e.final_order_pos || '?'}</span>
+                    <span class="text-dayuse-ink text-[11px] font-bold px-2 py-0.5 rounded-full" style="background: linear-gradient(62deg, #FFAF36 0%, #FFC536 100%); box-shadow: 0 2px 6px rgba(255, 175, 54, 0.25);">#${e.final_order_pos || '?'}</span>
                     ${e.is_fully_generated ? `<span class="bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide">📌 PHOTO 100% IA</span>` : ''}
+                    ${e.is_bonus ? `<span class="bg-fuchsia-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide">✨ Bonus ${e.bonus_amenity || ''}</span>` : ''}
                     <span class="text-xs font-semibold">${e.filename.length > 26 ? e.filename.substring(0, 24) + '…' : e.filename}</span>
                   </div>
-                  <div class="text-[10px] text-gray-500">${j.category || '?'} → top ${j.selection_rank || '?'} de "${j.selection_category || '?'}"</div>
+                  <div class="text-[10px] text-gray-500">${e.is_bonus ? `bonus lifestyle "${e.bonus_amenity || '?'}"` : `${j.category || '?'} → top ${j.selection_rank || '?'} de "${j.selection_category || '?'}"`}</div>
                   ${(() => {
                     // Tags multi-catégories : principale + secondaires + tous les buckets shopping list où la photo compte
                     const allTags = new Set();
@@ -883,6 +1520,43 @@
                 <div class="bg-gray-50 rounded px-1.5 py-1"><span class="text-gray-500">Lum</span> ${j.ambiance || '—'}</div>
                 <div class="bg-gray-50 rounded px-1.5 py-1"><span class="text-gray-500">Hum</span> ${j.human_count != null ? j.human_count : '?'} · ${j.time_of_day || '?'}</div>
               </div>
+
+              ${(() => {
+                // ━━ Grille des transformations appliquées (cases à cocher) ━━
+                const tx = e.transformations;
+                if (!tx) return '';
+                const TX_LABELS = [
+                  { key: 'smart_crop',         label: 'Recadrage Gemini',  icon: '✂️' },
+                  { key: 'ai_recompose',       label: 'Recadrage IA',      icon: '✂️' },
+                  { key: 'lut_brand',          label: 'LUT brand',         icon: '🎨' },
+                  { key: 'ai_lighting',        label: 'Lumière transformée', icon: '🌅' },
+                  { key: 'clutter_removed',    label: 'Clutter retiré',    icon: '🧹' },
+                  { key: 'character_added',    label: 'Humain ajouté IA',  icon: '👤' },
+                  { key: 'people_removed',     label: 'Personnes retirées',icon: '🚫' },
+                  { key: 'warm_boost',         label: 'Warm boost local',  icon: '🌤️' },
+                  { key: 'fully_generated',    label: 'Photo 100% IA',     icon: '🎯' },
+                  { key: 'bonus_lifestyle',    label: 'Bonus lifestyle',   icon: '✨' },
+                  { key: 'validation_ok',      label: 'Validation IA OK',  icon: '✅' },
+                  { key: 'retry_attempted',    label: 'Retry effectué',    icon: '🔁' },
+                  { key: 'fallback_original',  label: 'Fallback original', icon: '↩️' },
+                ];
+                const cells = TX_LABELS
+                  .filter(({key}) => tx[key] !== undefined)
+                  .map(({key, label, icon}) => {
+                    const on = !!tx[key];
+                    const cls = on
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                      : 'bg-gray-50 text-gray-400 border-gray-200';
+                    const symbol = on ? '☑' : '☐';
+                    return `<div class="flex items-center gap-1 px-1.5 py-0.5 rounded border ${cls}"><span>${symbol}</span><span class="text-[9px]">${icon}</span><span>${label}</span></div>`;
+                  }).join('');
+                return `
+                  <div class="border border-slate-200 rounded p-2 bg-slate-50">
+                    <div class="text-[10px] font-semibold text-slate-700 mb-1 uppercase tracking-wide">Transformations appliquées</div>
+                    <div class="grid grid-cols-2 gap-1 text-[10px]">${cells}</div>
+                  </div>
+                `;
+              })()}
 
               ${(() => {
                 const sc = j.score_components;
@@ -933,7 +1607,7 @@
         ? `
           <div class="flex items-center justify-between mt-6 mb-2">
             <h3 class="text-sm font-semibold text-gray-700">Photos finales (slider avant / après)</h3>
-            <a href="/api/download-zip/${d.slug}" class="px-3 py-1.5 bg-gradient-to-br from-orange-500 to-amber-500 text-white text-xs font-medium rounded-md hover:from-orange-600">
+            <a href="/api/download-zip/${d.slug}" class="btn-dayuse-primary inline-flex items-center gap-1.5" style="padding: 8px 18px; font-size: 12px;">
               ⬇ Télécharger le pack ZIP
             </a>
           </div>

@@ -64,7 +64,13 @@ PROMPT_WARM_BOOST = (
 )
 
 # === Suppression clutter (parasites : objets, mais aussi équipements techniques visibles) ===
-PROMPT_REMOVE_CLUTTER = """Remove non-aspirational clutter and technical eyesores from this image while keeping the scene EXACTLY identical otherwise.
+PROMPT_REMOVE_CLUTTER = """🛑 ADDITION-FREE RULE (#1, MOST IMPORTANT) :
+This task is REMOVAL ONLY. You are NEVER allowed to ADD anything to the image — no people, no furniture, no plants, no birds, no clouds, no construction equipment (cranes, scaffolding, trucks, vehicles), no signs, no text, no shadows, no decoration. NOTHING NEW.
+You may ONLY remove existing visible clutter elements and replace the area with what was naturally behind/under them (sky, wall, floor, fabric).
+
+If you find yourself wanting to "improve" the scene by adding anything → STOP. The improvement is exactly what we're avoiding. Just remove and reconstruct what was there.
+
+Remove non-aspirational clutter and technical eyesores from this image while keeping the scene EXACTLY identical otherwise.
 
 REMOVE (if visible) — anything that breaks a premium editorial feel:
 
@@ -75,13 +81,19 @@ Loose objects:
 - Unsightly signage, posters, "out of order" notices, plastic A-boards, price tags
 - Construction debris, hazard barriers, tape, hose, fire-extinguisher boxes on a wall
 
-Technical / structural eyesores (Q3 Martin: accept the small risk of bavure):
+Technical / structural eyesores (accept the small risk of bavure):
 - Visible surveillance cameras / CCTV (mounted on poles, walls, ceilings)
 - Fire-escape staircases visible on neighbouring buildings, fire-escape doors
 - Antennas, satellite dishes, telecom poles
 - Outdoor air-conditioner units, AC compressors, vents, ventilation grilles, gutter pipes, downspouts (only the obvious eyesore ones — keep architectural details)
 - Ugly handrails painted in non-brand colors (plain galvanized steel, etc.) — replace with discreet matching railing if removable risk too high
 - Drainage covers, manholes when in plain sight in a key area
+
+Third-party brand logos / sponsorship markings (these break editorial neutrality):
+- Brand logos visible on parasols, umbrellas, cushions, towels, signage, drink coasters
+- Sponsorship branding on cabanas, chair backs, beach toys
+- Restaurant / hotel brand markings other than the venue's own subtle signage
+Replace the logo area with a neutral matching color/texture (the parasol's main color, the cushion fabric pattern, etc.). KEEP the parasol/cushion/towel itself — only remove the logo printed on it.
 
 KEEP EXACTLY IDENTICAL:
 - All hospitality furniture (loungers, daybeds, parasols, tables, chairs, sofas)
@@ -93,7 +105,13 @@ Reconstruct the underlying surface (sand, tile, wood, fabric, wall, sky) seamles
 
 Photorealistic editorial lifestyle photography. The result must look like a professional cleanup crew passed and the technical building services had been hidden — same scene, just polished.
 
-NEGATIVE PROMPT: removed furniture, altered architecture, missing decor, ghost outlines, blurred patches, CGI artifacts, structural deformation, removed served food or cocktails on a dining table, removed people."""
+NEGATIVE PROMPT (HARD avoid):
+- ANY new element added to the scene (cranes, scaffolding, trucks, vehicles, construction, birds, people, plants, decorations, signs, text overlays)
+- "improvements" that go beyond cleaning (do NOT add a sky, do NOT add clouds, do NOT add greenery)
+- removed furniture, altered architecture, missing decor, ghost outlines, blurred patches, CGI artifacts, structural deformation
+- removed served food or cocktails on a dining table, removed people
+- duplicated parts of the scene (a wall section pasted twice, water duplicated)
+- color shifts in regions that were not edited"""
 
 
 # === Suppression humain (cas trop chargé > 4 personnes) ===
@@ -119,34 +137,45 @@ Negative prompt: aggressive cropping, lost elements, distortion, artistic filter
 
 PERSONA_TEMPLATES = {
     "couples": (
-        "EITHER one couple (man + woman, mixed-race, 30s) wearing swimsuits/leisure attire, "
-        "PLACED USING ONE OF THESE OPTIONS (pick the most plausible based on scene): "
-        "(a) on adjacent existing empty loungers if clearly visible in foreground, "
-        "(b) sharing one existing daybed/cabana sofa, "
-        "(c) standing/sitting on the existing pool deck/edge, feet in water, "
-        "(d) IN the water swimming together, partially submerged, water splashes around them. "
-        "Mid-action (chatting, sharing a moment), no eye contact with camera. "
-        "OR if only one good spot exists, ONE single person is better — do not force a couple if it requires inventing furniture."
+        "ONE couple (mixed-race adult man + woman, late 20s/30s, NATURAL chemistry), real travel candid feel (NOT staged photo shoot). "
+        "Outfit : SWIMWEAR for both on pool/beach scenes (bikini/one-piece for her, swim shorts for him), or relaxed leisure attire for indoor/dining. "
+        "\n\n"
+        "PLACEMENT (pick what fits the scene) :\n"
+        "  (1) IN THE WATER swimming together, splashing playfully, one of them helping the other into the water, holding hands while wading\n"
+        "  (2) AT POOL EDGE — both sitting feet-in-water side by side, talking, sharing a drink, one leaning on the other\n"
+        "  (3) HALF-EMERGING — she's in the water, he's at the edge offering her a hand, OR vice versa. Wet skin, real moment\n"
+        "  (4) ON EXISTING ADJACENT LOUNGERS (only if clearly visible empty) — relaxed, one reading, one on phone, occasionally glancing at each other\n"
+        "  (5) ON ONE EXISTING DAYBED/CABANA SOFA together — close, casual\n"
+        "  (6) IF nothing fits naturally → DO NOT ADD. Return image unchanged.\n"
+        "\n"
+        "INTERACTION : real chemistry, mid-conversation, sharing a candid moment. They can look at each other, OR one looking at the other, OR both looking at the water/horizon naturally — but NEVER directly at the camera.\n"
+        "\n"
+        "🔥 NEVER invent furniture. If only one good spot exists, ADD JUST HIM OR HER (one person), NOT a couple."
     ),
     "solos": (
-        "ONE single STUNNING adult woman (late 20s/early 30s, mixed-race or any ethnicity that fits the scene). "
-        "She is the editorial focal point — make her ELEGANT, SUNKISSED, ASPIRATIONAL, the kind of subject that makes someone want to book this exact pool RIGHT NOW. "
-        "Outfit : chic SWIMWEAR (sleek one-piece swimsuit, stylish bikini, monokini) — NEVER a long dress, NEVER a robe, NEVER street clothes. Sunglasses pushed up in her hair or on her face, a summer hat (straw / canvas / bucket) optional, gold or shell minimal jewelry. Wet or dry skin depending on the placement. Toned, healthy figure, natural-looking, real beauty (NOT artificial / Instagram-filter-overprocessed)."
+        "ONE adult woman (late 20s/early 30s, mixed-race or any ethnicity that fits the scene), naturally beautiful (NOT artificial / over-filtered). "
+        "She is LIVING THE MOMENT — actually enjoying her stay, not posing for a photo shoot. Think candid travel photography, NOT model fashion editorial. "
+        "Outfit : chic SWIMWEAR (sleek one-piece swimsuit, stylish bikini, monokini, cut-out swimsuit) — NEVER a long dress, NEVER a robe, NEVER street clothes. Sunglasses pushed up in her hair or on her face, a summer hat (straw / canvas / bucket) optional. Toned, healthy, natural body. Real micro-expressions, slight asymmetry — feels REAL, not posed."
         "\n\n"
-        "PLACEMENT — pick the OPTION that fits THIS exact scene best (priority order — IN water comes FIRST for pool scenes):\n"
-        "  (1) ⭐ IN THE WATER (default for ANY photo where pool/water surface is visible) — pick the most editorial pose for the scene:\n"
-        "       • Floating on her back in 'planking' pose, arms relaxed at her sides or above her head, hair fanned out in the water, sunglasses on, peaceful eyes closed or looking up at the sky\n"
-        "       • Half-emerging from the pool at the edge — wet skin glistening in sunlight, hair slicked back wet, elbows leaning on the pool rim, water dripping down her shoulders, looking off-scene with a soft smile\n"
-        "       • Swimming gently breaststroke or sidestroke, head above water, slight wake behind her, in golden-hour light\n"
-        "       • Standing waist-deep in the pool, water at hip level, arms gliding through water, hair partially wet, looking towards the horizon\n"
-        "       Body MUST be realistically immersed — water displacement around her, wet hair if her head is at water level, splashes acceptable, NEVER floating dry on top of water.\n"
-        "  (2) AT THE POOL EDGE (if water is visible but you really want her dry) — sitting at the edge of the deck with calves submerged in water, leaning back on her hands, looking at the view ; OR standing on the existing deck holding a drink, in a relaxed editorial pose.\n"
-        "  (3) ON AN EXISTING EMPTY LOUNGER (last resort, ONLY if a lounger is CLEARLY VISIBLE EMPTY in the foreground in the original input) — reclining elegantly on it, holding a drink, sunglasses on, looking off-scene.\n"
-        "  (4) IF NONE OF THE ABOVE FITS NATURALLY → DO NOT ADD anyone. Return the image unchanged. A clean pool photo without a subject is FAR better than a photo with a fabricated lounger.\n"
+        "PLACEMENT (pick the option that fits THIS scene best) :\n"
+        "  (1) IN THE WATER swimming gently breaststroke or freestyle, head above water, real swim motion (one arm extended, slight splash) — NOT planking, NOT lying flat\n"
+        "  (2) HALF-EMERGING FROM POOL at the edge — wet skin, hair wet, leaning naturally on the rim with one or both arms, can be looking AT the water, AT her arm/hand, AT a friend off-scene, OR straight ahead with a soft natural expression. NOT a posed gaze\n"
+        "  (3) AT POOL EDGE sitting with feet/legs in water, can be reading on her phone, putting on/removing sunglasses, applying sunscreen, sipping a drink, scrolling on her phone, casually looking down at the water\n"
+        "  (4) STANDING in the pool waist-deep, can be moving / wading / gathering hair behind ears\n"
+        "  (5) ON AN EXISTING EMPTY LOUNGER (only if clearly visible empty) — reading, on her phone, eyes closed sunbathing, drinking. NOT staring at the horizon for the photo\n"
+        "  (6) IF NOTHING FITS NATURALLY → DO NOT ADD. Return image unchanged.\n"
         "\n"
-        "🔥 ABSOLUTE RULE — DO NOT INVENT any furniture, raft, float, daybed, lounger, platform, towel-on-the-ground, that is not 100% clearly visible in the input. If options (1)/(2) feel forced, just don't add the subject. NEVER reduce or shrink the existing pool, decking, or any other element to make space for the subject.\n"
+        "GAZE & EXPRESSION (CRITICAL — vary these naturally) :\n"
+        "  - VARIETY of gaze : looking at her phone / at her drink / at the water / at her hand / closing eyes peacefully / mid-laugh / chatting / reading / lost in thought looking down / NOT every photo with the same 'looking off in the distance' magazine pose\n"
+        "  - NEVER directly at the camera (no selfie pose)\n"
+        "  - Natural micro-expressions : slight smile / focused / serene / casual\n"
+        "  - The viewer should think 'this is a guest enjoying her day', NOT 'this is a model posing for a brochure'\n"
         "\n"
-        "Looking off-scene (profile or 3/4 angle, NEVER directly at camera, NEVER posing for selfie), mid-action candid moment, warm golden-hour light on her skin, premium-accessible editorial Vogue/Condé-Nast Traveler feel — never stock-photo, never catalog."
+        "🚫 DO NOT use a 'planking on the back' pose. DO NOT use a 'staring at the horizon hand-on-hip' pose. DO NOT make her look like she's modeling.\n"
+        "\n"
+        "🔥 ABSOLUTE RULE — DO NOT INVENT any furniture, raft, float, daybed, lounger, ladder, pool steps, handrail, or anything not visible in the input. If no place to put her naturally → do not add anyone.\n"
+        "\n"
+        "Mid-action candid moment, warm natural light, premium-accessible editorial travel-magazine feel — like a real guest snapped by a friend, not a fashion shoot."
     ),
     "families": (
         "a young family of 3-4 (two parents mixed-race + 1-2 children ages 5-10) "
@@ -172,7 +201,7 @@ PERSONA_TEMPLATES = {
 CATEGORY_ACTION_HINT = {
     "cabana":   "lounging on the existing daybed/cabana sofa, sunglasses on, relaxed posture (use existing furniture only)",
     "transat":  "reclining on the existing sun lounger(s), correct contact with the chair, natural weight (use existing furniture only)",
-    "piscine":  "DEFAULT placement = IN the water. Pick the most editorial pose: floating on her back with hair fanned in water (planking), OR half-emerging from the pool at the edge with wet hair slicked back, water dripping (most aspirational), OR swimming breaststroke head above water in golden light, OR standing waist-deep gliding hands through water. Stylish swimwear (bikini/one-piece). Editorial wet-look beauty. Use an existing lounger ONLY if clearly empty in foreground — but IN-water is preferred 95% of the time on pool scenes. NEVER invent a raft, lounger, daybed, towel, or any object.",
+    "piscine":  "DEFAULT placement = MODEL pose IN or AT the water. Priority order: (1) emerging from the pool at the edge (wet hair slicked back, elbows on pool rim, droplets running down — Vogue Vacation editorial), (2) swimming breaststroke head above water in golden light, (3) sitting at pool edge with calves in water in editorial model pose, (4) standing waist-deep gliding hands through water. Stylish swimwear (bikini/one-piece). Editorial wet-look beauty, fashion-editorial composition. Use an existing lounger ONLY if clearly empty in foreground. ⛔ DO NOT use 'planking on the back' pose (lying flat horizontally on water — looks artificial). NEVER invent a raft, lounger, daybed, towel, or any object.",
     "piscine_vue_aerienne": "DO NOT add subjects (aerial view — added humans would be tiny). If the brief insists, return image unchanged.",
     "rooftop":  "standing at the rooftop with view in background holding a drink, OR seated on existing rooftop lounger, OR if there's a rooftop pool: in/at the pool (cf. piscine rules)",
     "f_and_b":  "around the existing dining table, mid-meal moment (passing food, pouring drink), one or two glasses on the table",
@@ -234,6 +263,7 @@ You are ONLY allowed to add human subject(s) — and only the items they persona
 
 You MUST NEVER add ANY of the following — NO EXCEPTIONS:
 - A lounger, daybed, sofa, sun lounger, beach chair, raft, float, pool noodle, bench, table, ottoman, bed
+- A pool ladder, pool steps, pool rail, handrail, ladder of any kind (if there is no ladder visible in the input, DO NOT add one)
 - A pillow, towel placed on the ground/lounger, blanket, rug
 - A plant, vase, decoration, lamp, candle, sign, board
 - Any new equipment, drinkware (a drink in their HAND is OK; a tray, additional glasses on a fictional table are NOT OK)
@@ -285,11 +315,21 @@ PHYSICAL SAFETY & PLAUSIBILITY (CRITICAL — non-negotiable):
 
 🔥 PRIORITY RULE FOR POOL/WATER SCENES — the most common failure mode:
 If the photo features a swimming pool and there is NO clearly visible empty lounger/daybed in the foreground, place the subject IN the water:
-  - Floating on her back (planking pose, arms relaxed, hair fanned in water around her head)
   - Swimming gently breaststroke (head above water, calm wake)
   - Emerging from the pool at the edge (water dripping, hair wet, elbows leaning on rim)
   - OR sitting at the pool edge with legs/calves submerged in water
 This is FAR BETTER than inventing a lounger/raft/daybed. Body must be partially submerged, hair wet if in water, water displacement visible, splashes acceptable.
+
+🌊 WATER DEPTH PHYSICS (ABSOLUTE RULE — most common failure on pool photos) :
+
+When a subject is STANDING IN the pool, the water level on their body must follow real physics :
+  - Pool with NO visible steps/ladder/raised shelf → ALL subjects standing in water must be WAIST-DEEP at minimum (water at hip level — only the torso, shoulders, and head are above water). NEVER show their knees, calves, thighs, or belly above water in this case.
+  - If you want to show a subject lower (knees visible above water), they MUST be either : (a) sitting on the EDGE of the pool with feet/calves submerged, NOT standing in the water, OR (b) on a clearly visible existing pool step/shelf.
+  - Pool with visible shallow shelf / Baja shelf / pool steps → subjects on the shelf can have water at knee or thigh level, but the shelf itself must be visible in the input.
+  - Subjects sitting in water (e.g. on a step) : same rule — water level matches their actual sitting position. No floating "knees-out-of-water" bodies.
+  - Multiple subjects in same pool → consistent water level for all of them (not one waist-deep and another knee-deep without geometric reason).
+
+If you cannot place subjects respecting these depth rules → put them at the edge (sitting/standing on dry deck), or DO NOT add them. Wrong-water-level subjects look immediately fake and ruin the entire photo.
 
 - Subjects MUST be placed on plausible, safe supports: seated on chairs / loungers / sofas / daybeds **THAT ALREADY EXIST IN THE PHOTO**, OR standing on solid floor/ground/decking, OR realistically immersed IN water (swimming, floating, wading waist-deep, sitting at pool edge).
 - **DO NOT INVENT OR ADD any furniture, daybed, lounger, raft, platform, float, or any object that is not visibly present in the original input image.** If there is no plausible existing seat for a subject AND the scene has water → place them IN the water (priority rule above). Otherwise, place them standing on solid ground, OR DO NOT add the subject at all.
@@ -325,9 +365,11 @@ NEGATIVE PROMPT (HARD avoid):
 - altering, replacing, or "beautifying" any architecture, window, balcony, fire escape, neighbouring building, or skyline visible in background
 - 🚨 SHRINKING / RESIZING / MOVING any existing element (pool, deck, plants, furniture, walls) to "make space" for the subject — the existing scene must remain pixel-identical in size and position
 - adding any new plant, vase, prop, decor, lamp, food/drink, or accessory not requested for the subject(s)
-- inventing, adding, or hallucinating new furniture — ESPECIALLY a new lounger, daybed, beach chair, sofa, raft, float, towel-on-the-ground, ottoman, table — that is not 100% clearly visible in the input
+- inventing, adding, or hallucinating new furniture — ESPECIALLY a new lounger, daybed, beach chair, sofa, raft, float, towel-on-the-ground, ottoman, table, pool ladder, pool steps, handrail, ladder of any kind — that is not 100% clearly visible in the input
 - subject wearing street clothes / long dress / robe / business attire on a pool scene — the subject MUST be in proper SWIMWEAR (bikini / one-piece swimsuit / monokini) on pool scenes
 - subjects standing on top of water as if walking on it, or floating dry without a flotation device
+- subjects standing in pool with knees / thighs / belly visible ABOVE the water (impossible without a step/shelf — water must reach hip level minimum for standing)
+- inconsistent water levels between multiple subjects in the same pool
 - standing on daybeds / sun loungers / sofas / tables / any furniture meant for sitting or lying
 - subjects on the wrong side of railings, barriers, glass panels, balustrades
 - leaning over rooftop edges, climbing structures, unsupported balancing
@@ -349,6 +391,7 @@ def _pick_main_action(
     personas_allowed: list[str] | None = None,
     vibe: str | None = None,
     add_character: bool = False,
+    persona_override: str | None = None,
 ) -> dict:
     """Choisit l'action principale (hors crop) à appliquer à la photo."""
     if not analysis:
@@ -394,7 +437,8 @@ def _pick_main_action(
 
     # 3. Ajout personnage forcé en amont (pipeline calcule l'alternance)
     if add_character and personas_allowed:
-        persona = personas_allowed[0] if personas_allowed else "couples"
+        # persona_override permet à app.py d'alterner solos/couples/small_groups dans le pack
+        persona = persona_override or (personas_allowed[0] if personas_allowed else "couples")
         # Récupère les safe zones décrites par Gemini sur cette photo précise
         safe_zones_block = analysis.get("safe_zones_for_humans") or {}
         safe_zones = safe_zones_block.get("safe_areas") or []
@@ -428,12 +472,14 @@ def _pick_main_action(
         "sceau", "seau", "bucket", "pelle", "spade", "jouet", "toy",
         "ballon", "sandale", "flip-flop", "serviette", "towel",
         "sac", "bag", "extincteur", "barrière", "hose", "tuyau",
-        # Eyesores techniques/structurels (Q3 Martin)
+        # Eyesores techniques/structurels
         "caméra", "camera", "surveillance", "cctv",
         "escalier de secours", "fire escape", "issue de secours",
         "antenne", "antenna", "parabole", "satellite",
         "climatiseur", "ac unit", "air conditioner", "ventilation",
         "vmc", "extracteur", "grille", "gaine",
+        # Logos / marques tierces
+        "logo", "logos", "branding", "marque", "brand", "label", "sponsor",
     )
     has_clutter_in_issues = any(k in issues_str for k in clutter_keywords_in_issues)
     if clutter_list or has_clutter_in_issues:
@@ -526,7 +572,7 @@ def _maybe_crop_step(analysis: dict | None) -> dict | None:
 
 
 def _has_clutter(analysis: dict | None) -> bool:
-    """Vrai si Gemini a identifié du clutter (objets ou eyesores techniques) à retirer."""
+    """Vrai si Gemini a identifié du clutter (objets, eyesores techniques, ou logos tiers)."""
     if not analysis:
         return False
     clutter_list = analysis.get("clutter_to_remove") or []
@@ -539,12 +585,14 @@ def _has_clutter(analysis: dict | None) -> bool:
         "trash", "wire", "poubelle", "plastic", "fil", "poteau",
         "sceau", "seau", "bucket", "pelle", "jouet", "toy",
         "ballon", "sandale", "serviette", "towel", "sac", "bag",
-        # Eyesores techniques (Q3 Martin)
+        # Eyesores techniques
         "caméra", "camera", "surveillance", "cctv",
         "escalier de secours", "fire escape", "issue de secours",
         "antenne", "antenna", "parabole",
         "climatiseur", "ac unit", "air conditioner", "ventilation",
         "vmc", "extracteur", "grille", "gaine",
+        # Logos / marques tierces
+        "logo", "logos", "branding", "marque", "brand", "label", "sponsor",
     )
     return any(k in issues_str for k in keywords)
 
@@ -555,6 +603,7 @@ def pick_strategy(
     personas_allowed: list[str] | None = None,
     vibe: str | None = None,
     add_character: bool = False,
+    persona_override: str | None = None,
 ) -> dict:
     """Construit la séquence d'actions à appliquer à une photo (chaînage possible, max 2 IA).
 
@@ -574,27 +623,64 @@ def pick_strategy(
     - Sinon : step principale unique
     """
     crop_step = _maybe_crop_step(analysis)
-    main_step = _pick_main_action(analysis, category, personas_allowed, vibe, add_character)
+    main_step = _pick_main_action(analysis, category, personas_allowed, vibe, add_character, persona_override)
+
+    # Détection : photo nuit/sombre qui doit ÉGALEMENT recevoir un personnage IA
+    # (alternance forcée → mais _pick_main_action a retourné ai_lighting et ignoré add_character)
+    factual = (analysis or {}).get("factual") or {}
+    hints = (analysis or {}).get("technical_hints") or {}
+    is_night_or_dark = (
+        (factual.get("time_of_day") or "").lower() in ("nuit", "aube_crepuscule")
+        or (hints.get("ambiance") or "").lower().startswith("sombre")
+    )
+    needs_lighting_then_character = (
+        add_character
+        and personas_allowed
+        and main_step["action"] == "ai_lighting"
+        and is_night_or_dark
+    )
 
     steps: list[dict] = []
     if crop_step:
         steps.append(crop_step)
 
-    # Cas spécial : ajout perso ET clutter détecté → on chaîne clutter avant add_character
-    # (le PROMPT_REMOVE_CLUTTER ne touche pas la composition donc l'output sert d'input propre)
-    if main_step["action"] == "ai_add_character" and _has_clutter(analysis):
-        clutter_list = (analysis or {}).get("clutter_to_remove") or []
-        clutter_desc = ", ".join(clutter_list[:3]) if clutter_list else "objets parasites détectés"
+    if needs_lighting_then_character:
+        # Chaînage : ai_lighting (nuit→jour) puis ai_add_character (sur la version jour)
+        cat = (factual.get("category") or "").lower()
+        persona = persona_override or (personas_allowed[0] if personas_allowed else "couples")
+        safe_zones_block = (analysis or {}).get("safe_zones_for_humans") or {}
+        safe_zones = safe_zones_block.get("safe_areas") or []
+        unsafe_zones = safe_zones_block.get("unsafe_areas") or []
+        max_h_raw = safe_zones_block.get("max_recommended")
+        try:
+            max_h = int(max_h_raw) if max_h_raw is not None else None
+        except (ValueError, TypeError):
+            max_h = None
         steps.append({
-            "action": "ai_remove_clutter",
-            "prompt": PROMPT_REMOVE_CLUTTER,
-            "reason": f"pré-nettoyage clutter avant ajout perso : {clutter_desc}",
+            "action": "ai_lighting",
+            "prompt": PROMPT_ENSOLEILLEMENT,
+            "reason": "transformation nuit→jour avant ajout perso (étape 1/2)",
         })
+        steps.append({
+            "action": "ai_add_character",
+            "prompt": build_persona_prompt(persona, cat, vibe, safe_zones=safe_zones,
+                                           unsafe_zones=unsafe_zones, max_humans=max_h),
+            "reason": f"ajout personnage IA ({persona}) sur scène ensoleillée (étape 2/2)",
+        })
+    else:
+        # Cas spécial : ajout perso ET clutter détecté → on chaîne clutter avant add_character
+        if main_step["action"] == "ai_add_character" and _has_clutter(analysis):
+            clutter_list = (analysis or {}).get("clutter_to_remove") or []
+            clutter_desc = ", ".join(clutter_list[:3]) if clutter_list else "objets parasites détectés"
+            steps.append({
+                "action": "ai_remove_clutter",
+                "prompt": PROMPT_REMOVE_CLUTTER,
+                "reason": f"pré-nettoyage clutter avant ajout perso : {clutter_desc}",
+            })
 
-    # Si on a déjà cropé ET que l'action principale est juste warm_boost (rien d'urgent),
-    # on saute le warm — le crop est déjà une amélioration suffisante.
-    if not (crop_step and main_step["action"] == "local_warm_boost"):
-        steps.append(main_step)
+        # Si on a déjà cropé ET que l'action principale est juste warm_boost (rien d'urgent), on saute le warm
+        if not (crop_step and main_step["action"] == "local_warm_boost"):
+            steps.append(main_step)
 
     # Sécurité : si la liste est vide (cas dégénéré), au moins warm_boost
     if not steps:
@@ -744,7 +830,11 @@ def _get_genai_client():
 
 def enhance_ai(input_path: Path, output_path: Path, prompt: str,
                model: str = NANO_BANANA_MODEL) -> dict:
-    """Retouche via Nano Banana 2. Préserve la composition."""
+    """Retouche via Nano Banana 2. Préserve la composition.
+
+    Si Nano Banana retourne du texte au lieu d'une image (cas connu Gemini Image preview),
+    on retry 1 fois avec un préfixe forçant la génération d'image. Si encore raté → exception.
+    """
     t0 = time.time()
     client = _get_genai_client()
 
@@ -757,28 +847,49 @@ def enhance_ai(input_path: Path, output_path: Path, prompt: str,
         suffix.lstrip("."), "image/jpeg"
     )
 
-    response = client.models.generate_content(
-        model=model,
-        contents=[
-            prompt,
-            types.Part.from_bytes(data=image_bytes, mime_type=mime),
-        ],
-    )
-
-    # Extraction de l'image générée depuis la réponse
-    image_data = None
-    text_response = None
-    for part in response.candidates[0].content.parts:
-        if hasattr(part, "inline_data") and part.inline_data and part.inline_data.data:
-            image_data = part.inline_data.data
-            break
-        if hasattr(part, "text") and part.text:
-            text_response = part.text
-
-    if not image_data:
-        raise RuntimeError(
-            f"Nano Banana n'a pas retourné d'image. Texte reçu : {text_response[:200] if text_response else 'aucun'}"
+    def _call_with_prompt(p):
+        return client.models.generate_content(
+            model=model,
+            contents=[p, types.Part.from_bytes(data=image_bytes, mime_type=mime)],
         )
+
+    def _extract_image(resp):
+        img_data = None
+        txt = None
+        for part in resp.candidates[0].content.parts:
+            if hasattr(part, "inline_data") and part.inline_data and part.inline_data.data:
+                img_data = part.inline_data.data
+                break
+            if hasattr(part, "text") and part.text:
+                txt = part.text
+        return img_data, txt
+
+    # 1ère tentative
+    response = _call_with_prompt(prompt)
+    image_data, text_response = _extract_image(response)
+
+    # Retry si Nano Banana a renvoyé du texte au lieu d'une image (~5-10% des cas, modèle preview)
+    if not image_data:
+        forced_prompt = (
+            "🚨 STRICT IMAGE GENERATION REQUIRED — DO NOT respond with text or descriptions. "
+            "Apply the following editing instruction and RETURN THE EDITED IMAGE as your only output. "
+            "Any text response will be considered a failure.\n\n"
+            f"{prompt}"
+        )
+        try:
+            response2 = _call_with_prompt(forced_prompt)
+            image_data, text_response2 = _extract_image(response2)
+            if not image_data:
+                # Toujours raté → exception explicite avec texte des 2 tentatives pour debug
+                raise RuntimeError(
+                    f"Nano Banana n'a pas retourné d'image (2 tentatives). "
+                    f"Texte 1 : {(text_response or 'aucun')[:120]} | "
+                    f"Texte 2 : {(text_response2 or 'aucun')[:120]}"
+                )
+        except RuntimeError:
+            raise
+        except Exception as e:
+            raise RuntimeError(f"Nano Banana retry failed: {e}")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "wb") as f:
@@ -960,12 +1071,18 @@ def enhance_one(input_path: Path, strategy: dict, output_dir: Path) -> dict:
         retry_attempted = False
         fallback_to_original = False
         if had_ai_step:
-            # Récupère l'action principale du chaînage pour adapter la validation
+            # Récupère TOUTES les actions IA du chaînage pour unionner les whitelists du validateur.
+            # Cas critique : chaînage ai_lighting → ai_add_character → le validateur doit accepter
+            # à la fois les violations légitimes de ai_lighting (scene_regenerated, architecture_changed)
+            # ET celles de ai_add_character. Sinon faux positif → retry → fallback original.
             ai_steps = [s for s in steps if s["action"].startswith("ai_")]
-            primary_ai_action = ai_steps[-1]["action"] if ai_steps else None
+            ai_actions_chain = [s["action"] for s in ai_steps]
+            primary_ai_action = ai_actions_chain[-1] if ai_actions_chain else None
             try:
                 ai_validation = ai_validator.validate_ai_output(
-                    input_path, output_path, action_context=primary_ai_action,
+                    input_path, output_path,
+                    action_context=primary_ai_action,
+                    actions_chain=ai_actions_chain,
                 )
                 total_cost_usd += ai_validation.get("cost_usd", 0)
                 total_duration_ms += ai_validation.get("duration_ms", 0)
@@ -988,7 +1105,9 @@ def enhance_one(input_path: Path, strategy: dict, output_dir: Path) -> dict:
                     methods.append(f"retry_after_{','.join(actionable_violations[:2])}")
                     # Re-validation
                     ai_validation2 = ai_validator.validate_ai_output(
-                        input_path, output_path, action_context=primary_ai_action,
+                        input_path, output_path,
+                        action_context=primary_ai_action,
+                        actions_chain=ai_actions_chain,
                     )
                     total_cost_usd += ai_validation2.get("cost_usd", 0)
                     total_duration_ms += ai_validation2.get("duration_ms", 0)

@@ -77,40 +77,54 @@ def _is_disguised_closeup(entry: dict) -> bool:
     """Heuristique Python identique à coverage._is_lifestyle_disguised_closeup,
     dupliquée ici pour éviter la dépendance circulaire ordering ↔ coverage.
 
-    Détecte les closeups bikini/torse/underwater même si Gemini prétend shot_type=medium.
+    Détecte 2 patterns :
+      A. Closeup bikini/torse/portrait (Gemini dit shot=medium à tort)
+      B. Vue aérienne plein cadre sur un nageur (drone shot lifestyle)
     """
     a = entry.get("analysis") or {}
     factual = a.get("factual") or {}
     subjects = " ".join(s.lower() for s in (factual.get("subjects") or []))
     human_count = factual.get("human_count") or 0
     presence = (factual.get("human_presence_type") or "").lower()
+    shot_type = ((a.get("shot_type") or {}).get("type") or "").lower()
+    dominance = (a.get("amenity_dominance") or {}).get("primary_amenity_visible_pct") or 0
+    if not isinstance(dominance, (int, float)):
+        dominance = 0
 
     if human_count == 0 or presence in ("none", "partial"):
         return False
 
+    AMENITY_CONTEXT = ("vue d'ensemble", "vue large", "vue panoramique",
+                       "skyline", "rooftop", "horizon", "vue mer",
+                       "loungers", "transats", "cabanas", "deck", "pool deck")
+    has_context = any(k in subjects for k in AMENITY_CONTEXT)
+
+    # Pattern A : body focus
     BODY_FOCUS = ("maillot de bain", "maillot", "bikini", "swimsuit",
                   "torse", "body", "abdos", "underwater", "sous l'eau",
-                  "sous-marin", "submerg", "portrait", "selfie")
-    if not any(k in subjects for k in BODY_FOCUS):
-        return False
+                  "sous-marin", "submerg", "portrait", "selfie",
+                  "nageur", "nageuse", "swimmer")
+    if any(k in subjects for k in BODY_FOCUS) and not has_context and human_count <= 2:
+        return True
 
-    AMENITY_CONTEXT = ("vue d'ensemble", "vue large", "vue panoramique",
-                        "skyline", "rooftop", "horizon", "vue mer")
-    if any(k in subjects for k in AMENITY_CONTEXT):
-        return False
+    # Pattern B : aerial avec humain en focus
+    if shot_type == "aerial" and human_count <= 2 and dominance < 50 and not has_context:
+        return True
 
-    return human_count <= 2
+    return False
 
 
 def _is_slot1_eligible(entry: dict) -> bool:
-    """Hard requirements pour qu'une photo soit candidate slot 1 (Q1+Q2 Martin).
+    """Hard requirements pour qu'une photo soit candidate slot 1.
 
     Règles :
       - L'amenity doit être le sujet principal (dominance >= 50%)
       - Pas un close-up portrait (Gemini OU heuristique Python)
       - Hero quality score >= 50 (pas de photo banale en couverture)
-    Photos lifestyle close-up sont exclues par cette règle.
-    Si AUCUNE photo ne passe le filtre, on relâche (fallback).
+      - DOIT POUVOIR avoir un humain en slot 1 (humain natif visible OU primary_cat
+        compatible avec ai_add_character). Sinon, on aurait un slot 1 sans humain ce qui
+        viole la règle brand. Cas typique : photo f_and_b primary mappée au bucket pool
+        via secondary — interdit en slot 1 car ai_add_character est interdit sur f_and_b.
     """
     a = entry.get("analysis") or {}
     factual = a.get("factual") or {}
@@ -118,19 +132,33 @@ def _is_slot1_eligible(entry: dict) -> bool:
     shot = ((a.get("shot_type") or {}).get("type") or "").lower()
     hero = (a.get("hero_quality") or {}).get("score") or 0
     human_count = factual.get("human_count") or 0
+    primary_cat = (factual.get("category") or "").lower()
+    presence = (factual.get("human_presence_type") or "").lower()
 
     if not isinstance(dom, (int, float)):
         dom = 0
     if not isinstance(hero, (int, float)):
         hero = 0
 
-    # ━ EXCLUSION ABSOLUE : disguised closeup (heuristique Python, indépendante de Gemini) ━
+    # ━ EXCLUSION ABSOLUE : disguised closeup ━
     if _is_disguised_closeup(entry):
+        return False
+
+    # ━ NEW : Slot 1 DOIT pouvoir avoir un humain (natif ou IA ajouté) ━
+    # Catégories où l'ajout perso IA est autorisé (cf enhance.AI_ADD_OK_CATEGORIES).
+    # Si primary_cat n'est PAS dans cette liste ET la photo n'a PAS d'humain natif visible,
+    # alors la photo ne peut pas finir en slot 1 (qui DOIT avoir un humain).
+    SLOT1_AI_ADDABLE_CATS = {
+        "piscine", "cabana", "transat", "rooftop", "spa",
+        "beach", "exterieur", "interieur_commun", "gym",
+    }
+    has_native_human = (presence in ("full_visible", "fully visible", "complete")) and human_count > 0
+    can_eventually_have_human = (primary_cat in SLOT1_AI_ADDABLE_CATS) or has_native_human
+    if not can_eventually_have_human:
         return False
 
     if dom < 50:
         return False
-    # Close-up portrait sur humain (lifestyle Instagram) = exclu
     if shot == "close_up" and human_count > 0:
         return False
     if hero < 50:
@@ -154,11 +182,15 @@ def _has_human(entry: dict) -> bool:
     return bool(factual.get("human_face_visible")) and (factual.get("human_count") or 0) > 0
 
 
+BONUS_LIFESTYLE_MAX = 2  # max photos lifestyle bonus dans le pack final
+
+
 def order_final_pack(
     selected: list[dict],
     photo_targets: dict[str, list[dict]],
     target_count_min: int = 12,
     target_count_max: int = 18,
+    bonus_lifestyle_entries: list[dict] | None = None,
 ) -> list[dict]:
     """Ordonne les photos sélectionnées selon les règles brand.
 
@@ -167,9 +199,12 @@ def order_final_pack(
         photo_targets    : mapping filename → list[target_category] (multi-tagging)
         target_count_min : min total souhaité
         target_count_max : max total souhaité
+        bonus_lifestyle_entries : photos lifestyle qualifiées (dict avec entry, amenity, score)
+                                  injectées à la FIN du pack, max BONUS_LIFESTYLE_MAX.
 
     Returns:
         Liste ordonnée des entrées (avec un champ ajouté: 'final_order_pos').
+        Les bonus ont aussi 'is_bonus_lifestyle': True et 'bonus_amenity': '<amenity>'.
     """
     if not selected:
         return []
@@ -250,17 +285,33 @@ def order_final_pack(
             -_score(entry.get("analysis") or {}),
         )
 
+    def _can_eventually_have_human(entry):
+        """Vrai si la photo PEUT recevoir un humain en slot 1 (natif ou ajout IA)."""
+        a = entry.get("analysis") or {}
+        f = a.get("factual") or {}
+        primary = (f.get("category") or "").lower()
+        presence = (f.get("human_presence_type") or "").lower()
+        AI_OK = {"piscine", "cabana", "transat", "rooftop", "spa", "beach",
+                 "exterieur", "interieur_commun", "gym"}
+        has_native = (presence in ("full_visible", "fully visible", "complete")) and (f.get("human_count") or 0) > 0
+        return (primary in AI_OK) or has_native
+
     def _pick_slot1_from_tier(tier_amenities: set) -> dict | None:
-        """Sélectionne le meilleur slot 1 candidat dans les amenities de ce tier."""
+        """Sélectionne le meilleur slot 1 candidat dans les amenities de ce tier.
+
+        Filtre strict d'abord (_is_slot1_eligible). Si rien, fallback relâché —
+        mais EXIGE quand même que la photo puisse avoir un humain (sinon slot 1 sans humain).
+        """
         candidates = [(e, am) for (e, am) in all_amenity_candidates if am in tier_amenities]
         eligible = [(e, am) for (e, am) in candidates if _is_slot1_eligible(e)]
         if eligible:
             eligible.sort(key=_slot1_sort_key)
             return eligible[0][0]
-        # Pas d'éligible strict → on relâche les hard requirements pour ce tier
-        if candidates:
-            candidates.sort(key=_slot1_sort_key)
-            return candidates[0][0]
+        # Fallback : on relâche dom/shot/hero MAIS on garde la règle humain possible
+        relaxed = [(e, am) for (e, am) in candidates if _can_eventually_have_human(e)]
+        if relaxed:
+            relaxed.sort(key=_slot1_sort_key)
+            return relaxed[0][0]
         return None
 
     slot1 = _pick_slot1_from_tier(SLOT1_TIER_1)
@@ -317,12 +368,17 @@ def order_final_pack(
         ratio_with = placed_with_human / max(placed_total, 1)
         want_with_human = ratio_with < 0.5
 
+        # NB : l'alternance stricte (jamais 2 photos sans humain à la suite) est gérée
+        # APRÈS ordering, dans app.py via add_character_filenames qui force l'ajout IA.
+        # Donc ici on ne bloque PAS le pack si pas de photo avec humain natif —
+        # on prend les meilleures photos disponibles, l'IA ajoutera des humains aux slots
+        # impairs/forcés.
+
         # Phase 1 : hero amenities (pool/cabana/rooftop/beach/spa)
         chosen = _try_pick(HERO_AMENITY_ORDER, want_with_human, allow_relax_human=False)
-        # Phase 1 bis : relâche la contrainte humain si phase 1 ne trouve pas
         if not chosen:
             chosen = _try_pick(HERO_AMENITY_ORDER, want_with_human, allow_relax_human=True)
-        # Phase 2 : supplemental (bar/food) seulement si plus rien en phase 1
+        # Phase 2 : supplemental (bar/food/gym) seulement si plus rien en phase 1
         if not chosen:
             chosen = _try_pick(SUPPLEMENTAL_AMENITY_ORDER, want_with_human, allow_relax_human=True)
 
@@ -365,6 +421,27 @@ def order_final_pack(
 
         # Plus rien à placer
         break
+
+    # ━━ Injection des photos BONUS lifestyle à la FIN du pack ━━
+    # Max 2 photos lifestyle qualifiées (face_visibility=complete) en queue de pack.
+    # Tri par score desc déjà fait dans coverage. Pas de doublons avec le pack normal.
+    if bonus_lifestyle_entries:
+        already_used_names = {e["input"]["filename"] for e in ordered}
+        bonus_added = 0
+        for b in bonus_lifestyle_entries:
+            if bonus_added >= BONUS_LIFESTYLE_MAX:
+                break
+            entry = b.get("entry")
+            if not entry:
+                continue
+            fname = entry["input"]["filename"]
+            if fname in already_used_names:
+                continue
+            entry["is_bonus_lifestyle"] = True
+            entry["bonus_amenity"] = b.get("amenity", "")
+            ordered.append(entry)
+            already_used_names.add(fname)
+            bonus_added += 1
 
     # Annote la position finale
     for pos, entry in enumerate(ordered, 1):

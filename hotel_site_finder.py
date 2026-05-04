@@ -38,6 +38,23 @@ BLACKLIST_DOMAINS = {
     "yelp.com", "wikipedia.org",
 }
 
+# Domaines de chaînes hôtelières connues protégées par Cloudflare Enterprise.
+# Pour ces domaines, on FAIT CONFIANCE à l'URL Gemini (pas de check 200 — Cloudflare
+# bloquera systématiquement notre Playwright). L'extraction tentera quand même, et si
+# elle échoue on retombe sur Booking/RP via le orchestrateur.
+TRUSTED_CHAIN_DOMAINS = {
+    "hyatt.com",        "marriott.com",      "hilton.com",       "ihg.com",
+    "accor.com",        "accorhotels.com",   "sofitel.com",      "novotel.com",
+    "ibis.com",         "mercure.com",       "pullman.com",      "raffles.com",
+    "fairmont.com",     "swissotel.com",     "mgallery.com",
+    "westin.com",       "sheraton.com",      "wal­dorfastoria.com", "stregis.com",
+    "ritzcarlton.com",  "wynnhotels.com",    "fourseasons.com",  "shangri-la.com",
+    "rosewoodhotels.com","mandarinoriental.com","aman.com",      "soho-house.com",
+    "kimptonhotels.com","cromwell.com",      "intercontinental.com","crowneplaza.com",
+    "holidayinn.com",   "candlewoodsuites.com","staybridge.com", "regenthotels.com",
+    "loewshotels.com",  "omnihotels.com",    "wyndhamhotels.com","choicehotels.com",
+}
+
 PROMPT = """Quel est le site web officiel de l'hôtel suivant ?
 
 Hôtel : {name}

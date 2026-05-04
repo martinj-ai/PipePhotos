@@ -64,13 +64,15 @@ def _ensure_configured():
 def validate_ai_output(input_path: Path, output_path: Path,
                        model_name: str = VALIDATION_MODEL,
                        max_retries: int = 2,
-                       action_context: str | None = None) -> dict:
+                       action_context: str | None = None,
+                       actions_chain: list[str] | None = None) -> dict:
     """Compare l'avant/après et retourne {ok: bool, violations: list, summary: str, ...}.
 
     Args:
-        action_context : si fourni, certaines violations sont **autorisées** :
-          - "ai_lighting" → la transformation nuit→jour est autorisée → on filtre 'scene_regenerated'
-            et 'lighting_break' (changement de lumière voulu)
+        action_context : action principale (legacy, utilisé si actions_chain absent).
+        actions_chain : liste des actions IA appliquées dans l'ordre. Permet d'unionner
+            les whitelists (cas chaînage ai_lighting → ai_add_character : on accepte
+            les violations légitimes de chaque étape).
     """
     _ensure_configured()
     model = genai.GenerativeModel(model_name)
@@ -93,19 +95,27 @@ def validate_ai_output(input_path: Path, output_path: Path,
             cost_usd = (input_tokens * 0.30 + output_tokens * 2.50) / 1_000_000
 
             violations = data.get("violations") or []
-            # Filtrage selon le contexte d'action : certaines "violations" sont en réalité des
-            # transformations légitimes attendues.
+            # Filtrage selon les actions appliquées : chaque action peut whitelist certaines
+            # violations légitimes. Pour les chaînages (ex: ai_lighting → ai_add_character),
+            # on UNIONNE les whitelists des étapes — sinon le chaînage tombe en faux positif.
             ALLOWED_BY_ACTION = {
                 # ai_lighting (nuit→jour) : la transformation modifie INÉVITABLEMENT le décor
                 # perçu (bâtiments illuminés vs ensoleillés, ciel, ombres, ambiance générale).
-                # On accepte ces 3 violations comme effet de bord légitime.
                 "ai_lighting": {"scene_regenerated", "lighting_break", "architecture_changed"},
                 # ai_recompose : recadrage peut paraître "régénéré" pour le validateur
                 "ai_recompose": {"scene_regenerated"},
                 # ai_remove_clutter : effacer des objets modifie nécessairement le décor
                 "ai_remove_clutter": {"architecture_changed"},
+                # ai_add_character : ajout perso peut sembler "lighting_break" si shadows mismatch
+                "ai_add_character": set(),
             }
-            allowed = ALLOWED_BY_ACTION.get(action_context or "", set())
+            # Construit la whitelist en unionnant toutes les actions du chaînage
+            actions_to_consider = set(actions_chain or [])
+            if action_context:
+                actions_to_consider.add(action_context)
+            allowed = set()
+            for act in actions_to_consider:
+                allowed |= ALLOWED_BY_ACTION.get(act, set())
             filtered = [v for v in violations if v not in allowed]
             ok_after_filter = len(filtered) == 0
 

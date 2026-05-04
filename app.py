@@ -598,6 +598,25 @@ def api_run():
                     }
                 photo_targets.setdefault(ph["filename"], []).append(cat)
 
+    # 4.a-ter : Photos BONUS lifestyle (focus humains qualifiés) — selection_meta synthétique
+    # pour qu'elles aient une justification dans l'UI ("bonus <amenity>")
+    for b in (cov.get("bonus_lifestyle") or []):
+        fname = b["filename"]
+        if fname in selection_meta:
+            continue  # déjà placée dans le pack normal, pas besoin de doubler
+        # Le bonus_lifestyle_entries dans cov contient l'entry complet — on prend le score_components live
+        bonus_entry = next((e for e in (cov.get("_bonus_lifestyle_entries") or []) if e["entry"]["input"]["filename"] == fname), None)
+        sc = coverage_mod.compute_score_components(bonus_entry["entry"]) if bonus_entry else None
+        selection_meta[fname] = {
+            "category": f"bonus_{b['amenity']}",
+            "rank": 0,  # 0 = bonus, pas un rang dans bucket normal
+            "score_brand_total": b.get("score"),
+            "score_components": sc,
+            "is_bonus": True,
+            "bonus_amenity": b["amenity"],
+        }
+        photo_targets.setdefault(fname, []).append(f"bonus_{b['amenity']}")
+
     # 4.a-bis : Génération full IA pour amenities manquantes (spa, bar — règle métier stricte)
     generated_photos = []  # liste des photos générées full IA, à injecter dans le pack
     for cat, info in cov["by_category"].items():
@@ -654,11 +673,14 @@ def api_run():
 
     # 4.b Ordering : règles brand (slot 1 = meilleure amenity hors intérieur, alternance gens/sans, round-robin)
     selected_analyses_objs = [by_filename[f] for f in selected_filenames if f in by_filename and by_filename[f].get("analysis")]
+    # Récupère les entries bonus lifestyle (clé interne du coverage_mod.compute_coverage)
+    bonus_entries = cov.get("_bonus_lifestyle_entries") or []
     ordered_pack = ordering.order_final_pack(
         selected_analyses_objs,
         photo_targets,
         target_count_min=12,
         target_count_max=18,
+        bonus_lifestyle_entries=bonus_entries,
     )
     final_order = {entry["input"]["filename"]: idx + 1 for idx, entry in enumerate(ordered_pack)}
 
@@ -676,19 +698,40 @@ def api_run():
     personas_allowed = rp_data.get("personas_allowed") or []
     vibe = rp_data.get("vibe_primary")
 
+    # ━━ Alternance humain STRICTE + rotation des personas ━━
+    # Règle : jamais 2 photos sans humain à la suite.
+    # Si la photo précédente n'aura pas d'humain (ni natif ni ajouté IA), on force l'ajout IA
+    # sur celle-ci (si elle est candidate). Slot 1 a sa règle propre : humain obligatoire.
+    # On alterne aussi les personas (solos / couples / small_groups) pour varier le pack.
     add_character_filenames = set()
+    persona_per_filename = {}  # filename → persona à utiliser
     if personas_allowed:
+        prev_will_have_human = False
+        persona_idx = 0  # rotation parmi personas_allowed
         for idx, entry in enumerate(ordered_pack, 1):
-            has_human = enhance.has_narrative_human(entry["analysis"])
-            is_candidate = enhance.is_add_character_candidate(entry["analysis"])
-            # ━━ Règle slot 1 : photo de couverture DOIT avoir un humain ━━
-            if idx == 1 and not has_human and is_candidate:
-                add_character_filenames.add(entry["input"]["filename"])
+            # Skip bonus lifestyle : elles ont déjà leur humain natif, on ne touche à rien
+            if entry.get("is_bonus_lifestyle"):
+                prev_will_have_human = True  # bonus = humain
                 continue
-            # Règle slots pairs : alternance avec/sans
-            is_even_slot = (idx % 2 == 0)
-            if is_even_slot and not has_human and is_candidate:
-                add_character_filenames.add(entry["input"]["filename"])
+            has_human_native = enhance.has_narrative_human(entry["analysis"])
+            is_candidate = enhance.is_add_character_candidate(entry["analysis"])
+
+            will_add = False
+            if idx == 1 and not has_human_native and is_candidate:
+                # Slot 1 = humain obligatoire (règle brand)
+                will_add = True
+            elif not has_human_native and not prev_will_have_human and is_candidate:
+                # Alternance stricte : si précédente sans humain, on force humain ici
+                will_add = True
+
+            if will_add:
+                fname = entry["input"]["filename"]
+                add_character_filenames.add(fname)
+                # Rotation des personas — alterne solos/couples/etc selon vibe
+                persona_per_filename[fname] = personas_allowed[persona_idx % len(personas_allowed)]
+                persona_idx += 1
+
+            prev_will_have_human = has_human_native or will_add
 
     # === Boucle de retouche : on itère dans l'ORDRE FINAL du pack (slot 1, 2, ...) ===
     ordered_filenames = [e["input"]["filename"] for e in ordered_pack]
@@ -701,6 +744,7 @@ def api_run():
             personas_allowed=personas_allowed,
             vibe=vibe,
             add_character=(filename in add_character_filenames),
+            persona_override=persona_per_filename.get(filename),
         )
         input_path = Path(a["input"]["path_absolute"])
         result = enhance.enhance_one(input_path, strategy, enhanced_dir)
@@ -820,6 +864,25 @@ def api_run():
 
         if r.get("output_path"):
             is_fully_gen = bool((a or {}).get("is_fully_generated"))
+            is_bonus = bool(sel.get("is_bonus")) if sel else False
+            # ━ Construit un récap structuré des transformations appliquées (cases à cocher UI) ━
+            steps_actions = {s.get("action") for s in (r.get("steps") or [])}
+            ai_validation = r.get("ai_validation") or {}
+            transformations = {
+                "smart_crop":       "local_smart_crop" in steps_actions,
+                "ai_recompose":     "ai_recompose" in steps_actions,
+                "lut_brand":        bool(r.get("brand_lut_applied")),
+                "ai_lighting":      "ai_lighting" in steps_actions,
+                "clutter_removed":  "ai_remove_clutter" in steps_actions,
+                "character_added":  "ai_add_character" in steps_actions,
+                "people_removed":   "ai_remove_people" in steps_actions,
+                "warm_boost":       "local_warm_boost" in steps_actions,
+                "fully_generated":  is_fully_gen,
+                "bonus_lifestyle":  is_bonus,
+                "validation_ok":    bool(ai_validation.get("ok")) and not r.get("fallback_to_original"),
+                "retry_attempted":  bool(r.get("retry_attempted")),
+                "fallback_original":bool(r.get("fallback_to_original")),
+            }
             enhanced_summary.append({
                 "filename": filename,
                 "final_order_pos": r.get("final_order_pos"),
@@ -834,8 +897,11 @@ def api_run():
                 "framing_warning": r.get("framing_warning"),
                 "steps": r.get("steps") or [],
                 "ai_validation": r.get("ai_validation"),
+                "transformations": transformations,
                 "justification": justification,
                 "is_fully_generated": is_fully_gen,
+                "is_bonus": is_bonus,
+                "bonus_amenity": sel.get("bonus_amenity") if sel else None,
             })
         else:
             enhanced_summary.append({

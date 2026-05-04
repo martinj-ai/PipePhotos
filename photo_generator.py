@@ -26,12 +26,26 @@ NANO_BANANA_PRICE_USD = 0.067
 
 # Prompts par amenity générique. Tous calibrés "ton brand Dayuse / Kodak Vision3 500T".
 GENERIC_PROMPTS = {
-    "spa": """A serene spa massage room, premium-accessible feel.
-Single empty massage table with crisp white linens and folded towels, soft warm natural light from a window or sheer curtain, lush green plants in the corner, neutral wood tones, minimalist design, calm atmosphere.
-Photorealistic editorial lifestyle photography. Kodak Vision3 500T look: warm highlights, neutral tones, subtle film grain, soft contrast. Sony A7R IV / Canon R5 aesthetic, 35mm, f/4, ISO 100.
-Composition: rule of thirds, table positioned slightly off-center, soft natural light coming from the side. No people. No identifying brand elements. No logos. Premium-accessible Dayuse mood — chaleureuse parenthèse, never sterile.
+    "spa": """A premium hotel spa treatment room — UNAMBIGUOUSLY a spa, NOT a bedroom.
 
-NEGATIVE PROMPT: clinical/hospital look, harsh fluorescent lighting, plastic shine, CGI, over-saturated, generic stock photo feel, watermarks, logos, text in image, identifying brand elements.""",
+REQUIRED VISUAL ELEMENTS (must be clearly identifiable as spa) :
+- A professional MASSAGE TABLE with a face cradle / face hole at one end (NOT a bed). Crisp white linens, folded white towels stacked at the foot.
+- Spa-specific objects on a side table or shelf : rolled white towels, a small bowl with stones / orchid / rose petals, candles (lit), essential oil bottles, a lit incense stick, hot stones in a wooden bowl.
+- Spa ambiance details : soft warm dim spa lighting (NOT bright daylight), wooden Asian-inspired or zen elements, lush green plants, dark wood floor or stone tiles, a small water feature OR a folded yoga mat in the background.
+- Atmosphere : quiet, dim, intimate, NOT a hotel bedroom. NO bed with pillows. NO bedside lamp. NO dressing area.
+
+🚫 FORBIDDEN visual elements (these would make it look like a bedroom — DO NOT include) :
+- A real bed with bed linens / pillows / headboard
+- Bedside table with reading lamp
+- Wardrobe, mirror over a dressing table, closet door
+- Window with city view (spa rooms typically have NO windows or only frosted/closed ones)
+- TV screen, dresser, suitcase
+- Hotel-room-style decor (bedsheets, throw pillows on bed, etc.)
+
+Composition : massage table positioned diagonally or rule-of-thirds, soft warm low-key lighting (golden bias), shallow depth of field. The photo must read as "spa treatment room" within 1 second of looking at it.
+Photorealistic editorial lifestyle photography. Kodak Vision3 500T look : warm highlights, neutral tones, subtle film grain, soft contrast. 35mm, f/4, ISO 100. Premium-accessible Dayuse mood — chaleureuse parenthèse wellness.
+
+NEGATIVE PROMPT: bedroom, hotel bedroom, real bed, pillows on bed, headboard, bedside lamp, window with view, wardrobe, sterile clinical look, harsh fluorescent lighting, hospital, CGI, plastic shine, watermarks, logos, text, brand elements.""",
 
     "bar": """A vibrant outdoor bar scene with one signature cocktail in the foreground.
 A single tall glass with a tropical-style cocktail (orange/yellow tones, ice, mint or fruit garnish, simple glass), placed on a rustic wood or marble bar counter. Soft tropical greenery and warm golden-hour ambient light in the background. No specific bar architecture visible — just bokeh / blurred background suggesting an outdoor pool or rooftop atmosphere.

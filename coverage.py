@@ -110,6 +110,24 @@ def gemini_category_to_target(analysis: dict) -> str | None:
 # Même si elle est "la meilleure" de sa catégorie. Mieux vaut "manque" qu'une photo hors-scope.
 MIN_BRAND_SCORE = 80
 
+# Seuil DUR pour hero_ext / detail : ces catégories ne sont pas le cœur du produit Day Pass.
+# On ne veut pas remplir un slot avec une photo d'immeuble urbain banale boostée juste par
+# le bonus transformable. Si pas de bonne photo, on laisse le bucket vide.
+# La valeur s'évalue sur le PILLAR de base (sans bonus transformable / removable / hero).
+MIN_PILLAR_FOR_NON_AMENITY = 130  # vue urbaine banale ~120 pillar → exclue, vraie facade hotel ~150+
+
+# Mots-clés dans issues qui indiquent que la photo n'est pas pertinente pour la fiche Day Pass
+# (même si elle est techniquement classée hero_ext / detail). Si présents → exclue.
+DISQUALIFYING_ISSUE_KEYWORDS = (
+    "absence d'amenity", "absence d'aménité", "absence damenity",
+    "amenity non mise en valeur", "aménité non mise en valeur",
+    "ne représente pas une aménité",
+    "non pertinent pour dayuse",
+    "non pertinente pour dayuse",
+    "ne correspond pas aux do visuels",
+    "pas une amenity dayuse", "pas d'amenity",
+)
+
 
 def _is_transformable(analysis: dict) -> bool:
     """Photo qui peut bénéficier d'une transformation IA (nuit→jour ensoleillé, sombre→lumineux).
@@ -144,26 +162,25 @@ REMOVABLE_ISSUE_KEYWORDS = (
     "sceau", "seau", "bucket", "pelle", "spade", "jouet", "toy",
     "ballon", "sandale", "flip-flop", "serviette", "towel",
     "sac", "bag", "extincteur", "barrière", "hose", "tuyau",
-    # Éléments structurels effaçables (Q3 — risque accepté)
+    # Éléments structurels effaçables
     "caméra", "camera", "surveillance", "cctv",
     "escalier de secours", "fire escape", "issue de secours",
     "antenne", "antenna", "parabole", "satellite",
     "climatiseur", "ac unit", "air conditioner", "ventilation",
     "vmc", "extracteur", "grille", "gaine",
+    # Logos / marques tierces (effaçables sans risque)
+    "logo", "logos", "branding", "marque", "brand", "label", "sponsor",
 )
 
 
 def _is_lifestyle_disguised_closeup(analysis: dict) -> bool:
-    """Détecte les photos lifestyle close-up que Gemini classifie à tort (Q+ Martin).
+    """Détecte les photos lifestyle close-up / aérien-focus-humain que Gemini classifie à tort.
 
-    Gemini hallucine régulièrement sur les closeups bikini/torse :
-      - shot_type='medium' alors que c'est un close-up
-      - amenity_dominance=60% alors que l'amenity est en arrière-plan
-      - is_slot1_worthy=true sur un torse en bikini
+    Détecte 2 patterns :
+      A. Close-up bikini/torse sans contexte amenity (Gemini dit shot=medium/dominance=60% à tort)
+      B. Vue aérienne plein cadre sur 1 nageur (la "piscine" n'est qu'un fond bleu, pas reconnaissable)
 
-    Heuristique indépendante : on regarde les subjects + human_presence_type.
-    Si on voit un humain proche en bikini/maillot/torse SANS contexte amenity évident,
-    c'est un lifestyle closeup même si Gemini prétend le contraire.
+    Heuristique indépendante via subjects + human_presence_type + shot_type.
     """
     if not analysis:
         return False
@@ -171,33 +188,42 @@ def _is_lifestyle_disguised_closeup(analysis: dict) -> bool:
     subjects = " ".join(s.lower() for s in (factual.get("subjects") or []))
     human_count = factual.get("human_count") or 0
     presence = (factual.get("human_presence_type") or "").lower()
+    shot_type = ((analysis.get("shot_type") or {}).get("type") or "").lower()
+    dominance = (analysis.get("amenity_dominance") or {}).get("primary_amenity_visible_pct") or 0
+    if not isinstance(dominance, (int, float)):
+        dominance = 0
 
-    # Pas d'humain visible → ce n'est pas un closeup lifestyle
+    # Pas d'humain visible → ce n'est pas un lifestyle
     if human_count == 0 or presence in ("none", "partial"):
-        return False
-
-    # Mots-clés indiquant focus humain proche
-    BODY_FOCUS_KEYWORDS = (
-        "maillot de bain", "maillot", "bikini", "swimsuit",
-        "torse", "body", "abdos",
-        "underwater", "sous l'eau", "sous-marin", "submerg",
-        "portrait", "selfie",
-    )
-    has_body_focus = any(k in subjects for k in BODY_FOCUS_KEYWORDS)
-    if not has_body_focus:
         return False
 
     # Sujets "amenity context" qui PAR EXCEPTION sauvent (vue d'ensemble piscine + nageur)
     AMENITY_CONTEXT_KEYWORDS = (
         "vue d'ensemble", "vue large", "vue panoramique", "skyline",
         "rooftop", "horizon", "ville", "vue mer",
+        "loungers", "transats", "cabanas", "deck", "pool deck",
     )
     has_amenity_context = any(k in subjects for k in AMENITY_CONTEXT_KEYWORDS)
-    if has_amenity_context:
-        return False
 
-    # Heuristique forte : 1 seul humain (le sujet) + body focus + pas de contexte large
-    return human_count <= 2
+    # ━ Pattern A : closeup bikini/torse/portrait ━
+    BODY_FOCUS_KEYWORDS = (
+        "maillot de bain", "maillot", "bikini", "swimsuit",
+        "torse", "body", "abdos",
+        "underwater", "sous l'eau", "sous-marin", "submerg",
+        "portrait", "selfie",
+        "nageur", "nageuse", "swimmer",  # vue aérienne sur un nageur seul
+    )
+    has_body_focus = any(k in subjects for k in BODY_FOCUS_KEYWORDS)
+    if has_body_focus and not has_amenity_context and human_count <= 2:
+        return True
+
+    # ━ Pattern B : vue aérienne avec humain plein cadre, amenity quasi absente ━
+    # Ex Yotel : drone shot d'une nageuse, on ne voit ni le bord de la piscine, ni les transats,
+    # juste l'humain et de l'eau bleue. Ces photos n'apportent rien à une fiche hôtel.
+    if shot_type == "aerial" and human_count <= 2 and dominance < 50 and not has_amenity_context:
+        return True
+
+    return False
 
 
 def _all_issues_are_removable(analysis: dict) -> bool:
@@ -339,6 +365,16 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
     # Pour ces catégories, on ne penalise pas le close-up.
     CATEGORIES_WHERE_CLOSEUP_IS_OK = {"food", "bar"}
 
+    # Catégories non-amenity (façade, intérieur banal) : on durcit le seuil
+    # pour éviter qu'une photo d'immeuble urbain à 66/300 + bonus transformable +40
+    # ne remplisse un slot hero_ext sans aucun intérêt.
+    NON_AMENITY_CATEGORIES = {"hero_ext", "detail"}
+
+    # Bonus bucket global : photos lifestyle (close-up humain) qualifiées qui passent les checks
+    # face_visibility=complete + human_count<=2 + scène cohérente. Ces photos servent de bonus
+    # en fin de pack (max 1-2 par hôtel), avec un badge "bonus <amenity>" dans l'UI.
+    bonus_lifestyle: list[dict] = []  # entries qualifiées (chacune annotée avec son amenity d'origine)
+
     rejected_low_score: list[dict] = []
     rescued_transformable: list[dict] = []
     for cat in buckets:
@@ -364,9 +400,60 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
                 )
             )
 
+            # Garde-fou non-amenity : pour hero_ext/detail, on regarde le PILLAR brut
+            # (sans les bonus transformable/removable/hero) et on rejette si trop bas.
+            # Évite qu'une photo d'immeuble banal soit gonflée artificiellement par +40 transformable.
+            if cat in NON_AMENITY_CATEGORIES:
+                pillar = sum(((a.get("emotional") or {}).get("pillar_scores") or {}).get(k, 0)
+                              for k in ("freedom", "wellness", "experience"))
+                if pillar < MIN_PILLAR_FOR_NON_AMENITY:
+                    rejected_low_score.append({
+                        "filename": entry["input"]["filename"],
+                        "category": cat,
+                        "score": score,
+                        "reason": f"pillar brut {pillar} < {MIN_PILLAR_FOR_NON_AMENITY} (non-amenity, pas de rescue par bonus)",
+                    })
+                    continue
+
+                # Bloquage supplémentaire : si Gemini a explicitement noté que la photo n'est PAS
+                # pertinente Dayuse (absence d'amenity, ne correspond pas DO visuels, etc.) → exclue
+                issues_lower = " ".join((a.get("issues") or [])).lower()
+                disqualifying_match = next(
+                    (kw for kw in DISQUALIFYING_ISSUE_KEYWORDS if kw in issues_lower),
+                    None,
+                )
+                if disqualifying_match:
+                    rejected_low_score.append({
+                        "filename": entry["input"]["filename"],
+                        "category": cat,
+                        "score": score,
+                        "reason": f"issue disqualifiante détectée : '{disqualifying_match}'",
+                    })
+                    continue
+
             if is_closeup:
-                # Photos lifestyle close-up : on les garde mais en queue de bucket (jamais top-N)
-                lifestyle_supplemental.append(entry)
+                # Photos lifestyle close-up : on les évalue pour le bonus bucket global.
+                # Acceptées en bonus uniquement si visage complet visible ET ≤2 humains.
+                # Rejetées si décapitées / torse seul / dos / focus body sans visage.
+                face_vis = (a.get("factual") or {}).get("face_visibility", "").lower()
+                human_n = (a.get("factual") or {}).get("human_count") or 0
+
+                if face_vis == "complete" and human_n <= 2:
+                    # Qualifiée → entre dans le bonus global, annotée avec l'amenity
+                    bonus_lifestyle.append({
+                        "entry": entry,
+                        "amenity": cat,
+                        "score": score,
+                    })
+                else:
+                    # Décapitée / torse seul / dos → rejetée définitivement
+                    rejected_low_score.append({
+                        "filename": entry["input"]["filename"],
+                        "category": cat,
+                        "score": score,
+                        "reason": f"lifestyle closeup non qualifié (face_visibility={face_vis or 'absent'}, humans={human_n})",
+                    })
+                # Dans tous les cas, on ne met PAS dans lifestyle_supplemental (rescue par bucket désactivé)
             elif score >= MIN_BRAND_SCORE:
                 ok.append(entry)
             elif _is_transformable(a):
@@ -465,6 +552,17 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
         for e in unmapped
     ]
 
+    # 6) Bonus lifestyle : dédup (une photo peut apparaître dans plusieurs buckets) + tri par score desc
+    seen_bonus = set()
+    bonus_unique = []
+    bonus_lifestyle.sort(key=lambda b: -b["score"])
+    for b in bonus_lifestyle:
+        fname = b["entry"]["input"]["filename"]
+        if fname in seen_bonus:
+            continue
+        seen_bonus.add(fname)
+        bonus_unique.append(b)
+
     return {
         "hotel_name": rp_data.get("name"),
         "vibe": rp_data.get("vibe_primary"),
@@ -474,6 +572,11 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
         "unmapped": unmapped_summary,
         "rejected_low_score": rejected_low_score,
         "rescued_transformable": rescued_transformable,
+        "bonus_lifestyle": [
+            {"filename": b["entry"]["input"]["filename"], "amenity": b["amenity"], "score": b["score"]}
+            for b in bonus_unique
+        ],
+        "_bonus_lifestyle_entries": bonus_unique,  # référence pour ordering (interne, pas exposé)
         "global": {
             "total_kept_estimate": total_kept,
             "total_target_min": sum(c["min"] for c in active_targets.values()),
