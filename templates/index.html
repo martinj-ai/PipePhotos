@@ -1415,12 +1415,29 @@ flowchart TD
         "local_smart_crop": { label: "recadrage Gemini", color: "bg-cyan-700" },
         "local_warm_boost": { label: "LUT brand",       color: "bg-gray-500" },
       };
+      const PERSONA_LABELS = {
+        solos:        "+ solo",
+        couples:      "+ couple (2 pers.)",
+        small_groups: "+ petit groupe (2-3)",
+        groups:       "+ groupe (3-5)",
+        families:     "+ famille (3-4)",
+      };
       const enhancedHTML = (d.enhanced || []).map((e, i) => {
         // Si chaîne d'actions (steps), on affiche tous les badges. Sinon, juste l'action principale.
         const stepActions = (e.steps && e.steps.length > 1) ? e.steps.map(s => s.action) : [e.action];
         const actionBadge = stepActions.map(a => {
-          const cfg = ACTION_BADGES[a] || { label: a, color: "bg-gray-500" };
-          return `<span class="${cfg.color} text-white text-[10px] px-1.5 py-0.5 rounded">${cfg.label}</span>`;
+          let label;
+          let color;
+          // Si c'est ai_add_character ET on a un persona_used, on affiche le persona précis
+          if (a === "ai_add_character" && e.persona_used) {
+            label = PERSONA_LABELS[e.persona_used] || `+ ${e.persona_used}`;
+            color = "bg-purple-600";
+          } else {
+            const cfg = ACTION_BADGES[a] || { label: a, color: "bg-gray-500" };
+            label = cfg.label;
+            color = cfg.color;
+          }
+          return `<span class="${color} text-white text-[10px] px-2 py-0.5 rounded-full font-semibold">${label}</span>`;
         }).join(' <span class="text-gray-400 text-[10px]">+</span> ');
         if (!e.after_url) {
           return `<div class="border border-red-200 bg-red-50 rounded-lg p-3 text-xs">
@@ -1550,10 +1567,28 @@ flowchart TD
                     const symbol = on ? '☑' : '☐';
                     return `<div class="flex items-center gap-1 px-1.5 py-0.5 rounded border ${cls}"><span>${symbol}</span><span class="text-[9px]">${icon}</span><span>${label}</span></div>`;
                   }).join('');
+                // Si pas d'humain ajouté ET pas d'humain natif → expliquer pourquoi
+                let noHumanNote = '';
+                const cat = (j.category || '').toLowerCase();
+                const humanCount = j.human_count || 0;
+                if (!tx.character_added && humanCount === 0 && !tx.bonus_lifestyle && !tx.fully_generated) {
+                  let reason = '';
+                  if (cat === 'f_and_b') {
+                    reason = "📜 Règle métier : pas d'ajout d'humain sur les photos F&B (risque inventer un plat)";
+                  } else if (cat === 'piscine_vue_aerienne') {
+                    reason = "📜 Règle métier : pas d'ajout d'humain sur vue aérienne (figure trop petite)";
+                  } else if (cat === 'chambre' || cat === 'staff') {
+                    reason = "📜 Règle métier : catégorie exclue du Day Pass";
+                  } else {
+                    reason = "🛑 Gemini n'a pas identifié de safe_zone naturelle pour placer un humain (l'IA aurait inventé du décor)";
+                  }
+                  noHumanNote = `<div class="mt-1 text-[10px] text-slate-600 italic px-1">${reason}</div>`;
+                }
                 return `
                   <div class="border border-slate-200 rounded p-2 bg-slate-50">
                     <div class="text-[10px] font-semibold text-slate-700 mb-1 uppercase tracking-wide">Transformations appliquées</div>
                     <div class="grid grid-cols-2 gap-1 text-[10px]">${cells}</div>
+                    ${noHumanNote}
                   </div>
                 `;
               })()}

@@ -698,16 +698,25 @@ def api_run():
     personas_allowed = rp_data.get("personas_allowed") or []
     vibe = rp_data.get("vibe_primary")
 
-    # ━━ Alternance humain STRICTE + rotation des personas ━━
+    # ━━ Alternance humain STRICTE + rotation des personas balancée ━━
     # Règle : jamais 2 photos sans humain à la suite.
-    # Si la photo précédente n'aura pas d'humain (ni natif ni ajouté IA), on force l'ajout IA
-    # sur celle-ci (si elle est candidate). Slot 1 a sa règle propre : humain obligatoire.
-    # On alterne aussi les personas (solos / couples / small_groups) pour varier le pack.
+    # Slot 1 a sa règle propre : humain obligatoire.
+    # Rotation des personas : on alterne pour varier (solos / couples / small_groups / families).
+    # Slot 1 priorise les personas "groupe" (couples / small_groups) plus aspirationnels que solos.
     add_character_filenames = set()
     persona_per_filename = {}  # filename → persona à utiliser
+
+    # Construit l'ordre de rotation : couples/small_groups en premier si dispo, solos en fallback.
+    PERSONA_PRIORITY_FIRST = ["couples", "small_groups", "families", "groups", "solos"]
+    rotation_order = [p for p in PERSONA_PRIORITY_FIRST if p in personas_allowed] if personas_allowed else []
+    # Garde aussi les personas autorisés non priorisés (au cas où on ajoute un persona custom)
+    for p in (personas_allowed or []):
+        if p not in rotation_order:
+            rotation_order.append(p)
+
     if personas_allowed:
         prev_will_have_human = False
-        persona_idx = 0  # rotation parmi personas_allowed
+        persona_idx = 0  # rotation parmi rotation_order
         for idx, entry in enumerate(ordered_pack, 1):
             # Skip bonus lifestyle : elles ont déjà leur humain natif, on ne touche à rien
             if entry.get("is_bonus_lifestyle"):
@@ -727,8 +736,8 @@ def api_run():
             if will_add:
                 fname = entry["input"]["filename"]
                 add_character_filenames.add(fname)
-                # Rotation des personas — alterne solos/couples/etc selon vibe
-                persona_per_filename[fname] = personas_allowed[persona_idx % len(personas_allowed)]
+                # Rotation balancée : couples/small_groups d'abord, puis solos
+                persona_per_filename[fname] = rotation_order[persona_idx % len(rotation_order)]
                 persona_idx += 1
 
             prev_will_have_human = has_human_native or will_add
@@ -902,6 +911,7 @@ def api_run():
                 "is_fully_generated": is_fully_gen,
                 "is_bonus": is_bonus,
                 "bonus_amenity": sel.get("bonus_amenity") if sel else None,
+                "persona_used": r.get("persona_used"),
             })
         else:
             enhanced_summary.append({

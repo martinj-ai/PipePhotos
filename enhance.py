@@ -238,23 +238,42 @@ def build_persona_prompt(persona: str, category: str, vibe: str | None = None,
         "Trendy":          "urban-leisure vibe, lifestyle editorial mood",
     }.get(vibe or "", "warm relaxed daytime moment, premium-accessible feel")
 
-    # Bloc safe zones (analyse spécifique de cette photo par Gemini)
+    # ━━ SAFE ZONES = SOURCE DE VÉRITÉ ABSOLUE pour le placement ━━
+    # Si Gemini a identifié des zones précises, l'IA DOIT les utiliser strictement.
+    # Sinon (zones vides) → on instruit l'IA de NE PAS ajouter d'humain.
+    has_safe_zones = bool(safe_zones)
     safe_zones_block = ""
-    if safe_zones or unsafe_zones:
-        safe_list = "\n".join(f"  - {z}" for z in (safe_zones or []))
+    if has_safe_zones:
+        safe_list = "\n".join(f"  ZONE {i+1}: {z}" for i, z in enumerate(safe_zones))
         unsafe_list = "\n".join(f"  - {z}" for z in (unsafe_zones or []))
-        max_h = max_humans or 3
+        max_h = max_humans or 1
         safe_zones_block = f"""
 
-SCENE-SPECIFIC SAFE ZONES (analyzed by Gemini Vision on THIS exact photo — non-negotiable):
+🎯 ABSOLUTE PLACEMENT RULE — THE SCENE-SPECIFIC SAFE ZONES (analyzed by Gemini Vision on THIS exact photo):
 
-ALLOWED placements (use ONLY these zones for the new subject(s)):
+The subject(s) MUST be placed in ONE of these specific zones (and ONLY these zones). These are the ONLY locations identified as physically/visually possible WITHOUT inventing decor:
 {safe_list or "  - (no specific safe zones identified — apply generic physical rules)"}
+
+{safe_list}
+
+📌 STRICT RULES on these zones :
+- Pick exactly ONE zone (zone 1 has highest priority, then zone 2, etc.)
+- Place the subject EXACTLY where described — same location, same pose. Do NOT slide them somewhere "more aspirational" if it's not in the zones list.
+- Do NOT create a new edge, new step, new ledge, new platform, new lounger to make a different placement work.
+- If you cannot place the subject naturally in ANY of these zones → DO NOT ADD anyone. Return the image unchanged.
 
 FORBIDDEN placements in this scene (do NOT place subjects here under any circumstance):
 {unsafe_list or "  - (none specific)"}
 
 Maximum subjects to add for this scene: {max_h} (less is better).
+"""
+    else:
+        # Aucune safe_zone identifiée par Gemini → on instruit l'IA de NE PAS ajouter
+        safe_zones_block = """
+
+🛑 NO SAFE ZONES IDENTIFIED for this photo — Gemini Vision concluded that there is no natural place to add a human subject without modifying the decor.
+
+ABSOLUTE INSTRUCTION : DO NOT ADD any human subject to this image. Return the image unchanged.
 """
 
     return f"""🛑 RULE #1 — SUBJECT-ONLY ADDITION (THE MOST IMPORTANT RULE OF ALL):
@@ -322,14 +341,18 @@ This is FAR BETTER than inventing a lounger/raft/daybed. Body must be partially 
 
 🌊 WATER DEPTH PHYSICS (ABSOLUTE RULE — most common failure on pool photos) :
 
-When a subject is STANDING IN the pool, the water level on their body must follow real physics :
-  - Pool with NO visible steps/ladder/raised shelf → ALL subjects standing in water must be WAIST-DEEP at minimum (water at hip level — only the torso, shoulders, and head are above water). NEVER show their knees, calves, thighs, or belly above water in this case.
-  - If you want to show a subject lower (knees visible above water), they MUST be either : (a) sitting on the EDGE of the pool with feet/calves submerged, NOT standing in the water, OR (b) on a clearly visible existing pool step/shelf.
-  - Pool with visible shallow shelf / Baja shelf / pool steps → subjects on the shelf can have water at knee or thigh level, but the shelf itself must be visible in the input.
-  - Subjects sitting in water (e.g. on a step) : same rule — water level matches their actual sitting position. No floating "knees-out-of-water" bodies.
-  - Multiple subjects in same pool → consistent water level for all of them (not one waist-deep and another knee-deep without geometric reason).
+When a subject is STANDING UPRIGHT in the pool, the water level on their body must follow real physics :
+  - Pool with NO visible steps/ladder/shelf → standing subjects MUST be **CHEST-DEEP** (water at sternum / upper-chest level — only upper-torso, shoulders, neck, head visible above water). This is the DEFAULT and CORRECT level for adult swimming pools.
+  - 🚫 NEVER show belly button, hips, swimsuit waistband, shorts waistband, or thighs above water for standing subjects. This makes the pool look like a kiddie pool.
+  - WAIST-DEEP (water at hip) is acceptable ONLY for : (a) child-sized subject, (b) subject clearly walking INTO the water (mid-step transition), (c) pool clearly very shallow as visible in original.
+  - To show subjects lower in the water (knees / thighs visible), they MUST be either :
+       (a) Sitting on the EDGE of the pool with feet/calves submerged (NOT standing in the water).
+       (b) On a clearly visible existing pool STEP / Baja shelf / raised platform — and the step itself must be in the input image.
+  - Sitting in water on a step : water level matches the actual sitting depth (typically waist or chest level on the seated subject).
+  - Multiple subjects in same pool → ALL the same water level (not one chest-deep + another knee-deep without geometric reason).
+  - If subject's swimsuit color shows above water at hip level on a 1.4m+ deep pool → it is WRONG. The water should hide everything below chest.
 
-If you cannot place subjects respecting these depth rules → put them at the edge (sitting/standing on dry deck), or DO NOT add them. Wrong-water-level subjects look immediately fake and ruin the entire photo.
+If you cannot place subjects respecting these depth rules → put them at the edge (sitting on the dry deck with calves in water), OR have them swimming horizontally (head + upper back above water), OR DO NOT add them. Wrong water levels are immediately recognizable as fake and ruin the photo.
 
 - Subjects MUST be placed on plausible, safe supports: seated on chairs / loungers / sofas / daybeds **THAT ALREADY EXIST IN THE PHOTO**, OR standing on solid floor/ground/decking, OR realistically immersed IN water (swimming, floating, wading waist-deep, sitting at pool edge).
 - **DO NOT INVENT OR ADD any furniture, daybed, lounger, raft, platform, float, or any object that is not visibly present in the original input image.** If there is no plausible existing seat for a subject AND the scene has water → place them IN the water (priority rule above). Otherwise, place them standing on solid ground, OR DO NOT add the subject at all.
@@ -340,6 +363,13 @@ If you cannot place subjects respecting these depth rules → put them at the ed
 - NEVER in physically dangerous, awkward, or improbable positions (no climbing, no leaning over edges, no unsupported balancing).
 - Respect human-scale physics: feet touch ground or seat, hands rest on plausible surfaces, weight is correctly supported.
 - If the scene has a railing/barrier (rooftop, balcony, pool edge, terrace), keep ALL subjects on the SAME safe side as the existing furniture.
+
+FACE QUALITY (CRITICAL — most common Nano Banana failure mode):
+- If the subject(s) occupy LESS than 25% of the frame height (= small/medium-distance figure), prefer 3/4 angle or PROFILE pose. Frontal small faces tend to come out distorted/blurred ("AI-old-school" look).
+- For ALL subjects regardless of size : faces must be PHOTOREALISTIC with clearly drawn eyes, nose, mouth, and natural skin texture — NOT smudged, NOT eyeless, NOT mannequin-like, NOT plastic.
+- For subjects at medium distance, eyes can be lightly closed (sunbathing, wearing sunglasses, looking down) to avoid eye-rendering issues.
+- Sunglasses are GOOD on small/medium-distance subjects (hides eye detail issues).
+- If you cannot render a clean photorealistic face at the required scale, use a hat brim casting shadow on the face, OR a side-profile with hair partially covering, OR sunglasses — anything that masks the precise face details while keeping the figure recognizable as human.
 
 LIGHTING & REALISM:
 Strong natural daytime sunlight, consistent with the existing scene direction.
@@ -368,7 +398,7 @@ NEGATIVE PROMPT (HARD avoid):
 - inventing, adding, or hallucinating new furniture — ESPECIALLY a new lounger, daybed, beach chair, sofa, raft, float, towel-on-the-ground, ottoman, table, pool ladder, pool steps, handrail, ladder of any kind — that is not 100% clearly visible in the input
 - subject wearing street clothes / long dress / robe / business attire on a pool scene — the subject MUST be in proper SWIMWEAR (bikini / one-piece swimsuit / monokini) on pool scenes
 - subjects standing on top of water as if walking on it, or floating dry without a flotation device
-- subjects standing in pool with knees / thighs / belly visible ABOVE the water (impossible without a step/shelf — water must reach hip level minimum for standing)
+- subjects standing in pool with knees / thighs / hips / belly button / swimsuit waistband / shorts waistband visible ABOVE the water (impossible without a step/shelf — water must reach CHEST level for standing adults)
 - inconsistent water levels between multiple subjects in the same pool
 - standing on daybeds / sun loungers / sofas / tables / any furniture meant for sitting or lying
 - subjects on the wrong side of railings, barriers, glass panels, balustrades
@@ -377,6 +407,7 @@ NEGATIVE PROMPT (HARD avoid):
 - inconsistent scale between subjects (one person twice the size of another at the same distance)
 - more than 3 people total, scattered groups in 3+ disconnected zones
 - doubled limbs, distorted anatomy, extra fingers, mismatched shadows
+- 🚨 BLURRY / SMUDGED / DISTORTED faces, faceless figures, melted faces, mannequin-like skin, eyeless figures, missing nose/mouth, plastic CGI face
 - posed models, looking at camera, fake smiles, stiff postures, crowded scene
 - business attire, drunk/loud party, recognizable faces
 - harsh HDR, over-saturation, CGI look, over-sharpened plastic skin, glowing edges
@@ -448,11 +479,22 @@ def _pick_main_action(
             max_h = int(max_h_raw) if max_h_raw is not None else None
         except (ValueError, TypeError):
             max_h = None
+
+        # ━ NEW : si pas de safe_zone OU max_recommended=0 → on ne tente PAS l'ajout ━
+        # Gemini a conclu qu'il n'y a pas de place naturelle pour un humain. Forcer l'IA
+        # à en mettre un produirait une scène modifiée (rebord inventé, etc.). Skip propre.
+        if not safe_zones or (max_h is not None and max_h == 0):
+            return {
+                "action": "local_warm_boost",
+                "prompt": None,
+                "reason": "ajout perso skip (Gemini : aucune safe_zone identifiée — l'IA inventerait du décor)",
+            }
         return {
             "action": "ai_add_character",
             "prompt": build_persona_prompt(persona, cat, vibe, safe_zones=safe_zones,
                                            unsafe_zones=unsafe_zones, max_humans=max_h),
-            "reason": f"ajout personnage IA ({persona}) sur {cat or 'scène vide'}",
+            "reason": f"ajout personnage IA ({persona}) sur {cat or 'scène vide'} — zone précise Gemini",
+            "persona_used": persona,
         }
 
     # 4. Trop de monde (> 4 personnes) → suppression
@@ -490,14 +532,11 @@ def _pick_main_action(
             "reason": f"nettoyage clutter : {clutter_desc}",
         }
 
-    # 5b. Cadrage off détecté dans les issues mais pas de crop précis recommandé → on tente IA recompose
-    cadrage_keywords = ("cadrage", "horizon penché", "horizon penche", "asymétrique", "asymetrique", "mal centré", "mal centre", "non centré", "non centre", "tilted")
-    if any(k in issues_str for k in cadrage_keywords):
-        return {
-            "action": "ai_recompose",
-            "prompt": PROMPT_RECOMPOSE,
-            "reason": f"issue cadrage détectée : {issues[0] if issues else ''}",
-        }
+    # 5b. Cadrage off détecté → on NE FAIT PAS de ai_recompose (qui invente du décor pour
+    # remplir les bords du recadrage). Si Gemini avait jugé un crop pertinent, il aurait
+    # rempli `recommended_crop` qui est déjà géré en local Pillow par _maybe_crop_step.
+    # Si juste mention "horizon penché" / "asymétrique" sans coordonnées : on accepte la photo
+    # telle quelle (pas de redressement automatique sécurisé sans recadrage IA risqué).
 
     # 6. Routage lumière — on regarde aussi les issues car Gemini est parfois incohérent
     #    (ex: ambiance="lumineux-chaud" mais issue="ambiance sombre")
@@ -700,6 +739,10 @@ def pick_strategy(
     }
     if "crop_box_pct" in primary_step:
         out["crop_box_pct"] = primary_step["crop_box_pct"]
+    # Expose persona si un step ai_add_character a été utilisé
+    persona_step = next((s for s in steps if s.get("persona_used")), None)
+    if persona_step:
+        out["persona_used"] = persona_step["persona_used"]
     return out
 
 
@@ -1173,6 +1216,7 @@ def enhance_one(input_path: Path, strategy: dict, output_dir: Path) -> dict:
             "ai_validation": ai_validation,
             "retry_attempted": retry_attempted,
             "fallback_to_original": fallback_to_original,
+            "persona_used": strategy.get("persona_used"),
         }
     except Exception as e:
         # Cleanup partiel
