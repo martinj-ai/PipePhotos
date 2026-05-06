@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import time
 from pathlib import Path
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
@@ -38,6 +39,7 @@ import photo_journey as photo_journey_mod
 import instagram_finder
 import instagram_scraper
 import booking_amenities_extractor
+import slowmo_higgsfield
 
 ROOT = Path(__file__).parent
 UPLOADS_DIR = ROOT / "data" / "uploads"
@@ -485,6 +487,7 @@ def api_run():
     5. Coverage vs shopping list RP
     6. Renvoie tout pour affichage front
     """
+    pipeline_started_at = time.time()
     payload = request.get_json(silent=True) or {}
     slug = (payload.get("slug") or "").strip()
     if not slug:
@@ -886,6 +889,44 @@ def api_run():
             message=f"Retouche {i}/{len(ordered_filenames)} : {filename} ({strategy['action']})",
         )
 
+    # === Étape 4.5 (optionnelle) : Slow-motion loop ===
+    # Une seule photo finale → cinemagraph mp4 (Higgsfield Kling 2.1 Pro + ping-pong ffmpeg).
+    # Source = la version `enhanced` finale (avec retouches IA + LUT brand appliqués).
+    # Voir docs/SLOWMO_SPEC.md pour la rationale.
+    slowmo_enabled = bool((payload or {}).get("slowmo_enabled", False))
+    slowmo_result = None
+    slowmo_target = None
+    if slowmo_enabled and ordered_pack:
+        slowmo_target = slowmo_higgsfield.pick_slowmo_target(ordered_pack, by_filename)
+        if slowmo_target:
+            slowmo_dir = ROOT / "data" / "output" / slug / "slowmo"
+            slowmo_dir.mkdir(parents=True, exist_ok=True)
+            target_filename = slowmo_target["filename"]
+            # Source = enhanced final (ou original si enhanced absent / fallback)
+            enhanced_path = enhanced_dir / target_filename
+            source_path = enhanced_path if enhanced_path.exists() else Path(by_filename[target_filename]["input"]["path_absolute"])
+            output_mp4 = slowmo_dir / (Path(target_filename).stem + ".mp4")
+            progress.update(
+                f"{slug}_analyze",
+                step="slowmo",
+                current=0,
+                total=1,
+                message=f"Slow-motion loop : {target_filename} ({slowmo_target['motion_subject']})…",
+            )
+            slowmo_result = slowmo_higgsfield.generate_slowmo(
+                source_path,
+                slowmo_target["motion_subject"],
+                output_mp4,
+            )
+            slowmo_result["target"] = slowmo_target
+            progress.update(
+                f"{slug}_analyze",
+                step="slowmo_done",
+                current=1,
+                total=1,
+                message=("Slow-motion OK" if slowmo_result.get("success") else f"Slow-motion KO : {slowmo_result.get('error')}"),
+            )
+
     # === Étape 5 (optionnelle) : Multi-format crop ===
     # Si l'utilisateur a coché des formats dans Step 4 → on génère les variantes
     # croppées par format après les retouches IA.
@@ -896,13 +937,25 @@ def api_run():
     if output_formats and enhanced_dir.exists():
         try:
             import multi_format_cropper
+            n_photos_enhanced = len([p for p in enhanced_dir.glob("*.jpg") if p.is_file()])
+            total_variants = n_photos_enhanced * len(output_formats)
             progress.update(
                 f"{slug}_analyze",
                 step="multi_format",
                 current=0,
-                total=len(output_formats),
-                message=f"Génération multi-format ({len(output_formats)} formats" + (f", outpaint {outpaint_quality}" if outpaint_enabled else "") + ")…",
+                total=total_variants,
+                message=f"Génération multi-format : {total_variants} variantes ({n_photos_enhanced} photos × {len(output_formats)} formats)" + (f", outpaint {outpaint_quality}" if outpaint_enabled else "") + "…",
             )
+
+            def _multiformat_progress(done: int, total: int, msg: str):
+                progress.update(
+                    f"{slug}_analyze",
+                    step="multi_format",
+                    current=done,
+                    total=total,
+                    message=msg,
+                )
+
             multiformat_dir = ROOT / "data" / "output" / slug / "multiformat"
             multiformat_result = multi_format_cropper.run_multi_format(
                 enhanced_dir=enhanced_dir,
@@ -911,13 +964,15 @@ def api_run():
                 analyses_dir=analyses_dir if analyses_dir.exists() else None,
                 outpaint_enabled=outpaint_enabled,
                 outpaint_quality=outpaint_quality,
+                progress_callback=_multiformat_progress,
             )
+            n_ok = multiformat_result['summary']['crop'] + multiformat_result['summary']['resize'] + multiformat_result['summary'].get('outpaint', 0)
             progress.update(
                 f"{slug}_analyze",
                 step="multi_format_done",
-                current=len(output_formats),
-                total=len(output_formats),
-                message=f"Multi-format OK : {multiformat_result['summary']['crop'] + multiformat_result['summary']['resize']} variantes",
+                current=total_variants,
+                total=total_variants,
+                message=f"Multi-format OK : {n_ok}/{total_variants} variantes (crop {multiformat_result['summary']['crop']} + outpaint {multiformat_result['summary'].get('outpaint', 0)} + skip {multiformat_result['summary'].get('skip', 0)})",
             )
         except Exception as e:
             multiformat_result = {"error": f"{type(e).__name__}: {e}"}
@@ -1084,8 +1139,14 @@ def api_run():
     total_enhancement_usd = enhancement_cost_usd
     total_all_usd = total_cost_usd + total_enhancement_usd
 
+    pipeline_completed_at = time.time()
+    pipeline_duration_s = round(pipeline_completed_at - pipeline_started_at, 1)
+
     return jsonify({
         "slug": slug,
+        "pipeline_started_at": pipeline_started_at,
+        "pipeline_completed_at": pipeline_completed_at,
+        "pipeline_duration_s": pipeline_duration_s,
         "hotel": {
             "name": rp_data["name"],
             "city": rp_data["city"],
@@ -1096,6 +1157,7 @@ def api_run():
         "photos": photos_summary,
         "coverage": cov,
         "enhanced": enhanced_summary,
+        "slowmo": _build_slowmo_summary(slowmo_result, slug) if slowmo_result else None,
         "stats": {
             "uploaded": len(photo_paths),
             "analyzed_ok": sum(1 for p in photos_summary if p["trace_ok"]),
@@ -1113,6 +1175,7 @@ def api_run():
             "ai_remove_people": len([e for e in enhanced_summary if e.get("action") == "ai_remove_people"]),
             "ai_recompose": len([e for e in enhanced_summary if e.get("action") == "ai_recompose"]),
             "local_enhanced": len([e for e in enhanced_summary if e.get("action") == "local_warm_boost"]),
+            "slowmo_generated": 1 if (slowmo_result and slowmo_result.get("success")) else 0,
         },
         "cost": {
             "analysis_input_tokens": total_input_tokens,
@@ -1121,6 +1184,7 @@ def api_run():
             "enhancement_usd": round(total_enhancement_usd, 6),
             "enhancement_input_tokens": enhancement_input_tokens,
             "enhancement_output_tokens": enhancement_output_tokens,
+            "slowmo_usd": round((slowmo_result or {}).get("cost_usd", 0) or 0, 6),
             "multiformat_usd": round((multiformat_result or {}).get("total_cost_usd", 0) or 0, 6),
             "multiformat_input_tokens": (multiformat_result or {}).get("total_input_tokens", 0) or 0,
             "multiformat_output_tokens": (multiformat_result or {}).get("total_output_tokens", 0) or 0,
@@ -1130,9 +1194,10 @@ def api_run():
                 total_all_usd
                 + sum(p.get("cost_usd", 0) for p in vlm_dedup_results)
                 + verifier_cost_usd
-                + ((multiformat_result or {}).get("total_cost_usd", 0) or 0),
+                + ((multiformat_result or {}).get("total_cost_usd", 0) or 0)
+                + ((slowmo_result or {}).get("cost_usd", 0) or 0),
                 6),
-            "total_eur": round((total_all_usd + sum(p.get("cost_usd", 0) for p in vlm_dedup_results) + verifier_cost_usd + ((multiformat_result or {}).get("total_cost_usd", 0) or 0)) * 0.92, 6),
+            "total_eur": round((total_all_usd + sum(p.get("cost_usd", 0) for p in vlm_dedup_results) + verifier_cost_usd + ((multiformat_result or {}).get("total_cost_usd", 0) or 0) + ((slowmo_result or {}).get("cost_usd", 0) or 0)) * 0.92, 6),
             "total_input_tokens": total_input_tokens + enhancement_input_tokens + ((multiformat_result or {}).get("total_input_tokens", 0) or 0),
             "total_output_tokens": total_output_tokens + enhancement_output_tokens + ((multiformat_result or {}).get("total_output_tokens", 0) or 0),
         },
@@ -1152,9 +1217,40 @@ def api_run():
             enhanced_results=enhanced_results,
             vlm_dedup_results=vlm_dedup_results,
             verifier_results=verifier_results,
+            slowmo_result=slowmo_result,
         ),
         "workflow_nodes": photo_journey_mod.NODE_DEFINITIONS,
     })
+
+
+def _build_slowmo_summary(slowmo_result: dict, slug: str) -> dict:
+    """Construit le summary slowmo envoyé au front."""
+    target = slowmo_result.get("target") or {}
+    out_path = slowmo_result.get("output_path")
+    video_url = None
+    if slowmo_result.get("success") and out_path:
+        video_url = f"/output/{slug}/slowmo/{Path(out_path).name}"
+    return {
+        "success": bool(slowmo_result.get("success")),
+        "video_url": video_url,
+        "target_filename": target.get("filename"),
+        "target_slot": target.get("slot"),
+        "motion_subject": target.get("motion_subject") or slowmo_result.get("motion_subject"),
+        "motion_strength": target.get("motion_strength"),
+        "fallback_used": target.get("fallback_used", False),
+        "model": slowmo_result.get("model"),
+        "duration_s": slowmo_result.get("duration_s"),
+        "duration_ms": slowmo_result.get("duration_ms"),
+        "cost_usd": slowmo_result.get("cost_usd", 0.0),
+        "prompt": slowmo_result.get("prompt"),
+        "error": slowmo_result.get("error"),
+    }
+
+
+@app.route("/output/<slug>/slowmo/<filename>")
+def serve_slowmo(slug, filename):
+    """Sert le mp4 slow-motion pour preview dans l'UI."""
+    return send_from_directory(ROOT / "data" / "output" / slug / "slowmo", filename)
 
 
 @app.route("/output/<slug>/enhanced/<filename>")

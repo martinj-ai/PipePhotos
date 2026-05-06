@@ -442,6 +442,7 @@ def run_multi_format(
     analyses_dir: Path | None = None,
     outpaint_enabled: bool = False,
     outpaint_quality: str = "flash",
+    progress_callback=None,
 ) -> dict:
     """Pour chaque photo finale + chaque format demandé, produit la variante.
 
@@ -496,8 +497,12 @@ def run_multi_format(
         "total_output_tokens": 0,
     }
 
-    print(f"📐 Multi-format : {len(photos)} photos × {len(formats_to_run)} formats = {len(photos) * len(formats_to_run)} variantes" +
+    total_variants = len(photos) * len(formats_to_run)
+    print(f"📐 Multi-format : {len(photos)} photos × {len(formats_to_run)} formats = {total_variants} variantes" +
           (f" (outpaint {outpaint_quality})" if outpaint_enabled else ""))
+    if progress_callback:
+        progress_callback(0, total_variants, "Initialisation multi-format…")
+    n_done = 0
 
     for photo_path in photos:
         # Charger l'analyse pour récupérer crop_safe_zones
@@ -574,6 +579,13 @@ def run_multi_format(
                     "source": photo_path.name, "format_id": fmt["id"],
                     "error": f"{type(e).__name__}: {e}",
                 })
+
+            n_done += 1
+            if progress_callback:
+                progress_callback(
+                    n_done, total_variants,
+                    f"Variante {n_done}/{total_variants} : {photo_path.name} → {fmt['id']}",
+                )
 
     manifest["completed_at"] = time.time()
     manifest["duration_s"] = round(manifest["completed_at"] - manifest["started_at"], 2)

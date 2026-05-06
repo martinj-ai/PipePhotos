@@ -21,6 +21,7 @@ Liste des nœuds (ordre du pipeline réel) :
  12. validation_postIA     — ok / retry / fallback original
  13. lut_brand             — LUT cohérence brand appliqué
  14. final_pack            — photo dans le pack final
+ 15. slowmo_higgsfield     — 1 photo finale → cinemagraph mp4 loop (Kling 2.1 + ping-pong ffmpeg)
 """
 
 from __future__ import annotations
@@ -53,6 +54,7 @@ def build_photo_journey(
     enhanced_results: list[dict],
     vlm_dedup_results: list[dict] | None = None,
     verifier_results: list[dict] | None = None,
+    slowmo_result: dict | None = None,
 ) -> list[dict]:
     """Consolide les transitions de chaque photo à travers tous les nœuds du pipeline.
 
@@ -348,6 +350,31 @@ def build_photo_journey(
         })
         j["final_status"] = "in_final_pack"
 
+    # ━━ Phase 9 : slowmo_higgsfield (1 photo finale → cinemagraph mp4) ━━
+    if slowmo_result:
+        target = slowmo_result.get("target") or {}
+        target_fname = target.get("filename")
+        if target_fname and target_fname in journey:
+            j = journey[target_fname]
+            if slowmo_result.get("success"):
+                j["events"].append({
+                    "node": "slowmo_higgsfield",
+                    "result": "pass",
+                    "details": {
+                        "motion_subject": target.get("motion_subject"),
+                        "motion_strength": target.get("motion_strength"),
+                        "fallback_used": target.get("fallback_used"),
+                        "model": slowmo_result.get("model"),
+                        "duration_s": slowmo_result.get("duration_s"),
+                    },
+                })
+            else:
+                j["events"].append({
+                    "node": "slowmo_higgsfield",
+                    "result": "warn",
+                    "reason": slowmo_result.get("error") or "génération slowmo échouée",
+                })
+
     return list(journey.values())
 
 
@@ -454,5 +481,15 @@ NODE_DEFINITIONS = [
         "description": "Le pack ZIP de 12-18 photos (cible 15), ordonnées slot 1 → N selon les règles brand. "
                        "Téléchargeable directement, prêt pour publication sur la fiche Day Pass de l'hôtel.",
         "test": "Photo dans le ZIP final livrable ?",
+    },
+    {
+        "id": "slowmo_higgsfield", "label": "Slow-motion loop", "icon": "🎬",
+        "description": "UNE photo finale du pack est convertie en cinemagraph mp4 (loop seamless) via Higgsfield "
+                       "Kling 2.1 Pro (image-to-video, prompt mouvement ambiant), puis post-process ffmpeg ping-pong "
+                       "(forward + reverse) pour un loop mathématiquement parfait. Sélection : photo avec le plus haut "
+                       "`slowmo_potential.motion_strength` (Gemini détecte les sujets animables : eau, voilages, feuillage, "
+                       "flammes, vapeur, fontaine). Fallback : slot 1 si aucune candidate qualifiée. "
+                       "FLF natif (start=end frame) indisponible sur l'API officielle Higgsfield — voir doc.",
+        "test": "Photo choisie comme cible slowmo (plus haut motion_strength du pack final) ?",
     },
 ]
