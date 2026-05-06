@@ -464,6 +464,20 @@ def run_multi_format(
     if not photos:
         raise RuntimeError(f"Aucune photo trouvée dans {enhanced_dir}")
 
+    # ━━ Cleanup pre-run : on repart d'un dossier clean ━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Sans ce wipe, des sous-dossiers/fichiers d'anciens runs (avec d'autres
+    # formats cochés) restent sur disque et sont servis par la route Flask
+    # /output/<slug>/multiformat → l'utilisateur voit "les anciens formats"
+    # alors qu'il n'a pas regénéré (bug rapporté 6/5/26).
+    # Politique : un run = un état clean. Tout est régénéré, rien ne fuit.
+    import shutil
+    if output_dir.exists():
+        for sub in output_dir.iterdir():
+            if sub.is_dir():
+                shutil.rmtree(sub)
+            elif sub.is_file() and sub.name in {"manifest.json"}:
+                # On supprime l'ancien manifest aussi (sera réécrit en fin de run)
+                sub.unlink()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     manifest = {
