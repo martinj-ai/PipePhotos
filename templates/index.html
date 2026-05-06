@@ -387,6 +387,27 @@
         </div>
       </details>
 
+      <!-- Section slow-motion loop (Step 4.5) -->
+      <details id="slowmo-section" class="mb-5 border border-dayuse-border rounded-xl overflow-hidden">
+        <summary class="px-4 py-3 bg-gradient-to-br from-amber-50 to-orange-50 cursor-pointer hover:bg-amber-100/50 transition-colors flex items-center justify-between gap-3">
+          <div>
+            <span class="font-semibold text-sm">🎬 Slow-motion loop <span class="text-xs text-gray-500 font-normal">(optionnel, ~$0.35)</span></span>
+            <span id="slowmo-summary" class="text-xs text-gray-600 ml-2">— désactivé</span>
+          </div>
+          <span class="text-xs text-amber-700 font-semibold">▼</span>
+        </summary>
+        <div class="p-4 bg-white">
+          <p class="text-xs text-gray-500 mb-3">
+            Génère <strong>1 cinemagraph mp4</strong> (loop seamless) sur la photo avec le meilleur potentiel de mouvement ambiant (eau, voilages, feuillage…).
+            Higgsfield Kling 2.1 Pro + post-process ffmpeg ping-pong. Voir l'onglet <strong>Documentation → 🎬 Slow-motion</strong> pour les détails.
+          </p>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" id="slowmo-toggle" class="accent-orange-500" />
+            <span class="text-xs font-semibold">🎬 Générer un slow-motion pour la hero</span>
+          </label>
+        </div>
+      </details>
+
       <button id="btn-run" class="btn-dayuse-primary disabled:opacity-50">
         Lancer le pipeline
       </button>
@@ -471,6 +492,7 @@
         <button class="subtab-btn" data-subtab="models">🧪 Comparatif modèles</button>
         <button class="subtab-btn" data-subtab="laws-audit">🧮 Audit matriciel</button>
         <button class="subtab-btn" data-subtab="mcscla">🪣 Champs MCSCLA</button>
+        <button class="subtab-btn" data-subtab="slowmo">🎬 Slow-motion</button>
       </nav>
 
       <!-- ━━━ Sous-onglet Workflow ━━━ -->
@@ -1390,6 +1412,146 @@ flowchart TD
 
       </div><!-- /subtab-mcscla -->
 
+      <!-- ━━━ Sous-onglet Slow-motion ━━━ -->
+      <div id="subtab-slowmo" class="subtab-panel">
+        <section class="card-dayuse p-6 mb-6">
+          <h2 class="text-2xl font-bold mb-2">🎬 Slow-motion loop (cinemagraph)</h2>
+          <p class="text-sm text-gray-600 mb-4">
+            <strong>Étape 4.5</strong> du pipeline : une photo finale du pack est convertie en mp4 loop seamless via Higgsfield Kling 2.1 Pro + post-process ffmpeg ping-pong. Une seule animation par hôtel (coût marginal ~$0.35).
+          </p>
+          <div class="text-sm text-gray-500">📄 Spec complète : <a href="#" onclick="alert('Voir docs/SLOWMO_SPEC.md dans le repo'); return false;" class="text-orange-600 underline">docs/SLOWMO_SPEC.md</a></div>
+        </section>
+
+        <section class="card-dayuse p-6 mb-6">
+          <h3 class="text-lg font-bold mb-3">🎯 Sélection de la photo cible</h3>
+          <p class="text-sm text-gray-700 mb-3">
+            Gemini ajoute un champ <code class="bg-gray-100 px-1.5 py-0.5 rounded">slowmo_potential</code> à chaque photo, identifiant les sujets de mouvement <strong>ambiant et non-directionnel</strong> (idéal pour ping-pong invisible).
+          </p>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b text-left">
+                  <th class="py-2 pr-4">motion_subject</th>
+                  <th class="py-2 pr-4">Quand</th>
+                  <th class="py-2">Exemple visuel</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y">
+                <tr><td class="py-2 pr-4 font-mono">water</td><td class="py-2 pr-4">surface d'eau dominante (piscine, jacuzzi, bassin)</td><td class="py-2 text-gray-500">ripples, reflets shimmer</td></tr>
+                <tr><td class="py-2 pr-4 font-mono">curtains</td><td class="py-2 pr-4">voilages / rideaux / tissus légers visibles</td><td class="py-2 text-gray-500">fabric drift léger</td></tr>
+                <tr><td class="py-2 pr-4 font-mono">foliage</td><td class="py-2 pr-4">palmiers / végétation extérieure</td><td class="py-2 text-gray-500">leaves swaying</td></tr>
+                <tr><td class="py-2 pr-4 font-mono">fire</td><td class="py-2 pr-4">cheminée / brasero / bougies allumées</td><td class="py-2 text-gray-500">⚠️ flammes = sujet directionnel, ping-pong moyen</td></tr>
+                <tr><td class="py-2 pr-4 font-mono">steam</td><td class="py-2 pr-4">jacuzzi fumant / hammam</td><td class="py-2 text-gray-500">⚠️ également directionnel</td></tr>
+                <tr><td class="py-2 pr-4 font-mono">fountain</td><td class="py-2 pr-4">fontaine / jet d'eau actif</td><td class="py-2 text-gray-500">⚠️ directionnel</td></tr>
+                <tr><td class="py-2 pr-4 font-mono">none</td><td class="py-2 pr-4">aucun sujet animable (intérieur sec, plat servi…)</td><td class="py-2 text-gray-500">photo exclue → fallback slot 1</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="text-sm text-gray-700 mt-4">
+            <strong>Tri</strong> : <code>motion_strength</code> desc, puis slot asc. <strong>Fallback</strong> : slot 1 (hero) avec sujet "ambient" si aucune candidate qualifiée.<br>
+            <strong>Exclusions</strong> : photos avec humains au premier plan (anim de cheveux/vêtements weird), photos de nuit, photos de food close-up sans vapeur.
+          </p>
+        </section>
+
+        <section class="card-dayuse p-6 mb-6">
+          <h3 class="text-lg font-bold mb-3">⚙️ Architecture technique</h3>
+          <pre class="bg-gray-50 border rounded-lg p-4 text-xs overflow-x-auto">
+photo finale enhanced (jpeg)
+    │
+    ▼ higgsfield_client.upload_file → URL CDN
+    │
+    ▼ POST kling-video/v2.1/pro/image-to-video
+        prompt = "subtle ripples, no camera movement, locked-off shot"
+        duration = 5s
+    │
+    ▼ download mp4 (5s, motion ambiant)
+    │
+    ▼ ffmpeg ping-pong : clip + reverse(clip) → 10s loop seamless
+    │
+    ▼ data/output/{slug}/slowmo/{filename}.mp4</pre>
+        </section>
+
+        <section class="card-dayuse p-6 mb-6 border-2 border-yellow-300 bg-yellow-50">
+          <h3 class="text-lg font-bold mb-3">⚠️ Ce qui ne marche pas (et pourquoi)</h3>
+          <p class="text-sm text-gray-800 mb-3">
+            On voulait initialement un <strong>First-Last-Frame natif</strong> (start_image = end_image = même photo) pour générer un mouvement directionnel revenant à l'origine = loop parfait sans post-process. <strong>Indisponible sur l'API officielle Higgsfield</strong>.
+          </p>
+          <table class="w-full text-sm mb-4">
+            <thead>
+              <tr class="border-b text-left">
+                <th class="py-2 pr-4">Modèle officiel</th>
+                <th class="py-2 pr-4">Endpoint</th>
+                <th class="py-2">FLF supporté ?</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y">
+              <tr><td class="py-2 pr-4">Kling 2.1 Pro</td><td class="py-2 pr-4 font-mono text-xs">kling-video/v2.1/pro/image-to-video</td><td class="py-2">❌ non (prompt + image_url + duration uniquement)</td></tr>
+              <tr><td class="py-2 pr-4">DoP standard</td><td class="py-2 pr-4 font-mono text-xs">higgsfield-ai/dop/standard</td><td class="py-2">❌ non</td></tr>
+              <tr><td class="py-2 pr-4">DoP preview</td><td class="py-2 pr-4 font-mono text-xs">higgsfield-ai/dop/preview</td><td class="py-2">❌ non</td></tr>
+              <tr><td class="py-2 pr-4">Seedance v1 Pro</td><td class="py-2 pr-4 font-mono text-xs">bytedance/seedance/v1/pro/image-to-video</td><td class="py-2">❌ non</td></tr>
+            </tbody>
+          </table>
+          <p class="text-sm text-gray-800">
+            Le FLF natif (<code>kling-o3-flf</code>, <code>kling3</code> avec <code>end_image_url</code>) existe uniquement sur le <strong>backend web non-officiel</strong> (cloud.higgsfield.ai) accessible via scraping de cookie Clerk JWT. <strong>Écarté</strong> : cookies rotés ~7 jours, Cloudflare + Datadome bot protection, schema undocumented, probablement contre les ToS.
+          </p>
+        </section>
+
+        <section class="card-dayuse p-6 mb-6">
+          <h3 class="text-lg font-bold mb-3">🔬 Alternatives évaluées</h3>
+          <div class="space-y-3 text-sm">
+            <div class="border-l-4 border-green-500 pl-4">
+              <div class="font-bold">Option A — Ping-pong loop ✅ retenue</div>
+              <div class="text-gray-700">clip 5s + reverse(clip) → 10s loop mathématiquement parfait. Marche sur eau / voilages / feuillage / vapeur. Ne marche pas sur sujets directionnels (flammes, fontaine).</div>
+            </div>
+            <div class="border-l-4 border-gray-300 pl-4">
+              <div class="font-bold">Option B — Crossfade loop</div>
+              <div class="text-gray-700">crossfade 0.5s entre fin et début → 5s loop. Marche sur sujets directionnels mais léger blur visible au point de couture. Implémentable plus tard via flag <code>SLOWMO_LOOP_MODE=crossfade</code>.</div>
+            </div>
+            <div class="border-l-4 border-gray-300 pl-4">
+              <div class="font-bold">Option C — Prompt "return to start"</div>
+              <div class="text-gray-700">demander à Kling de boucler au prompt. Inconsistant : Kling ignore souvent. Abandonnée.</div>
+            </div>
+            <div class="border-l-4 border-gray-300 pl-4">
+              <div class="font-bold">Option D — FLF via backend web Higgsfield</div>
+              <div class="text-gray-700">cloud.higgsfield.ai a <code>kling-o3-flf</code> avec FLF natif, mais auth fragile + ToS. À reconsidérer si Higgsfield ouvre FLF sur l'API officielle.</div>
+            </div>
+            <div class="border-l-4 border-gray-300 pl-4">
+              <div class="font-bold">Option E — Concurrents (Runway Gen-3, Luma Ray2, Pika)</div>
+              <div class="text-gray-700">Luma Ray2 a un mode "loop" natif. Runway Gen-3 supporte first-last-frame. À benchmarker si la qualité Kling 2.1 Pro déçoit.</div>
+            </div>
+            <div class="border-l-4 border-gray-300 pl-4">
+              <div class="font-bold">Option F — Nano Banana frame-par-frame</div>
+              <div class="text-gray-700">Modèle image, pas vidéo. Aucune cohérence temporelle, flicker, dérives d'identité. Abandonnée d'emblée.</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card-dayuse p-6 mb-6">
+          <h3 class="text-lg font-bold mb-3">💸 Coût</h3>
+          <table class="w-full text-sm">
+            <thead><tr class="border-b text-left"><th class="py-2 pr-4">Modèle</th><th class="py-2">Prix indicatif (5s clip)</th></tr></thead>
+            <tbody class="divide-y">
+              <tr><td class="py-2 pr-4 font-mono text-xs">higgsfield-ai/dop/standard</td><td class="py-2">~$0.10</td></tr>
+              <tr><td class="py-2 pr-4 font-mono text-xs">higgsfield-ai/dop/preview</td><td class="py-2">~$0.20</td></tr>
+              <tr><td class="py-2 pr-4 font-mono text-xs">bytedance/seedance/v1/pro/image-to-video</td><td class="py-2">~$0.20</td></tr>
+              <tr class="bg-orange-50"><td class="py-2 pr-4 font-mono text-xs">kling-video/v2.1/pro/image-to-video ✅ default</td><td class="py-2 font-bold">~$0.35</td></tr>
+            </tbody>
+          </table>
+          <p class="text-sm text-gray-600 mt-3">1 slowmo / hôtel → coût marginal ~$0.35 par hôtel. Tracké dans <code>cost.slowmo_usd</code> dans la réponse pipeline.</p>
+        </section>
+
+        <section class="card-dayuse p-6 mb-6">
+          <h3 class="text-lg font-bold mb-3">🗺 Roadmap</h3>
+          <ul class="text-sm text-gray-700 space-y-1.5 list-disc pl-5">
+            <li><strong>V1.1</strong> — Mode crossfade en option (<code>SLOWMO_LOOP_MODE=crossfade</code>) pour sujets directionnels</li>
+            <li><strong>V1.2</strong> — Top 3 candidates générées + UI de sélection manuelle</li>
+            <li><strong>V1.3</strong> — Variantes de format (16:9 desktop / 9:16 story / 1:1 feed) via ffmpeg crop</li>
+            <li><strong>V2</strong> — Bascule FLF natif si Higgsfield l'ouvre sur l'API officielle</li>
+            <li><strong>V2.1</strong> — Évaluation Luma Ray2 / Runway Gen-3 en alternative</li>
+          </ul>
+        </section>
+      </div><!-- /subtab-slowmo -->
+
     </div><!-- /tab-doc -->
 
   </div>
@@ -1592,7 +1754,7 @@ flowchart TD
             return;
           }
 
-          if (!s.done && (s.current > 0 || s.total > 0 || s.step === "starting" || s.step === "analyzing" || s.step === "downloading" || s.step === "scraping_booking" || s.step === "enhancing" || s.step === "dedup" || s.step === "dedup_vlm" || s.step === "amenity_verify" || s.step === "official_finding" || s.step === "official_extracting" || s.step === "booking" || s.step === "rp")) {
+          if (!s.done && (s.current > 0 || s.total > 0 || s.step === "starting" || s.step === "analyzing" || s.step === "downloading" || s.step === "scraping_booking" || s.step === "enhancing" || s.step === "dedup" || s.step === "dedup_vlm" || s.step === "amenity_verify" || s.step === "official_finding" || s.step === "official_extracting" || s.step === "booking" || s.step === "rp" || s.step === "multi_format" || s.step === "multi_format_done")) {
             sawInProgress = true;
           }
           onUpdate(s);
@@ -1924,6 +2086,8 @@ flowchart TD
         const outpaintQualityEl = document.getElementById('outpaint-quality');
         const outpaintEnabled = !!(outpaintToggle && outpaintToggle.checked);
         const outpaintQuality = (outpaintQualityEl && outpaintQualityEl.value) || 'flash';
+        const slowmoToggle = document.getElementById('slowmo-toggle');
+        const slowmoEnabled = !!(slowmoToggle && slowmoToggle.checked);
         const r = await fetch("/api/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1933,6 +2097,7 @@ flowchart TD
             output_formats: checkedFormats,
             outpaint_enabled: outpaintEnabled,
             outpaint_quality: outpaintQuality,
+            slowmo_enabled: slowmoEnabled,
           }),
         });
         const data = await r.json();
@@ -2061,13 +2226,30 @@ flowchart TD
 
       // Stats top + coût
       const cost = d.cost || {};
+      // ⏱ Durée totale du pipeline
+      const formatDuration = (s) => {
+        if (!s || s <= 0) return '—';
+        if (s < 60) return `${s.toFixed(1)}s`;
+        const m = Math.floor(s / 60);
+        const sec = Math.round(s - m * 60);
+        return `${m}m${sec.toString().padStart(2, '0')}`;
+      };
+      const totalDur = d.pipeline_duration_s || 0;
+      const startedAt = d.pipeline_started_at ? new Date(d.pipeline_started_at * 1000) : null;
+      const completedAt = d.pipeline_completed_at ? new Date(d.pipeline_completed_at * 1000) : null;
+      const fmtTime = (dt) => dt ? dt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—';
+
       const statsHTML = `
-        <div class="grid grid-cols-6 gap-2 mb-5">
+        <div class="grid grid-cols-7 gap-2 mb-5">
           <div class="bg-gray-50 rounded-lg p-3"><div class="text-2xl font-bold">${stats.uploaded}</div><div class="text-[11px] text-gray-500">uploadées</div></div>
           <div class="bg-green-50 rounded-lg p-3"><div class="text-2xl font-bold text-green-700">${stats.analyzed_ok}</div><div class="text-[11px] text-gray-500">analysées</div></div>
           <div class="bg-blue-50 rounded-lg p-3"><div class="text-2xl font-bold text-blue-700">${stats.kept_after_dedup}</div><div class="text-[11px] text-gray-500">uniques</div></div>
           <div class="bg-amber-50 rounded-lg p-3"><div class="text-2xl font-bold text-amber-700">${stats.duplicates_dropped || 0}</div><div class="text-[11px] text-gray-500">doublons${stats.vlm_dedup_same_scene_count ? ` (dont ${stats.vlm_dedup_same_scene_count} via VLM)` : ''}</div></div>
           <div class="bg-pink-50 rounded-lg p-3"><div class="text-2xl font-bold text-pink-700">${stats.enhanced || 0}</div><div class="text-[11px] text-gray-500">retouchées<br>+pers ${stats.ai_add_character || 0} · −pers ${stats.ai_remove_people || 0}<br>lum ${stats.ai_lighting || 0} · recadr ${stats.ai_recompose || 0} · loc ${stats.local_enhanced || 0}</div></div>
+          <div class="bg-cyan-50 rounded-lg p-3 cursor-help" title="Durée totale du pipeline (de Lancer le pipeline jusqu'à la réponse)\nDémarré : ${fmtTime(startedAt)}\nTerminé : ${fmtTime(completedAt)}">
+            <div class="text-lg font-bold text-cyan-700">⏱ ${formatDuration(totalDur)}</div>
+            <div class="text-[11px] text-gray-500">durée pipeline<br>${fmtTime(startedAt)} → ${fmtTime(completedAt)}</div>
+          </div>
           <div class="bg-purple-50 rounded-lg p-3 cursor-help" title="Détail tokens et coûts par étape (analyse Gemini Vision + retouche Nano Banana + multi-format outpainting)">
             <div class="text-lg font-bold text-purple-700">$${(cost.total_usd || 0).toFixed(4)}</div>
             <div class="text-[11px] text-gray-500">analyse $${(cost.analysis_usd || 0).toFixed(4)} + retouche $${(cost.enhancement_usd || 0).toFixed(4)}${(cost.multiformat_usd || 0) > 0 ? ` + crop $${(cost.multiformat_usd || 0).toFixed(4)}` : ''}</div>
@@ -2542,6 +2724,35 @@ flowchart TD
               ⚠ Multi-format : ${d.multiformat.error}
             </div>
           ` : '')}
+          ${d.slowmo ? `
+            <div class="mb-4 mt-2 rounded-xl border-2 ${d.slowmo.success ? 'border-orange-300 bg-gradient-to-br from-amber-50 to-orange-50' : 'border-red-300 bg-red-50'} overflow-hidden">
+              <div class="px-4 py-3 flex items-center justify-between flex-wrap gap-3">
+                <div>
+                  <div class="font-semibold text-sm flex items-center gap-2">🎬 Slow-motion loop
+                    ${d.slowmo.success ? '<span class="text-[10px] uppercase tracking-wider text-green-700 bg-green-100 px-2 py-0.5 rounded">OK</span>'
+                                       : '<span class="text-[10px] uppercase tracking-wider text-red-700 bg-red-100 px-2 py-0.5 rounded">ERREUR</span>'}
+                  </div>
+                  <div class="text-xs text-gray-600 mt-1">
+                    ${d.slowmo.target_filename ? `Photo cible : <strong>${d.slowmo.target_filename}</strong> (slot ${d.slowmo.target_slot || '?'})` : ''}
+                    · sujet : <code class="bg-white px-1.5 py-0.5 rounded">${d.slowmo.motion_subject || 'n/a'}</code>
+                    ${d.slowmo.motion_strength ? ` · strength <strong>${d.slowmo.motion_strength}</strong>` : ''}
+                    ${d.slowmo.fallback_used ? ' · <span class="text-amber-700">fallback slot 1</span>' : ''}
+                  </div>
+                  <div class="text-[10px] text-gray-500 mt-0.5">
+                    ${d.slowmo.model || ''} · ${d.slowmo.duration_s || 5}s × ping-pong = ${(d.slowmo.duration_s || 5) * 2}s loop · ${d.slowmo.duration_ms}ms · $${(d.slowmo.cost_usd || 0).toFixed(4)}
+                  </div>
+                </div>
+                ${d.slowmo.success && d.slowmo.video_url ? `
+                  <a href="${d.slowmo.video_url}" download class="btn-dayuse-ghost inline-flex items-center gap-1.5" style="padding: 6px 14px; font-size: 11px;">⬇ mp4</a>
+                ` : ''}
+              </div>
+              ${d.slowmo.success && d.slowmo.video_url ? `
+                <video src="${d.slowmo.video_url}" autoplay loop muted playsinline class="w-full max-h-96 object-contain bg-black"></video>
+              ` : `
+                <div class="px-4 pb-3 text-xs text-red-700">${d.slowmo.error || 'Génération échouée'}</div>
+              `}
+            </div>
+          ` : ''}
           <div class="grid grid-cols-2 gap-3 mb-6">${enhancedHTML}</div>
         `
         : '';
@@ -3095,6 +3306,22 @@ flowchart TD
       const quality = document.getElementById("outpaint-quality");
       if (toggle) toggle.addEventListener("change", updateOutpaintCost);
       if (quality) quality.addEventListener("change", updateOutpaintCost);
+
+      // Slowmo toggle summary
+      const slowmoToggle = document.getElementById("slowmo-toggle");
+      const slowmoSummary = document.getElementById("slowmo-summary");
+      const updateSlowmoSummary = () => {
+        if (!slowmoSummary) return;
+        if (slowmoToggle && slowmoToggle.checked) {
+          slowmoSummary.innerHTML = '— <strong class="text-amber-800">activé</strong> · ~$0.35/hôtel';
+          slowmoSummary.className = "text-xs text-amber-700 ml-2";
+        } else {
+          slowmoSummary.textContent = "— désactivé";
+          slowmoSummary.className = "text-xs text-gray-600 ml-2";
+        }
+      };
+      if (slowmoToggle) slowmoToggle.addEventListener("change", updateSlowmoSummary);
+      updateSlowmoSummary();
     });
 
     // Charge la config formats au boot
