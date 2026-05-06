@@ -1322,6 +1322,38 @@ flowchart TD
       <!-- ━━━ Sous-onglet Champs MCSCLA ━━━ -->
       <div id="subtab-mcscla" class="subtab-panel">
 
+        <!-- 📋 Vue consolidée (format screenshot-friendly, dark theme) -->
+        <section id="mcscla-overview" class="rounded-2xl mb-6 overflow-hidden" style="background:#0E0E14;color:#E5E5EA;font-family:'Manrope',sans-serif;">
+          <div class="px-7 py-6">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-xl">📋</span>
+              <h3 class="text-base font-bold" style="color:#34D399">Schema cible — vue consolidée (<span id="ov-total-headline">—</span> fields total)</h3>
+            </div>
+            <p class="text-xs text-gray-400 mb-6">
+              Tous les champs métier du pipeline photo DayAccess regroupés selon la taxonomie MCSCLA.
+              Format tableau lisible par bucket / drift / source.
+            </p>
+
+            <!-- §1 — Légende MCSCLA 10 buckets -->
+            <div class="mb-6">
+              <h4 class="text-sm font-semibold mb-3" style="color:#FCD34D">§1 — Légende MCSCLA 10 buckets</h4>
+              <div id="ov-buckets-grid" class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3"></div>
+            </div>
+
+            <!-- §2 — Légende Drift taxonomy -->
+            <div class="mb-6">
+              <h4 class="text-sm font-semibold mb-3" style="color:#FCD34D">§2 — Légende Drift taxonomy</h4>
+              <div id="ov-drift-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3"></div>
+            </div>
+
+            <!-- §3 — Total fields par catégorie -->
+            <div>
+              <h4 class="text-sm font-semibold mb-3" style="color:#FCD34D">§3 — Total fields par catégorie</h4>
+              <div id="ov-stats-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3"></div>
+            </div>
+          </div>
+        </section>
+
         <section class="card-dayuse p-6 mb-6">
           <h2 class="text-base font-semibold mb-1">🪣 Taxonomie MCSCLA — champs du pipeline photo</h2>
           <p class="text-sm text-gray-500 mb-3">
@@ -3014,10 +3046,87 @@ flowchart TD
         _mcsclaData = await r.json();
         renderMcsclaBuckets();
         renderDriftLegend();
+        renderMcsclaOverview();
         const total = _mcsclaData.buckets.reduce((s, b) => s + b.fields.length, 0);
         const totalEl = document.getElementById("mcscla-total");
         if (totalEl) totalEl.textContent = total;
       } catch (e) { console.error("[mcscla] load failed", e); }
+    }
+
+    function renderMcsclaOverview() {
+      if (!_mcsclaData) return;
+      const total = _mcsclaData.buckets.reduce((s, b) => s + b.fields.length, 0);
+      const headlineEl = document.getElementById("ov-total-headline");
+      if (headlineEl) headlineEl.textContent = total;
+
+      // §1 — Buckets cards (dark theme)
+      const bucketAccent = {
+        blue: "#60A5FA", purple: "#A78BFA", pink: "#F472B6", emerald: "#34D399",
+        amber: "#FBBF24", indigo: "#818CF8", gray: "#9CA3AF", rose: "#FB7185",
+        orange: "#FB923C", slate: "#94A3B8",
+      };
+      const buckets = _mcsclaData.buckets;
+      const bucketsHTML = buckets.map(b => {
+        const accent = bucketAccent[b.color] || "#9CA3AF";
+        const desc = (b.description || "").length > 110
+          ? (b.description.substring(0, 107) + "…")
+          : b.description;
+        return `
+          <div style="background:#1A1A22;border-left:3px solid ${accent};border-radius:8px;padding:12px 14px;">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+              <span style="font-size:14px;">${b.icon}</span>
+              <span style="font-weight:700;font-size:13px;color:${accent}">${b.label}</span>
+            </div>
+            <div style="font-size:11px;color:#A1A1AA;line-height:1.4;">${desc || ""}</div>
+          </div>`;
+      }).join("");
+      const ovBucketsEl = document.getElementById("ov-buckets-grid");
+      if (ovBucketsEl) ovBucketsEl.innerHTML = bucketsHTML;
+
+      // §2 — Drift taxonomy cards
+      const driftPalette = {
+        red:    { bg:"#1A0F12", border:"#EF4444", text:"#FCA5A5", icon:"🔴" },
+        amber:  { bg:"#1A1410", border:"#F59E0B", text:"#FCD34D", icon:"🟡" },
+        yellow: { bg:"#1A1410", border:"#EAB308", text:"#FDE68A", icon:"🟡" },
+        green:  { bg:"#0F1A14", border:"#10B981", text:"#6EE7B7", icon:"🟢" },
+      };
+      const driftHTML = Object.entries(_mcsclaData.drift_taxonomy).map(([key, drift]) => {
+        const p = driftPalette[drift.color] || driftPalette.green;
+        return `
+          <div style="background:${p.bg};border-left:3px solid ${p.border};border-radius:8px;padding:12px 14px;">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+              <span style="font-size:14px;">${p.icon}</span>
+              <span style="font-weight:800;font-size:12px;letter-spacing:0.04em;color:${p.text}">${key}</span>
+            </div>
+            <div style="font-size:11px;color:#A1A1AA;line-height:1.45;">${drift.description}</div>
+          </div>`;
+      }).join("");
+      const ovDriftEl = document.getElementById("ov-drift-grid");
+      if (ovDriftEl) ovDriftEl.innerHTML = driftHTML;
+
+      // §3 — Stats par catégorie (4 cards : total / buckets actifs / hard caps / phases multi-format)
+      const driftCounts = { HARD_CAP: 0, CONCEPT_CONSISTENT: 0, TOLERATED: 0, FREE: 0 };
+      buckets.forEach(b => (b.fields || []).forEach(f => { if (driftCounts[f.drift] !== undefined) driftCounts[f.drift]++; }));
+      const activeBuckets = buckets.filter(b => (b.fields || []).length > 0).length;
+      const totalBuckets = buckets.length;
+
+      const statCard = (icon, label, value, sub, color) => `
+        <div style="background:#1A1A22;border-left:3px solid ${color};border-radius:8px;padding:14px 16px;">
+          <div style="font-size:11px;color:#A1A1AA;font-weight:600;display:flex;align-items:center;gap:5px;margin-bottom:4px;">
+            <span style="font-size:13px;">${icon}</span><span>${label}</span>
+          </div>
+          <div style="font-size:30px;font-weight:800;color:${color};line-height:1.1;">${value}</div>
+          <div style="font-size:10px;color:#71717A;margin-top:4px;line-height:1.4;">${sub}</div>
+        </div>`;
+
+      const statsHTML = [
+        statCard("🎯", "Total fields", total, `pipeline photo DayAccess (post Phase 1+2 multi-format)`, "#34D399"),
+        statCard("🪣", "Buckets actifs", `${activeBuckets} / ${totalBuckets}`, `bucket Audio vide (N/A photo statique)`, "#A78BFA"),
+        statCard("🔴", "HARD_CAP", driftCounts.HARD_CAP, `champs immuables — drive la sélection et le filtrage`, "#FCA5A5"),
+        statCard("⚖️", "Lois liées", "20", `11 lois métier + 9 filets de sécurité (cf. audit matriciel)`, "#FBBF24"),
+      ].join("");
+      const ovStatsEl = document.getElementById("ov-stats-grid");
+      if (ovStatsEl) ovStatsEl.innerHTML = statsHTML;
     }
 
     function renderDriftLegend() {
