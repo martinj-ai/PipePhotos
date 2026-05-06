@@ -882,6 +882,38 @@ def api_run():
             message=f"Retouche {i}/{len(ordered_filenames)} : {filename} ({strategy['action']})",
         )
 
+    # === Étape 5 (optionnelle) : Multi-format crop ===
+    # Si l'utilisateur a coché des formats dans Step 4 → on génère les variantes
+    # croppées par format après les retouches IA.
+    output_formats = (payload or {}).get("output_formats") or []
+    multiformat_result = None
+    if output_formats and enhanced_dir.exists():
+        try:
+            import multi_format_cropper
+            progress.update(
+                f"{slug}_analyze",
+                step="multi_format",
+                current=0,
+                total=len(output_formats),
+                message=f"Génération multi-format ({len(output_formats)} formats)…",
+            )
+            multiformat_dir = ROOT / "data" / "output" / slug / "multiformat"
+            multiformat_result = multi_format_cropper.run_multi_format(
+                enhanced_dir=enhanced_dir,
+                output_dir=multiformat_dir,
+                format_ids=output_formats,
+                analyses_dir=analyses_dir if analyses_dir.exists() else None,
+            )
+            progress.update(
+                f"{slug}_analyze",
+                step="multi_format_done",
+                current=len(output_formats),
+                total=len(output_formats),
+                message=f"Multi-format OK : {multiformat_result['summary']['crop'] + multiformat_result['summary']['resize']} variantes",
+            )
+        except Exception as e:
+            multiformat_result = {"error": f"{type(e).__name__}: {e}"}
+
     # === Réponse ===
     photos_summary = []
     for a in analyses:
@@ -1086,6 +1118,8 @@ def api_run():
         },
         "vlm_dedup_results": vlm_dedup_results,
         "amenity_verifier_results": verifier_results,
+        # ━━ Multi-format output (Step 5, optionnel) ━━
+        "multiformat": multiformat_result,
         # ━━ Workflow visualization data ━━
         "photo_journey": photo_journey_mod.build_photo_journey(
             slug=slug,
@@ -1142,6 +1176,50 @@ def api_download_zip(slug):
 def serve_upload(slug, filename):
     """Sert les photos uploadées pour preview dans l'UI."""
     return send_from_directory(UPLOADS_DIR / slug, filename)
+
+
+@app.route("/api/output-formats")
+def api_output_formats():
+    """Retourne le catalogue des formats de sortie pour l'UI Step 3."""
+    return send_from_directory(ROOT / "config", "output_formats.json")
+
+
+@app.route("/api/download-multiformat-zip/<slug>")
+def api_download_multiformat_zip(slug):
+    """Pack le dossier multiformat (1 sous-dossier par format) en ZIP."""
+    import zipfile
+    import io as _io
+
+    multiformat_dir = ROOT / "data" / "output" / slug / "multiformat"
+    if not multiformat_dir.exists():
+        return jsonify({"error": "Aucun multi-format généré. Coche au moins un format dans Step 4 et relance la pipeline."}), 404
+
+    # Liste tous les fichiers (jpg dans sous-dossiers + manifest.json à la racine)
+    files = []
+    for sub in multiformat_dir.iterdir():
+        if sub.is_dir():
+            for f in sub.iterdir():
+                if f.is_file() and f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
+                    files.append((f, f"{sub.name}/{f.name}"))
+        elif sub.is_file() and sub.name == "manifest.json":
+            files.append((sub, sub.name))
+
+    if not any(arcname.endswith((".jpg", ".jpeg", ".png", ".webp")) for _, arcname in files):
+        return jsonify({"error": "Aucune variante générée (peut-être que tous les formats ont été skippés)."}), 404
+
+    buf = _io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for fpath, arcname in files:
+            zf.write(fpath, arcname=arcname)
+    buf.seek(0)
+
+    from flask import send_file
+    return send_file(
+        buf,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=f"{slug}_multiformat_pack.zip",
+    )
 
 
 @app.route("/comparison/<slug>/")

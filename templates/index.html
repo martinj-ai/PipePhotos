@@ -330,6 +330,43 @@
     <section id="step-run" class="card-dayuse p-6 mb-6 opacity-50 pointer-events-none">
       <h2 class="text-base font-semibold mb-1">3. Lancer l'analyse</h2>
       <p class="text-sm text-gray-500 mb-4">Pipeline complet : analyse Gemini → couverture → sélection → retouche → ajout IA → rapport.</p>
+
+      <!-- Section formats de sortie (Step 5 multi-format crop) -->
+      <details id="formats-section" class="mb-5 border border-dayuse-border rounded-xl overflow-hidden">
+        <summary class="px-4 py-3 bg-gradient-to-br from-amber-50 to-orange-50 cursor-pointer hover:bg-amber-100/50 transition-colors flex items-center justify-between gap-3">
+          <div>
+            <span class="font-semibold text-sm">📐 Formats de sortie <span class="text-xs text-gray-500 font-normal">(optionnel)</span></span>
+            <span id="formats-summary" class="text-xs text-gray-600 ml-2">— aucun format sélectionné</span>
+          </div>
+          <span class="text-xs text-amber-700 font-semibold">▼</span>
+        </summary>
+        <div class="p-4 bg-white">
+          <p class="text-xs text-gray-500 mb-3">
+            Coche un ou plusieurs formats pour générer en plus du pack standard un <strong>ZIP multi-format</strong>
+            (1 dossier par format coché). Si rien coché, comportement actuel inchangé.
+            <span class="block mt-1 italic">Phase 1 : crop intelligent Pillow uniquement. Si Δratio trop important → format skippé (Phase 2 = outpainting).</span>
+          </p>
+
+          <!-- Présets -->
+          <div class="flex flex-wrap gap-2 mb-3">
+            <button type="button" class="preset-btn btn-dayuse-ghost text-xs" data-preset="pack_dayuse" style="padding: 6px 14px;">📦 Pack Dayuse complet</button>
+            <button type="button" class="preset-btn btn-dayuse-ghost text-xs" data-preset="pack_social" style="padding: 6px 14px;">📱 Pack Social media</button>
+            <button type="button" class="preset-btn btn-dayuse-ghost text-xs" data-preset="pack_all" style="padding: 6px 14px;">✨ Tout cocher</button>
+            <button type="button" class="preset-btn btn-dayuse-ghost text-xs" data-preset="none" style="padding: 6px 14px;">⊘ Tout décocher</button>
+          </div>
+
+          <!-- Liste formats (chargée dynamiquement) -->
+          <div id="formats-list-dayuse" class="mb-3">
+            <div class="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">🏨 Site Dayuse</div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2" data-scope="dayuse"></div>
+          </div>
+          <div id="formats-list-social">
+            <div class="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">📱 Réseaux sociaux</div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2" data-scope="social"></div>
+          </div>
+        </div>
+      </details>
+
       <button id="btn-run" class="btn-dayuse-primary disabled:opacity-50">
         Lancer le pipeline
       </button>
@@ -1789,12 +1826,15 @@ flowchart TD
       });
 
       try {
+        // Récupère les formats cochés dans la section Step 4
+        const checkedFormats = Array.from(document.querySelectorAll('.format-checkbox:checked')).map(cb => cb.value);
         const r = await fetch("/api/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             slug: state.slug,
             deselected: [...(state.deselected || [])],
+            output_formats: checkedFormats,
           }),
         });
         const data = await r.json();
@@ -2268,12 +2308,35 @@ flowchart TD
 
       const enhancedSection = (d.enhanced || []).length
         ? `
-          <div class="flex items-center justify-between mt-6 mb-2">
+          <div class="flex items-center justify-between mt-6 mb-2 flex-wrap gap-2">
             <h3 class="text-sm font-semibold text-gray-700">Photos finales (slider avant / après)</h3>
-            <a href="/api/download-zip/${d.slug}" class="btn-dayuse-primary inline-flex items-center gap-1.5" style="padding: 8px 18px; font-size: 12px;">
-              ⬇ Télécharger le pack ZIP
-            </a>
+            <div class="flex items-center gap-2">
+              <a href="/api/download-zip/${d.slug}" class="btn-dayuse-primary inline-flex items-center gap-1.5" style="padding: 8px 18px; font-size: 12px;">
+                ⬇ Télécharger le pack ZIP
+              </a>
+              ${d.multiformat && !d.multiformat.error ? `
+                <a href="/api/download-multiformat-zip/${d.slug}" class="btn-dayuse-ghost inline-flex items-center gap-1.5" style="padding: 8px 18px; font-size: 12px;" title="ZIP multi-format : ${(d.multiformat.summary.crop || 0) + (d.multiformat.summary.resize || 0)} variantes (${d.multiformat.summary.skip || 0} skip)">
+                  📐 Multi-format ZIP
+                  <span class="text-[10px] text-gray-500">(${(d.multiformat.summary.crop || 0) + (d.multiformat.summary.resize || 0)})</span>
+                </a>
+              ` : ''}
+            </div>
           </div>
+          ${d.multiformat && !d.multiformat.error ? `
+            <div class="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+              📐 <strong>Multi-format</strong> :
+              ${d.multiformat.summary.crop || 0} crop +
+              ${d.multiformat.summary.resize || 0} resize +
+              ${d.multiformat.summary.skip || 0} skip (Δratio trop fort, Phase 2 outpainting requis) +
+              ${d.multiformat.summary.errors || 0} erreur(s)
+              · ${(d.multiformat.format_ids || []).length} format(s) demandé(s)
+              · ${d.multiformat.duration_s}s
+            </div>
+          ` : (d.multiformat && d.multiformat.error ? `
+            <div class="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">
+              ⚠ Multi-format : ${d.multiformat.error}
+            </div>
+          ` : '')}
           <div class="grid grid-cols-2 gap-3 mb-6">${enhancedHTML}</div>
         `
         : '';
@@ -2724,6 +2787,72 @@ flowchart TD
         }
       }, 200);
     });
+
+    // ━━━ Multi-format crop : section formats Step 3 ━━━
+    let _formatsConfig = null;
+
+    async function loadOutputFormats() {
+      try {
+        const r = await fetch("/api/output-formats");
+        if (!r.ok) return;
+        _formatsConfig = await r.json();
+        renderFormatsCheckboxes();
+      } catch (e) {
+        console.error("[formats] load failed", e);
+      }
+    }
+
+    function renderFormatsCheckboxes() {
+      if (!_formatsConfig) return;
+      for (const scope of ["dayuse", "social"]) {
+        const target = document.querySelector(`[data-scope="${scope}"]`);
+        if (!target) continue;
+        const list = _formatsConfig.formats.filter(f => f.scope === scope);
+        target.innerHTML = list.map(f => `
+          <label class="flex items-start gap-2 px-3 py-2 rounded-lg hover:bg-amber-50 transition-colors cursor-pointer border border-transparent hover:border-amber-200">
+            <input type="checkbox" class="format-checkbox mt-0.5 accent-orange-500" value="${f.id}" />
+            <div class="flex-1 min-w-0">
+              <div class="text-xs font-semibold text-gray-800">${f.label}</div>
+              <div class="text-[10px] text-gray-500 font-mono">${f.width}×${f.height} (${f.ratio.toFixed(2)}:1)</div>
+            </div>
+          </label>
+        `).join("");
+      }
+      // Listen on changes
+      document.querySelectorAll(".format-checkbox").forEach(cb => {
+        cb.addEventListener("change", updateFormatsSummary);
+      });
+      // Présets
+      document.querySelectorAll(".preset-btn").forEach(btn => {
+        btn.addEventListener("click", () => applyPreset(btn.dataset.preset));
+      });
+      updateFormatsSummary();
+    }
+
+    function applyPreset(presetId) {
+      if (!_formatsConfig) return;
+      const wantedIds = presetId === "none" ? [] : (_formatsConfig.presets[presetId] || []);
+      document.querySelectorAll(".format-checkbox").forEach(cb => {
+        cb.checked = wantedIds.includes(cb.value);
+      });
+      updateFormatsSummary();
+    }
+
+    function updateFormatsSummary() {
+      const checked = document.querySelectorAll(".format-checkbox:checked");
+      const summary = document.getElementById("formats-summary");
+      if (!summary) return;
+      if (checked.length === 0) {
+        summary.textContent = "— aucun format sélectionné";
+        summary.className = "text-xs text-gray-600 ml-2";
+      } else {
+        summary.innerHTML = `— <strong class="text-amber-800">${checked.length}</strong> format(s) sélectionné(s)`;
+        summary.className = "text-xs text-amber-700 ml-2";
+      }
+    }
+
+    // Charge la config formats au boot
+    loadOutputFormats();
   </script>
 </body>
 </html>

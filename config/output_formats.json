@@ -1,0 +1,161 @@
+{
+  "_meta": {
+    "version": "1.0",
+    "description": "Catalogue des formats de sortie du pipeline (Phase 1 - crop Pillow only).",
+    "phase": "phase_1_crop_only",
+    "outpainting_enabled": false
+  },
+  "formats": [
+    {
+      "id": "home_card_mobile",
+      "label": "Home — card mobile",
+      "scope": "dayuse",
+      "width": 715,
+      "height": 230,
+      "ratio": 3.11,
+      "notes": "Banner large (mobile homepage cards)"
+    },
+    {
+      "id": "home_card_desktop",
+      "label": "Home — card desktop",
+      "scope": "dayuse",
+      "width": 410,
+      "height": 230,
+      "ratio": 1.78,
+      "notes": "≈ 16:9 (desktop homepage cards)"
+    },
+    {
+      "id": "hotel_main_desktop",
+      "label": "Fiche hôtel — image principale desktop",
+      "scope": "dayuse",
+      "width": 845,
+      "height": 420,
+      "ratio": 2.01,
+      "notes": "Banner principale fiche hôtel desktop"
+    },
+    {
+      "id": "hotel_secondary_desktop",
+      "label": "Fiche hôtel — image secondaire desktop",
+      "scope": "dayuse",
+      "width": 410,
+      "height": 198,
+      "ratio": 2.07,
+      "notes": "Banner secondaire fiche hôtel desktop"
+    },
+    {
+      "id": "hotel_main_mobile",
+      "label": "Fiche hôtel — image principale mobile",
+      "scope": "dayuse",
+      "width": 766,
+      "height": 510,
+      "ratio": 1.50,
+      "notes": "3:2 standard (mobile fiche hôtel)"
+    },
+    {
+      "id": "rate_plan_desktop",
+      "label": "Rate plan — card desktop",
+      "scope": "dayuse",
+      "width": 410,
+      "height": 194,
+      "ratio": 2.11,
+      "notes": "Banner rate plan desktop"
+    },
+    {
+      "id": "rate_plan_mobile",
+      "label": "Rate plan — card mobile",
+      "scope": "dayuse",
+      "width": 726,
+      "height": 194,
+      "ratio": 3.74,
+      "notes": "Banner ultra-large mobile (outpainting probable en Phase 2)"
+    },
+    {
+      "id": "youtube_thumbnail",
+      "label": "YouTube — thumbnail",
+      "scope": "social",
+      "width": 1280,
+      "height": 720,
+      "ratio": 1.78,
+      "notes": "16:9 standard"
+    },
+    {
+      "id": "insta_feed",
+      "label": "Instagram — feed (carré)",
+      "scope": "social",
+      "width": 1080,
+      "height": 1080,
+      "ratio": 1.0,
+      "notes": "Carré centré"
+    },
+    {
+      "id": "insta_story",
+      "label": "Instagram — story / reels",
+      "scope": "social",
+      "width": 1080,
+      "height": 1920,
+      "ratio": 0.563,
+      "notes": "Vertical 9:16 (outpainting probable en Phase 2)"
+    },
+    {
+      "id": "linkedin_banner",
+      "label": "LinkedIn — banner",
+      "scope": "social",
+      "width": 1584,
+      "height": 396,
+      "ratio": 4.0,
+      "notes": "Banner ultra-large 4:1"
+    },
+    {
+      "id": "facebook_og",
+      "label": "Facebook — Open Graph",
+      "scope": "social",
+      "width": 1200,
+      "height": 630,
+      "ratio": 1.91,
+      "notes": "OG standard"
+    },
+    {
+      "id": "twitter_card",
+      "label": "Twitter — large card",
+      "scope": "social",
+      "width": 1200,
+      "height": 628,
+      "ratio": 1.91,
+      "notes": "OG-like"
+    }
+  ],
+  "presets": {
+    "pack_dayuse": [
+      "home_card_mobile",
+      "home_card_desktop",
+      "hotel_main_desktop",
+      "hotel_secondary_desktop",
+      "hotel_main_mobile",
+      "rate_plan_desktop",
+      "rate_plan_mobile"
+    ],
+    "pack_social": [
+      "youtube_thumbnail",
+      "insta_feed",
+      "insta_story",
+      "linkedin_banner",
+      "facebook_og",
+      "twitter_card"
+    ],
+    "pack_all": [
+      "home_card_mobile",
+      "home_card_desktop",
+      "hotel_main_desktop",
+      "hotel_secondary_desktop",
+      "hotel_main_mobile",
+      "rate_plan_desktop",
+      "rate_plan_mobile",
+      "youtube_thumbnail",
+      "insta_feed",
+      "insta_story",
+      "linkedin_banner",
+      "facebook_og",
+      "twitter_card"
+    ]
+  }
+}

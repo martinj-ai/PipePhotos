@@ -155,6 +155,15 @@ Tu regardes une photo d'hôtel et tu retournes UNIQUEMENT un objet JSON strict (
     "y_max_pct": 100,
     "reason": "Si la photo gagnerait à être recadrée (espace mort à supprimer, sujet à recentrer selon règle des tiers, horizon à redresser, zoom intéressant sur l'élément principal), passe should_crop=true et donne la box de crop en pourcentage de l'image (0-100). Ne propose PAS de crop si la photo est déjà bien cadrée. Le crop ne doit PAS supprimer plus de 40% de l'image (zone à conserver ≥ 60%). \n\n🚨 RÈGLE STRICTE : si un ou plusieurs humains sont visibles dans la photo (corps entier, visage), JAMAIS proposer un crop qui couperait leur tête, leur visage, ou leur corps. Soit le crop préserve TOUS les humains visibles INTÉGRALEMENT, soit should_crop=false. Couper une personne au-dessus du nombril ou décapiter un humain est interdit. \n\nSi pas pertinent, laisse should_crop=false."
   },
+  "crop_safe_zones": {
+    "humans_bboxes": [
+      {"x": 0.0, "y": 0.0, "w": 0.0, "h": 0.0, "_doc": "Une bbox PAR humain visible. Coordonnées normalisées 0-1 (x,y = coin haut-gauche ; w,h = largeur/hauteur). La bbox englobe tête + torse + membres entiers. Liste vide si aucun humain. CRITIQUE pour le multi-format crop : ces zones ne doivent JAMAIS être coupées."}
+    ],
+    "main_amenity_bbox": {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0, "_doc": "Bbox de l'amenity principale (piscine, cabana, lit spa, bar, transat, vue rooftop) en coordonnées normalisées 0-1. Si toute la photo est dédiée à l'amenity, x=0,y=0,w=1,h=1. Servira pour centrer le crop multi-format autour de l'élément clé."},
+    "critical_zones": [
+      {"x": 0.0, "y": 0.0, "w": 0.0, "h": 0.0, "label": "ex: logo Dayuse discret en bas à droite", "_doc": "Liste d'autres zones à préserver lors d'un crop multi-format (logos sobres, vue significative, élément architectural unique). Vide si rien de critique au-delà des humains et de l'amenity principale."}
+    ]
+  },
   "issues": ["liste problèmes éventuels pour le brand: sombre, nuit, cadrage raté, etc. Vide si rien."]
 }
 
