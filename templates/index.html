@@ -2333,10 +2333,15 @@ flowchart TD
                   const thumbW = 86;
                   const thumbH = Math.max(28, Math.min(60, Math.round(thumbW / Math.max(0.3, w / Math.max(h, 1)))));
                   const fallback = v.fallback_pro ? '<span class="text-[8px] text-amber-700">🔄Pro</span>' : '';
+                  // Index dans la liste filtrée (sans skip) pour la navigation lightbox
+                  const variantIdx = variants.indexOf(v);
                   return `
-                    <a href="${url}" target="_blank" rel="noopener"
+                    <button type="button"
                        class="flex-shrink-0 group relative rounded-md overflow-hidden border hover:shadow-md transition-all"
-                       style="background:${s.bg};border-color:${s.border};width:${thumbW}px;"
+                       style="background:${s.bg};border-color:${s.border};width:${thumbW}px;cursor:zoom-in;"
+                       data-mfvariant-photo="${e.filename}"
+                       data-mfvariant-idx="${variantIdx}"
+                       onclick="openMultiformatLightbox('${e.filename}', ${variantIdx})"
                        title="${v.format_id} · ${w}×${h} (${ratio}:1) · ${v.strategy}${v.cost_usd ? ' · $' + v.cost_usd.toFixed(3) : ''}">
                       <div style="width:${thumbW}px;height:${thumbH}px;background:#F3F4F6;display:flex;align-items:center;justify-content:center;overflow:hidden;">
                         <img src="${url}" loading="lazy" alt="${v.format_id}" style="width:100%;height:100%;object-fit:cover;">
@@ -2348,7 +2353,7 @@ flowchart TD
                           <span>${s.icon}${fallback}</span>
                         </div>
                       </div>
-                    </a>
+                    </button>
                   `;
                 }).join('')}
               </div>
@@ -3291,5 +3296,128 @@ flowchart TD
 
     loadMcsclaFields();
   </script>
+<!-- ━━━ Lightbox multi-format variantes ━━━ -->
+<div id="mf-lightbox" class="fixed inset-0 z-[1000] hidden flex-col items-center justify-center" style="background:rgba(0,0,0,0.92);backdrop-filter:blur(4px);" onclick="if(event.target===this)closeMultiformatLightbox()">
+  <button onclick="closeMultiformatLightbox()" class="absolute top-5 right-5 w-11 h-11 rounded-full flex items-center justify-center text-white text-xl transition-all" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.2);" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">✕</button>
+  <button id="mf-prev" onclick="navMultiformatLightbox(-1)" class="absolute left-5 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full flex items-center justify-center text-white text-2xl transition-all" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.2);" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">←</button>
+  <button id="mf-next" onclick="navMultiformatLightbox(1)" class="absolute right-5 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full flex items-center justify-center text-white text-2xl transition-all" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.2);" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">→</button>
+
+  <div class="flex flex-col items-center gap-3 max-w-[95vw] max-h-[90vh]">
+    <div id="mf-frame" class="rounded-xl overflow-hidden shadow-2xl bg-gray-100 flex items-center justify-center" style="max-height:75vh;">
+      <img id="mf-image" src="" alt="" style="max-width:95vw;max-height:75vh;object-fit:contain;display:block;">
+    </div>
+    <div class="flex items-center gap-3 px-5 py-2.5 rounded-full" style="background:rgba(255,255,255,0.95);backdrop-filter:blur(12px);">
+      <span id="mf-counter" class="text-xs font-bold text-gray-500"></span>
+      <span class="text-gray-300">·</span>
+      <span id="mf-format" class="text-sm font-bold text-gray-900"></span>
+      <span class="text-gray-300">·</span>
+      <span id="mf-dimensions" class="text-xs font-mono text-gray-600"></span>
+      <span class="text-gray-300">·</span>
+      <span id="mf-strategy" class="text-xs font-semibold px-2 py-0.5 rounded-full"></span>
+      <span id="mf-cost" class="text-xs text-gray-500"></span>
+    </div>
+    <!-- Strip de miniatures pour switcher rapidement -->
+    <div id="mf-thumbs" class="flex gap-1.5 overflow-x-auto px-3 pb-1 max-w-[95vw]" style="scrollbar-width:thin;"></div>
+  </div>
+</div>
+
+<script>
+  // ━━━ Multi-format variants lightbox ━━━
+  let _mfLightboxState = null;  // { photoFilename, variants[], idx }
+
+  function openMultiformatLightbox(photoFilename, idx) {
+    if (!state || !state.lastRun || !state.lastRun.multiformat) return;
+    const variants = (state.lastRun.multiformat.variants || [])
+      .filter(v => v.source === photoFilename && v.output);
+    if (variants.length === 0) return;
+    _mfLightboxState = { photoFilename, variants, idx: Math.max(0, Math.min(idx, variants.length - 1)) };
+    renderMultiformatLightbox();
+    document.getElementById('mf-lightbox').classList.remove('hidden');
+    document.getElementById('mf-lightbox').classList.add('flex');
+  }
+
+  function closeMultiformatLightbox() {
+    document.getElementById('mf-lightbox').classList.add('hidden');
+    document.getElementById('mf-lightbox').classList.remove('flex');
+    _mfLightboxState = null;
+  }
+
+  function navMultiformatLightbox(delta) {
+    if (!_mfLightboxState) return;
+    const n = _mfLightboxState.variants.length;
+    _mfLightboxState.idx = (_mfLightboxState.idx + delta + n) % n;
+    renderMultiformatLightbox();
+  }
+
+  function setMultiformatLightboxIdx(i) {
+    if (!_mfLightboxState) return;
+    _mfLightboxState.idx = i;
+    renderMultiformatLightbox();
+  }
+
+  function renderMultiformatLightbox() {
+    if (!_mfLightboxState) return;
+    const { photoFilename, variants, idx } = _mfLightboxState;
+    const v = variants[idx];
+    const slug = state.slug;
+    const url = `/output/${slug}/multiformat/${v.output}`;
+    const [w, h] = v.target_size || [0, 0];
+
+    const FMT_ABBR = {
+      home_card_mobile: 'Home — card mobile', home_card_desktop: 'Home — card desktop',
+      hotel_main_desktop: 'Fiche hôtel — image principale desktop',
+      hotel_secondary_desktop: 'Fiche hôtel — image secondaire desktop',
+      hotel_main_mobile: 'Fiche hôtel — image principale mobile',
+      rate_plan_desktop: 'Rate plan — card desktop',
+      rate_plan_mobile: 'Rate plan — card mobile',
+      youtube_thumbnail: 'YouTube — thumbnail',
+      insta_feed: 'Instagram — feed',
+      insta_story: 'Instagram — story / reels',
+      linkedin_banner: 'LinkedIn — banner',
+      facebook_og: 'Facebook — Open Graph',
+      twitter_card: 'Twitter — large card',
+    };
+    const stratStyle = {
+      resize:   { bg: '#DBEAFE', text: '#1E40AF', label: '↔ resize' },
+      crop:     { bg: '#D1FAE5', text: '#065F46', label: '✂ crop' },
+      outpaint: { bg: '#FEF3C7', text: '#92400E', label: '🎨 outpaint' },
+    };
+
+    document.getElementById('mf-image').src = url;
+    document.getElementById('mf-image').alt = v.format_id;
+    document.getElementById('mf-counter').textContent = `${idx + 1} / ${variants.length}`;
+    document.getElementById('mf-format').textContent = FMT_ABBR[v.format_id] || v.format_id;
+    document.getElementById('mf-dimensions').textContent = `${w}×${h}`;
+    const s = stratStyle[v.strategy] || { bg:'#F3F4F6', text:'#6B7280', label: v.strategy };
+    const stratEl = document.getElementById('mf-strategy');
+    stratEl.textContent = s.label + (v.fallback_pro ? ' 🔄Pro' : '');
+    stratEl.style.background = s.bg;
+    stratEl.style.color = s.text;
+    document.getElementById('mf-cost').textContent = v.cost_usd ? `$${v.cost_usd.toFixed(3)}` : '';
+
+    // Render thumbs strip pour switch rapide
+    const thumbsEl = document.getElementById('mf-thumbs');
+    thumbsEl.innerHTML = variants.map((vv, i) => {
+      const u = `/output/${slug}/multiformat/${vv.output}`;
+      const isActive = i === idx;
+      return `<button type="button" onclick="setMultiformatLightboxIdx(${i})" class="flex-shrink-0 rounded-md overflow-hidden border-2 transition-all" style="border-color:${isActive ? '#FFAF36' : 'rgba(255,255,255,0.2)'};opacity:${isActive ? '1' : '0.65'};">
+        <img src="${u}" loading="lazy" style="width:62px;height:42px;object-fit:cover;display:block;">
+      </button>`;
+    }).join('');
+
+    // Disable nav buttons si une seule variante
+    document.getElementById('mf-prev').style.display = variants.length > 1 ? 'flex' : 'none';
+    document.getElementById('mf-next').style.display = variants.length > 1 ? 'flex' : 'none';
+  }
+
+  // Keyboard nav (sans interférer avec les autres lightboxes)
+  document.addEventListener('keydown', (e) => {
+    if (!_mfLightboxState) return;
+    if (e.key === 'Escape') closeMultiformatLightbox();
+    else if (e.key === 'ArrowLeft') navMultiformatLightbox(-1);
+    else if (e.key === 'ArrowRight') navMultiformatLightbox(1);
+  });
+</script>
+
 </body>
 </html>
