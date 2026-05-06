@@ -1,7 +1,7 @@
 {
   "_meta": {
     "version": "1.0",
-    "description": "Taxonomie MCSCLA des champs photo du pipeline DayAccess. Inspirée du standard vidéo de Lyes (manager) — adapté à la photo statique.",
+    "description": "Taxonomie MCSCLA des champs photo du pipeline DayAccess. Adaptée à la photo statique depuis le standard vidéo MCSCLA.",
     "exported_at": "2026-05-06",
     "total_fields": 35
   },
@@ -122,7 +122,7 @@
       "icon": "🔇",
       "label": "Audio",
       "color": "gray",
-      "description": "N/A pour photo statique. Bucket conservé pour cohérence avec la taxonomie vidéo de Lyes.",
+      "description": "N/A pour photo statique. Bucket conservé pour cohérence avec la taxonomie MCSCLA vidéo.",
       "fields": []
     },
     {
