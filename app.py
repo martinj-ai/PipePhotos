@@ -886,6 +886,8 @@ def api_run():
     # Si l'utilisateur a coché des formats dans Step 4 → on génère les variantes
     # croppées par format après les retouches IA.
     output_formats = (payload or {}).get("output_formats") or []
+    outpaint_enabled = bool((payload or {}).get("outpaint_enabled", False))
+    outpaint_quality = (payload or {}).get("outpaint_quality") or "flash"
     multiformat_result = None
     if output_formats and enhanced_dir.exists():
         try:
@@ -895,7 +897,7 @@ def api_run():
                 step="multi_format",
                 current=0,
                 total=len(output_formats),
-                message=f"Génération multi-format ({len(output_formats)} formats)…",
+                message=f"Génération multi-format ({len(output_formats)} formats" + (f", outpaint {outpaint_quality}" if outpaint_enabled else "") + ")…",
             )
             multiformat_dir = ROOT / "data" / "output" / slug / "multiformat"
             multiformat_result = multi_format_cropper.run_multi_format(
@@ -903,6 +905,8 @@ def api_run():
                 output_dir=multiformat_dir,
                 format_ids=output_formats,
                 analyses_dir=analyses_dir if analyses_dir.exists() else None,
+                outpaint_enabled=outpaint_enabled,
+                outpaint_quality=outpaint_quality,
             )
             progress.update(
                 f"{slug}_analyze",

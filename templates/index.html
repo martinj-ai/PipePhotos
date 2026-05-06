@@ -355,6 +355,20 @@
             <button type="button" class="preset-btn btn-dayuse-ghost text-xs" data-preset="none" style="padding: 6px 14px;">⊘ Tout décocher</button>
           </div>
 
+          <!-- Toggle outpainting + indicateur coût -->
+          <div id="outpaint-block" class="mb-3 rounded-lg border border-gray-200 bg-gray-50 p-3 flex items-center gap-3 flex-wrap">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" id="outpaint-toggle" class="accent-orange-500" />
+              <span class="text-xs font-semibold">🎨 Activer outpainting Nano Banana</span>
+            </label>
+            <select id="outpaint-quality" class="text-xs border border-gray-300 rounded px-2 py-1 bg-white" disabled>
+              <option value="flash">Flash (~$0.04/variante)</option>
+              <option value="pro">Pro (~$0.13/variante, fallback auto)</option>
+            </select>
+            <span class="text-[11px] text-gray-500 italic">Pour les formats où le crop seul ne suffit pas (Δratio trop fort).</span>
+            <span id="outpaint-cost" class="text-xs ml-auto font-mono font-semibold text-amber-700">$0.00</span>
+          </div>
+
           <!-- Liste formats (chargée dynamiquement) -->
           <div id="formats-list-dayuse" class="mb-3">
             <div class="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">🏨 Site Dayuse</div>
@@ -363,7 +377,6 @@
           <div id="formats-list-social">
             <div class="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">📱 Réseaux sociaux</div>
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2" data-scope="social"></div>
-          </div>
         </div>
       </details>
 
@@ -1826,8 +1839,12 @@ flowchart TD
       });
 
       try {
-        // Récupère les formats cochés dans la section Step 4
+        // Récupère les formats cochés + flags outpainting dans la section Step 3
         const checkedFormats = Array.from(document.querySelectorAll('.format-checkbox:checked')).map(cb => cb.value);
+        const outpaintToggle = document.getElementById('outpaint-toggle');
+        const outpaintQualityEl = document.getElementById('outpaint-quality');
+        const outpaintEnabled = !!(outpaintToggle && outpaintToggle.checked);
+        const outpaintQuality = (outpaintQualityEl && outpaintQualityEl.value) || 'flash';
         const r = await fetch("/api/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1835,6 +1852,8 @@ flowchart TD
             slug: state.slug,
             deselected: [...(state.deselected || [])],
             output_formats: checkedFormats,
+            outpaint_enabled: outpaintEnabled,
+            outpaint_quality: outpaintQuality,
           }),
         });
         const data = await r.json();
@@ -2849,7 +2868,48 @@ flowchart TD
         summary.innerHTML = `— <strong class="text-amber-800">${checked.length}</strong> format(s) sélectionné(s)`;
         summary.className = "text-xs text-amber-700 ml-2";
       }
+      updateOutpaintCost();
     }
+
+    // ━━━ Estimateur coût outpainting (live) ━━━
+    function updateOutpaintCost() {
+      if (!_formatsConfig) return;
+      const toggle = document.getElementById("outpaint-toggle");
+      const quality = document.getElementById("outpaint-quality");
+      const costEl = document.getElementById("outpaint-cost");
+      if (!toggle || !costEl) return;
+
+      // Active/désactive le select selon checkbox
+      if (quality) quality.disabled = !toggle.checked;
+
+      // Estimation : on ne sait pas combien de photos seront sélectionnées
+      // dans le pipeline avant le run, mais on peut estimer 15 photos finales
+      // × N formats cochés × ratio_outpaint (estimé 40% des formats nécessitent outpaint)
+      const checked = Array.from(document.querySelectorAll(".format-checkbox:checked"));
+      const N_PHOTOS_ESTIMATED = 15;
+      const OUTPAINT_RATIO_ESTIMATED = 0.4;  // 40% des variantes vont nécessiter outpaint
+      const COST_FLASH = 0.039;
+      const COST_PRO = 0.134;
+
+      if (!toggle.checked || checked.length === 0) {
+        costEl.textContent = "$0.00";
+        costEl.className = "text-xs ml-auto font-mono font-semibold text-gray-400";
+        return;
+      }
+      const unitCost = (quality && quality.value === "pro") ? COST_PRO : COST_FLASH;
+      const estimatedVariants = Math.ceil(N_PHOTOS_ESTIMATED * checked.length * OUTPAINT_RATIO_ESTIMATED);
+      const totalCost = estimatedVariants * unitCost;
+      costEl.textContent = `≈ $${totalCost.toFixed(2)} (~${estimatedVariants} outpaint estimés)`;
+      costEl.className = "text-xs ml-auto font-mono font-semibold text-amber-700";
+    }
+
+    // Listeners outpaint
+    document.addEventListener("DOMContentLoaded", () => {
+      const toggle = document.getElementById("outpaint-toggle");
+      const quality = document.getElementById("outpaint-quality");
+      if (toggle) toggle.addEventListener("change", updateOutpaintCost);
+      if (quality) quality.addEventListener("change", updateOutpaintCost);
+    });
 
     // Charge la config formats au boot
     loadOutputFormats();
