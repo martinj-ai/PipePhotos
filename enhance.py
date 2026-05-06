@@ -981,9 +981,18 @@ def enhance_ai(input_path: Path, output_path: Path, prompt: str,
                 txt = part.text
         return img_data, txt
 
+    def _extract_tokens(resp):
+        """Récupère input_tokens + output_tokens depuis usage_metadata si dispo."""
+        u = getattr(resp, "usage_metadata", None)
+        if not u:
+            return 0, 0
+        return (getattr(u, "prompt_token_count", 0) or 0,
+                getattr(u, "candidates_token_count", 0) or 0)
+
     # 1ère tentative
     response = _call_with_prompt(prompt)
     image_data, text_response = _extract_image(response)
+    input_tokens, output_tokens = _extract_tokens(response)
 
     # Retry si Nano Banana a renvoyé du texte au lieu d'une image (~5-10% des cas, modèle preview)
     if not image_data:
@@ -996,6 +1005,9 @@ def enhance_ai(input_path: Path, output_path: Path, prompt: str,
         try:
             response2 = _call_with_prompt(forced_prompt)
             image_data, text_response2 = _extract_image(response2)
+            it2, ot2 = _extract_tokens(response2)
+            input_tokens += it2
+            output_tokens += ot2
             if not image_data:
                 # Toujours raté → exception explicite avec texte des 2 tentatives pour debug
                 raise RuntimeError(
@@ -1036,6 +1048,8 @@ def enhance_ai(input_path: Path, output_path: Path, prompt: str,
         "method": f"nano_banana_2 ({model})",
         "framing_changed": framing_changed,
         "framing_warning": framing_warning,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
     }
 
 

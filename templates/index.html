@@ -101,6 +101,13 @@
       cursor: pointer;
       transition: all 0.2s ease;
     }
+    .btn-dayuse-ghost.active {
+      background: linear-gradient(62deg, #FFAF36 0%, #FFC536 100%);
+      border-color: transparent;
+      color: #292935;
+      font-weight: 700;
+      box-shadow: 0 2px 8px rgba(255, 175, 54, 0.3);
+    }
     .btn-dayuse-ghost:hover { border-color: rgba(41, 41, 53, 0.26); background: white; }
 
     /* ━━ Small button (chip) ━━ */
@@ -463,6 +470,7 @@
         <button class="subtab-btn" data-subtab="personas">👥 Personas &amp; humains</button>
         <button class="subtab-btn" data-subtab="models">🧪 Comparatif modèles</button>
         <button class="subtab-btn" data-subtab="laws-audit">🧮 Audit matriciel</button>
+        <button class="subtab-btn" data-subtab="mcscla">🪣 Champs MCSCLA</button>
       </nav>
 
       <!-- ━━━ Sous-onglet Workflow ━━━ -->
@@ -1311,6 +1319,44 @@ flowchart TD
 
       </div><!-- /subtab-laws-audit -->
 
+      <!-- ━━━ Sous-onglet Champs MCSCLA ━━━ -->
+      <div id="subtab-mcscla" class="subtab-panel">
+
+        <section class="card-dayuse p-6 mb-6">
+          <h2 class="text-base font-semibold mb-1">🪣 Taxonomie MCSCLA — champs du pipeline photo</h2>
+          <p class="text-sm text-gray-500 mb-3">
+            Inspirée du standard vidéo de Lyes (manager), adaptée à la photo statique.
+            <strong id="mcscla-total">—</strong> champs métier ventilés dans 10 buckets fonctionnels.
+            <span class="block mt-1 italic text-xs">
+              Source : <code class="text-[10px]">config/mcscla_fields.json</code> · Ratio vs vidéo (108 champs) :
+              <strong>~48 %</strong> — cohérent avec le retrait du <strong>bucket Audio</strong> et de la dimension temporelle.
+            </span>
+          </p>
+
+          <!-- Drift taxonomy legend -->
+          <details class="mb-3">
+            <summary class="text-xs font-semibold cursor-pointer text-gray-700 hover:text-gray-900 select-none">📐 Légende — drift taxonomy (cohérence cross-photos)</summary>
+            <div id="drift-legend" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mt-2"></div>
+          </details>
+
+          <!-- Filtre par drift -->
+          <div class="flex flex-wrap items-center gap-2 mb-3">
+            <span class="text-[10px] uppercase tracking-wider font-bold text-gray-500">Filtrer :</span>
+            <button class="drift-filter-btn btn-dayuse-ghost text-[11px] px-3 py-1 active" data-drift="all">Tous</button>
+            <button class="drift-filter-btn btn-dayuse-ghost text-[11px] px-3 py-1" data-drift="HARD_CAP">🔴 HARD_CAP</button>
+            <button class="drift-filter-btn btn-dayuse-ghost text-[11px] px-3 py-1" data-drift="CONCEPT_CONSISTENT">🟡 CONCEPT_CONSISTENT</button>
+            <button class="drift-filter-btn btn-dayuse-ghost text-[11px] px-3 py-1" data-drift="TOLERATED">🟢 TOLERATED</button>
+            <button class="drift-filter-btn btn-dayuse-ghost text-[11px] px-3 py-1" data-drift="FREE">⚪ FREE</button>
+            <input type="text" id="mcscla-search" placeholder="🔍 chercher un champ..." class="ml-auto px-3 py-1 border border-gray-300 rounded-full text-xs" style="width: 220px;">
+          </div>
+
+          <div id="mcscla-buckets" class="space-y-3">
+            <div class="text-sm text-gray-400 italic text-center py-8">Chargement…</div>
+          </div>
+        </section>
+
+      </div><!-- /subtab-mcscla -->
+
     </div><!-- /tab-doc -->
 
   </div>
@@ -1989,8 +2035,50 @@ flowchart TD
           <div class="bg-blue-50 rounded-lg p-3"><div class="text-2xl font-bold text-blue-700">${stats.kept_after_dedup}</div><div class="text-[11px] text-gray-500">uniques</div></div>
           <div class="bg-amber-50 rounded-lg p-3"><div class="text-2xl font-bold text-amber-700">${stats.duplicates_dropped || 0}</div><div class="text-[11px] text-gray-500">doublons${stats.vlm_dedup_same_scene_count ? ` (dont ${stats.vlm_dedup_same_scene_count} via VLM)` : ''}</div></div>
           <div class="bg-pink-50 rounded-lg p-3"><div class="text-2xl font-bold text-pink-700">${stats.enhanced || 0}</div><div class="text-[11px] text-gray-500">retouchées<br>+pers ${stats.ai_add_character || 0} · −pers ${stats.ai_remove_people || 0}<br>lum ${stats.ai_lighting || 0} · recadr ${stats.ai_recompose || 0} · loc ${stats.local_enhanced || 0}</div></div>
-          <div class="bg-purple-50 rounded-lg p-3"><div class="text-lg font-bold text-purple-700">$${(cost.total_usd || 0).toFixed(4)}</div><div class="text-[11px] text-gray-500">analyse $${(cost.analysis_usd || 0).toFixed(4)} + retouche $${(cost.enhancement_usd || 0).toFixed(4)}</div></div>
+          <div class="bg-purple-50 rounded-lg p-3 cursor-help" title="Détail tokens et coûts par étape (analyse Gemini Vision + retouche Nano Banana + multi-format outpainting)">
+            <div class="text-lg font-bold text-purple-700">$${(cost.total_usd || 0).toFixed(4)}</div>
+            <div class="text-[11px] text-gray-500">analyse $${(cost.analysis_usd || 0).toFixed(4)} + retouche $${(cost.enhancement_usd || 0).toFixed(4)}${(cost.multiformat_usd || 0) > 0 ? ` + crop $${(cost.multiformat_usd || 0).toFixed(4)}` : ''}</div>
+          </div>
         </div>
+        <details class="mb-5 text-xs">
+          <summary class="cursor-pointer text-gray-600 hover:text-gray-800 select-none inline-flex items-center gap-1">
+            <span>🔢 Tokens consommés</span>
+            <span class="text-gray-400">— total in <strong class="text-gray-700">${(cost.total_input_tokens || 0).toLocaleString()}</strong> · out <strong class="text-gray-700">${(cost.total_output_tokens || 0).toLocaleString()}</strong></span>
+          </summary>
+          <div class="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div class="border border-blue-200 bg-blue-50 rounded-lg p-2">
+              <div class="text-[10px] font-bold uppercase tracking-wider text-blue-700">📷 Analyse Gemini Vision</div>
+              <div class="text-[11px] text-gray-700 mt-1">
+                input <strong>${(cost.analysis_input_tokens || 0).toLocaleString()}</strong><br>
+                output <strong>${(cost.analysis_output_tokens || 0).toLocaleString()}</strong><br>
+                <span class="text-gray-500">$${(cost.analysis_usd || 0).toFixed(4)}</span>
+              </div>
+            </div>
+            <div class="border border-pink-200 bg-pink-50 rounded-lg p-2">
+              <div class="text-[10px] font-bold uppercase tracking-wider text-pink-700">🎨 Retouche Nano Banana</div>
+              <div class="text-[11px] text-gray-700 mt-1">
+                input <strong>${(cost.enhancement_input_tokens || 0).toLocaleString()}</strong><br>
+                output <strong>${(cost.enhancement_output_tokens || 0).toLocaleString()}</strong><br>
+                <span class="text-gray-500">$${(cost.enhancement_usd || 0).toFixed(4)}</span>
+              </div>
+            </div>
+            ${(cost.multiformat_input_tokens || 0) > 0 ? `
+            <div class="border border-amber-200 bg-amber-50 rounded-lg p-2">
+              <div class="text-[10px] font-bold uppercase tracking-wider text-amber-700">📐 Outpaint multi-format</div>
+              <div class="text-[11px] text-gray-700 mt-1">
+                input <strong>${(cost.multiformat_input_tokens || 0).toLocaleString()}</strong><br>
+                output <strong>${(cost.multiformat_output_tokens || 0).toLocaleString()}</strong><br>
+                <span class="text-gray-500">$${(cost.multiformat_usd || 0).toFixed(4)}</span>
+              </div>
+            </div>
+            ` : `
+            <div class="border border-gray-200 bg-gray-50 rounded-lg p-2 opacity-50">
+              <div class="text-[10px] font-bold uppercase tracking-wider text-gray-500">📐 Outpaint multi-format</div>
+              <div class="text-[11px] text-gray-500 mt-1">non utilisé (aucun format coché ou outpaint OFF)</div>
+            </div>
+            `}
+          </div>
+        </details>
       `;
 
       // Couverture
@@ -2913,6 +3001,125 @@ flowchart TD
 
     // Charge la config formats au boot
     loadOutputFormats();
+
+    // ━━━ Taxonomie MCSCLA ━━━
+    let _mcsclaData = null;
+    let _mcsclaActiveFilter = "all";
+
+    async function loadMcsclaFields() {
+      try {
+        const r = await fetch("/api/mcscla-fields");
+        if (!r.ok) return;
+        _mcsclaData = await r.json();
+        renderMcsclaBuckets();
+        renderDriftLegend();
+        const total = _mcsclaData.buckets.reduce((s, b) => s + b.fields.length, 0);
+        const totalEl = document.getElementById("mcscla-total");
+        if (totalEl) totalEl.textContent = total;
+      } catch (e) { console.error("[mcscla] load failed", e); }
+    }
+
+    function renderDriftLegend() {
+      if (!_mcsclaData) return;
+      const el = document.getElementById("drift-legend");
+      if (!el) return;
+      const colors = { red: "border-red-300 bg-red-50 text-red-900",
+                       amber: "border-amber-300 bg-amber-50 text-amber-900",
+                       yellow: "border-yellow-300 bg-yellow-50 text-yellow-900",
+                       green: "border-green-300 bg-green-50 text-green-900" };
+      el.innerHTML = Object.entries(_mcsclaData.drift_taxonomy).map(([key, drift]) => `
+        <div class="border ${colors[drift.color] || 'border-gray-300 bg-gray-50'} rounded-lg p-2.5">
+          <div class="text-[10px] font-bold uppercase tracking-wider">${key}</div>
+          <div class="text-[11px] font-semibold mt-0.5">${drift.label}</div>
+          <div class="text-[10px] mt-1 leading-snug opacity-80">${drift.description}</div>
+        </div>
+      `).join("");
+    }
+
+    function renderMcsclaBuckets() {
+      if (!_mcsclaData) return;
+      const el = document.getElementById("mcscla-buckets");
+      if (!el) return;
+      const search = (document.getElementById("mcscla-search")?.value || "").toLowerCase().trim();
+      const driftFilter = _mcsclaActiveFilter;
+      const driftPill = (drift) => {
+        const map = { HARD_CAP: ["🔴", "bg-red-100 text-red-800"],
+                      CONCEPT_CONSISTENT: ["🟡", "bg-amber-100 text-amber-800"],
+                      TOLERATED: ["🟢", "bg-green-100 text-green-800"],
+                      FREE: ["⚪", "bg-gray-100 text-gray-700"] };
+        const [icon, cls] = map[drift] || ["", "bg-gray-50 text-gray-500"];
+        return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold ${cls}">${icon}${drift}</span>`;
+      };
+      const bucketColors = {
+        blue: "border-blue-300 bg-blue-50",
+        purple: "border-purple-300 bg-purple-50",
+        pink: "border-pink-300 bg-pink-50",
+        emerald: "border-emerald-300 bg-emerald-50",
+        amber: "border-amber-300 bg-amber-50",
+        indigo: "border-indigo-300 bg-indigo-50",
+        gray: "border-gray-300 bg-gray-50",
+        rose: "border-rose-300 bg-rose-50",
+        orange: "border-orange-300 bg-orange-50",
+        slate: "border-slate-300 bg-slate-50",
+      };
+
+      el.innerHTML = _mcsclaData.buckets.map(b => {
+        // Filtre les fields selon search + drift
+        const filteredFields = (b.fields || []).filter(f => {
+          if (driftFilter !== "all" && f.drift !== driftFilter) return false;
+          if (!search) return true;
+          const txt = ((f.name || "") + " " + (f.description || "") + " " + (f.values || "")).toLowerCase();
+          return txt.includes(search);
+        });
+        if (filteredFields.length === 0 && (search || driftFilter !== "all")) return "";
+
+        const fieldsHTML = (filteredFields.length === 0)
+          ? '<div class="text-[11px] italic text-gray-400 text-center py-3">— aucun champ (bucket vide ou non applicable photo) —</div>'
+          : filteredFields.map(f => `
+              <div class="border-l-2 border-gray-200 pl-3 py-1.5 text-xs hover:border-amber-400 transition-colors">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <code class="font-mono font-bold text-gray-900 text-[11px]">${f.name}</code>
+                  <span class="text-[9px] text-gray-400 italic">${f.type}</span>
+                  ${driftPill(f.drift)}
+                </div>
+                <div class="text-[11px] text-gray-600 mt-1 leading-snug">${f.description || ""}</div>
+                ${f.values ? `<div class="text-[10px] text-gray-500 mt-0.5"><strong>values:</strong> <code class="font-mono">${f.values}</code></div>` : ""}
+                <div class="text-[9px] text-gray-400 mt-0.5 font-mono opacity-60">${f.path || ""}</div>
+              </div>
+            `).join("");
+
+        return `
+          <details ${(search || driftFilter !== "all") ? "open" : "open"} class="border ${bucketColors[b.color] || 'border-gray-300 bg-gray-50'} rounded-xl overflow-hidden">
+            <summary class="px-4 py-3 cursor-pointer hover:bg-white/40 transition-colors flex items-center justify-between gap-3">
+              <div class="flex items-center gap-2">
+                <span class="text-lg">${b.icon}</span>
+                <span class="font-semibold text-sm">${b.label}</span>
+                <span class="text-[10px] bg-white/60 px-2 py-0.5 rounded-full font-bold text-gray-700">${(b.fields || []).length} champ${(b.fields || []).length > 1 ? 's' : ''}</span>
+              </div>
+              <span class="text-[10px] text-gray-600 italic max-w-md text-right">${b.description}</span>
+            </summary>
+            <div class="bg-white px-4 py-2 space-y-1">
+              ${fieldsHTML}
+            </div>
+          </details>
+        `;
+      }).filter(Boolean).join("");
+    }
+
+    // Listeners search + drift filter
+    document.addEventListener("DOMContentLoaded", () => {
+      const search = document.getElementById("mcscla-search");
+      if (search) search.addEventListener("input", renderMcsclaBuckets);
+      document.querySelectorAll(".drift-filter-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          _mcsclaActiveFilter = btn.dataset.drift;
+          document.querySelectorAll(".drift-filter-btn").forEach(b => b.classList.toggle("active", b === btn));
+          renderMcsclaBuckets();
+        });
+      });
+    });
+
+    loadMcsclaFields();
   </script>
 </body>
 </html>

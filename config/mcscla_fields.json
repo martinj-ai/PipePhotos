@@ -1,0 +1,173 @@
+{
+  "_meta": {
+    "version": "1.0",
+    "description": "Taxonomie MCSCLA des champs photo du pipeline DayAccess. Inspirée du standard vidéo de Lyes (manager) — adapté à la photo statique.",
+    "exported_at": "2026-05-06",
+    "total_fields": 35
+  },
+  "drift_taxonomy": {
+    "HARD_CAP": {
+      "label": "Hard cap immutable",
+      "color": "red",
+      "description": "Immutable cross-runs ET per-photo. Toute violation = exclusion immédiate (score -∞)."
+    },
+    "CONCEPT_CONSISTENT": {
+      "label": "Cohérence concept",
+      "color": "amber",
+      "description": "Doit être identique cross-photos d'un même hôtel (mais peut varier entre hôtels). Ex: vibe, persona pool."
+    },
+    "TOLERATED": {
+      "label": "Variance tolérée",
+      "color": "yellow",
+      "description": "Variance acceptable selon seuil défini (ex: ±5% de ratio crop, légère variation de saturation)."
+    },
+    "FREE": {
+      "label": "Libre",
+      "color": "green",
+      "description": "Pas de contrainte de cohérence. Évalué photo par photo."
+    }
+  },
+  "buckets": [
+    {
+      "id": "modele",
+      "icon": "🎯",
+      "label": "Modèle",
+      "color": "blue",
+      "description": "Vendor model selection + technical specs (résolution, endpoint, enhance strategy). Pas de décision créative.",
+      "fields": [
+        {"name": "model", "path": "config", "type": "enum", "drift": "HARD_CAP", "values": "gemini-2.5-flash-image | gemini-3.1-flash-image-preview | gemini-3-pro-image-preview | gpt-image-2", "description": "Modèle de génération/retouche IA. Décision adoptée Nano Banana 2 (cf. AB test 5/5/26)."},
+        {"name": "outpaint_quality", "path": "step_3.outpaint_quality", "type": "enum", "drift": "TOLERATED", "values": "flash | pro", "description": "Qualité du modèle d'outpainting multi-format (Flash $0.04 / Pro $0.13 fallback)."},
+        {"name": "outpaint_enabled", "path": "step_3.outpaint_enabled", "type": "bool", "drift": "FREE", "values": "true | false", "description": "Toggle utilisateur pour activer outpainting Nano Banana sur formats nécessitant extension."},
+        {"name": "enhance_strategy", "path": "enhance.action", "type": "enum", "drift": "HARD_CAP", "values": "ai_lighting | ai_add_character | ai_remove_clutter | ai_remove_people | ai_recompose | local_warm_boost", "description": "Action principale IA appliquée (déterminée par _pick_main_action selon analyse Gemini)."}
+      ]
+    },
+    {
+      "id": "camera",
+      "icon": "📷",
+      "label": "Camera",
+      "color": "purple",
+      "description": "Cadrage, type de plan, recommandations de crop. Pas de mouvement (photo statique).",
+      "fields": [
+        {"name": "shot_type", "path": "analysis.shot_type.type", "type": "enum", "drift": "HARD_CAP", "values": "close_up | medium | wide | aerial", "description": "Type de plan détecté par Gemini Vision. close_up = sujet plein cadre (≥30% humain)."},
+        {"name": "human_can_be_prominent", "path": "analysis.shot_type.human_can_be_prominent", "type": "bool", "drift": "TOLERATED", "description": "true uniquement si shot_type ∈ {close_up, medium} ET mobilier au premier plan exploitable."},
+        {"name": "recommended_crop", "path": "analysis.recommended_crop", "type": "object", "drift": "FREE", "values": "{should_crop, x_min_pct, y_min_pct, x_max_pct, y_max_pct}", "description": "Box éditoriale optimale pour rogner espaces morts (jamais couper humain visible)."},
+        {"name": "crop_safe_zones", "path": "analysis.crop_safe_zones", "type": "object", "drift": "HARD_CAP", "values": "{humans_bboxes[], main_amenity_bbox, critical_zones[]}", "description": "Bbox normalisées 0-1 utilisées par multi_format_cropper pour préserver humains + amenity lors du crop multi-format."},
+        {"name": "output_formats", "path": "step_3.output_formats[]", "type": "list", "drift": "FREE", "values": "13 IDs (home_card_mobile, insta_feed, etc.)", "description": "Formats cibles cochés par l'utilisateur. 1 ZIP avec dossier par format coché."}
+      ]
+    },
+    {
+      "id": "sujet",
+      "icon": "🧍",
+      "label": "Sujet",
+      "color": "pink",
+      "description": "Identité du/des personnages (réels ou ajoutés IA) : carnation, archétype persona, présence visible.",
+      "fields": [
+        {"name": "human_count", "path": "analysis.factual.human_count", "type": "int", "drift": "HARD_CAP", "description": "Nombre d'humains visibles dans la photo source."},
+        {"name": "human_face_visible", "path": "analysis.factual.human_face_visible", "type": "bool", "drift": "HARD_CAP", "description": "true si au moins 1 visage entier visible."},
+        {"name": "human_presence_type", "path": "analysis.factual.human_presence_type", "type": "enum", "drift": "HARD_CAP", "values": "none | partial | full_visible", "description": "Niveau d'incarnation narrative. partial = fragments seulement (mains, pieds)."},
+        {"name": "face_visibility", "path": "analysis.factual.face_visibility", "type": "enum", "drift": "HARD_CAP", "values": "complete | cropped | not_visible | no_human", "description": "Critique pour règle L4 anti-décapité."},
+        {"name": "persona", "path": "enhance.persona", "type": "enum", "drift": "CONCEPT_CONSISTENT", "values": "couples | solos | small_groups | families | groups", "description": "Persona retenu pour ajout humain (issu vibe RP × family_friendly_indicators)."},
+        {"name": "target_humans", "path": "enhance.target_humans", "type": "int", "drift": "TOLERATED", "description": "Nombre cible d'humains à placer (calcul capacity × persona)."},
+        {"name": "is_bonus_lifestyle", "path": "scoring.is_bonus_lifestyle", "type": "bool", "drift": "HARD_CAP", "description": "true si close-up bikini/torse + amenity en fond → bucket dédié L9 (max 2/hôtel)."}
+      ]
+    },
+    {
+      "id": "decor",
+      "icon": "🌴",
+      "label": "Décor",
+      "color": "emerald",
+      "description": "Catégorie d'amenity, capacity, indicateurs scène. Le bloc le plus dense — c'est ce qui drive la sélection et le scoring.",
+      "fields": [
+        {"name": "category", "path": "analysis.factual.category", "type": "enum", "drift": "HARD_CAP", "values": "piscine | cabana | rooftop | beach | spa | bar | f_and_b | gym | chambre | staff | interieur_commun | exterieur | hero_ext | detail | piscine_vue_aerienne", "description": "Catégorie principale détectée par Gemini. Drive le bucket coverage."},
+        {"name": "categories_secondary", "path": "analysis.factual.categories_secondary[]", "type": "list", "drift": "TOLERATED", "description": "Catégories supplémentaires applicables (ex: cabana en bord de piscine = [cabana, piscine])."},
+        {"name": "subjects", "path": "analysis.factual.subjects[]", "type": "list", "drift": "FREE", "description": "Éléments visibles du décor (transats, parasols, bar, plantes, etc.)."},
+        {"name": "background", "path": "analysis.factual.background", "type": "string", "drift": "FREE", "description": "Description courte du décor de fond (ex: 'vue gratte-ciel', 'jungle tropicale')."},
+        {"name": "amenity_dominance", "path": "analysis.amenity_dominance", "type": "object", "drift": "HARD_CAP", "values": "{primary_amenity_visible_pct, is_amenity_focused, reason}", "description": "% de la photo occupé visuellement par l'amenity COMME SUJET. Critique pour slot 1 (≥50% requis)."},
+        {"name": "placement_capacity", "path": "analysis.placement_capacity", "type": "object", "drift": "TOLERATED", "values": "{seats, water_zones, total, breakdown, reason}", "description": "Nombre de places utilisables pour ajout humain (sièges vides + zones d'eau)."},
+        {"name": "family_friendly_indicators", "path": "analysis.family_friendly_indicators", "type": "object", "drift": "CONCEPT_CONSISTENT", "values": "{is_family_friendly, indicators[], intimacy_indicators[]}", "description": "Indicateurs scène family vs adulte. Drive le persona contextuel par photo."},
+        {"name": "safe_zones_for_humans", "path": "analysis.safe_zones_for_humans", "type": "object", "drift": "HARD_CAP", "values": "{safe_areas[], unsafe_areas[], max_recommended}", "description": "Zones où placer un humain SANS que l'IA invente du décor. CRITIQUE pour ajout perso IA."}
+      ]
+    },
+    {
+      "id": "look",
+      "icon": "🎨",
+      "label": "Look",
+      "color": "amber",
+      "description": "Style visuel : lighting, palette, ambiance. Drive l'esthétique cinéma et la cohérence brand inter-hôtels.",
+      "fields": [
+        {"name": "time_of_day", "path": "analysis.factual.time_of_day", "type": "enum", "drift": "HARD_CAP", "values": "jour | nuit | aube_crepuscule | indetermine", "description": "Photos nuit/crépuscule → forcées en jour via ai_lighting (loi L5)."},
+        {"name": "ambiance", "path": "analysis.technical_hints.ambiance", "type": "enum", "drift": "TOLERATED", "values": "lumineux-chaud | lumineux-froid | sombre-chaud | sombre-froid | mixte", "description": "Tonalité globale. sombre-* déclenche ai_lighting."},
+        {"name": "palette_alignment", "path": "analysis.technical_hints.palette_alignment", "type": "enum", "drift": "CONCEPT_CONSISTENT", "values": "aligned-warm | aligned-cool | off-brand | neutral", "description": "Alignement palette vs brand Dayuse. off-brand → enhancement IA."},
+        {"name": "lut_brand", "path": "post_process.lut_applied", "type": "bool", "drift": "CONCEPT_CONSISTENT", "values": "true (toujours)", "description": "LUT brand Dayuse appliquée à TOUTES les photos finales (lois L11/F9 — redondance détectée)."},
+        {"name": "hero_quality", "path": "analysis.hero_quality", "type": "object", "drift": "HARD_CAP", "values": "{score, is_slot1_worthy, reason}", "description": "Score WOW factor 0-100. is_slot1_worthy=true si ≥70 ET amenity dominante (pas humain en gros plan)."}
+      ]
+    },
+    {
+      "id": "action",
+      "icon": "🎬",
+      "label": "Action",
+      "color": "indigo",
+      "description": "Ce qui se passe : action IA appliquée + alternance + position pack. Photo statique = pas de FLF chaining.",
+      "fields": [
+        {"name": "ai_action", "path": "enhance.action", "type": "enum", "drift": "HARD_CAP", "values": "ai_lighting | ai_add_character | ai_remove_clutter | ai_remove_people | ai_recompose | local_warm_boost | local_smart_crop", "description": "Action IA principale décidée par _pick_main_action. Mutuellement exclusive avec les autres lois."},
+        {"name": "add_character_flag", "path": "pipeline.add_character_filenames", "type": "set", "drift": "CONCEPT_CONSISTENT", "description": "Photos qui reçoivent un ajout humain (calcul alternance 1/2 stricte sur le pack)."},
+        {"name": "prev_photo_has_human", "path": "pipeline.prev_will_have_human", "type": "bool", "drift": "HARD_CAP", "description": "Variable séquence pour règle d'alternance L3 : si false → photo suivante DOIT avoir humain."},
+        {"name": "is_first_slot", "path": "pipeline.is_first_slot", "type": "bool", "drift": "HARD_CAP", "description": "Slot 1 (photo de couverture). Hard requirements L2/F5 + ajout humain forcé si pas natif."},
+        {"name": "final_order_pos", "path": "pipeline.final_order[filename]", "type": "int", "drift": "FREE", "description": "Position finale dans le pack ordonné (1-N)."},
+        {"name": "bucket_empty", "path": "coverage.bucket_empty", "type": "bool", "drift": "TOLERATED", "description": "Déclencheur de génération full IA (loi L8 : spa/bar OK, autres INTERDITS)."}
+      ]
+    },
+    {
+      "id": "audio",
+      "icon": "🔇",
+      "label": "Audio",
+      "color": "gray",
+      "description": "N/A pour photo statique. Bucket conservé pour cohérence avec la taxonomie vidéo de Lyes.",
+      "fields": []
+    },
+    {
+      "id": "context_ads",
+      "icon": "🚫",
+      "label": "Context Ads",
+      "color": "rose",
+      "description": "Contraintes brief-specific : ce qu'il faut retirer, problèmes signalés, blocklist.",
+      "fields": [
+        {"name": "clutter_to_remove", "path": "analysis.clutter_to_remove[]", "type": "list", "drift": "HARD_CAP", "description": "Éléments parasites à retirer (câbles, gobelets, logos tiers, eyesores techniques)."},
+        {"name": "issues", "path": "analysis.issues[]", "type": "list", "drift": "TOLERATED", "description": "Problèmes pour le brand (sombre, nuit, cadrage raté, absence d'amenity)."},
+        {"name": "issues_absence_amenity", "path": "analysis.issues_absence_amenity", "type": "bool", "drift": "HARD_CAP", "description": "Mention 'absence d'amenity' → exclude immédiate (loi L4 hero_ext banal)."},
+        {"name": "recommended_placement", "path": "analysis.recommended_placement.primary", "type": "enum", "drift": "TOLERATED", "values": "hero_home | product_page_amenities | product_page_incarnated | rejected | other_touchpoint", "description": "Recommandation Gemini sur le placement éditorial idéal."}
+      ]
+    },
+    {
+      "id": "context_dayuse",
+      "icon": "🏨",
+      "label": "Context Dayuse",
+      "color": "orange",
+      "description": "Différenciateur Dayuse-only : règles brand strictes pour Day Pass (pas de chambre, alternance, slot 1, vibes RP, bonus lifestyle).",
+      "fields": [
+        {"name": "vibe", "path": "rp.vibe_primary", "type": "enum", "drift": "CONCEPT_CONSISTENT", "values": "family_friendly | party | serene | luxe | trendy", "description": "Vibe extraite du scrape RP. Drive le pool de personas autorisés pour ajout IA."},
+        {"name": "personas_allowed", "path": "rp.personas_allowed[]", "type": "list", "drift": "CONCEPT_CONSISTENT", "description": "Personas autorisés depuis RP (ex: Trendy → solos/couples/small_groups en alternance)."},
+        {"name": "target_count_min_max", "path": "ordering.target_count_min/max", "type": "tuple", "drift": "HARD_CAP", "values": "(12, 18)", "description": "Cible 15 photos finales, min 12, max 18. Loi L1."},
+        {"name": "slot1_hard_requirements", "path": "ordering.slot1_validation", "type": "object", "drift": "HARD_CAP", "values": "{tier ∈ T1/T2/T3, dominance≥50%, shot_type≠close_up, hero_quality≥50}", "description": "Filtre éligibilité slot 1 (loi L2 + filet F5 — redondance détectée)."},
+        {"name": "category_volumes", "path": "coverage.target_min/max_per_category", "type": "object", "drift": "HARD_CAP", "values": "{pool: 3-4, cabana: 2-4, rooftop: 1-3, food: 0-1, ...}", "description": "Volumes max par catégorie (loi L7). Bar/Food/Gym = max 1, en queue de pack."},
+        {"name": "bonus_lifestyle_bucket", "path": "ordering.bonus_lifestyle_entries", "type": "list", "drift": "HARD_CAP", "values": "max 2/hôtel, en queue", "description": "Bucket dédié photos focus humain (loi L9). Slots N-1, N. Pas d'IA additionnelle."}
+      ]
+    },
+    {
+      "id": "orchestration",
+      "icon": "⚙️",
+      "label": "Orchestration meta",
+      "color": "slate",
+      "description": "Production / orchestration : tracking coût, tokens, durée, validation post-IA, audit trail.",
+      "fields": [
+        {"name": "cost_usd_per_step", "path": "cost.{analysis,enhancement,multiformat,vlm_dedup,verifier}_usd", "type": "object", "drift": "FREE", "description": "Coût USD ventilé par étape du pipeline."},
+        {"name": "tokens_per_step", "path": "cost.{analysis,enhancement,multiformat}_input/output_tokens", "type": "object", "drift": "FREE", "description": "Input/output tokens Gemini ventilés par étape (analyse Vision + retouche Nano Banana + outpainting)."},
+        {"name": "duration_ms", "path": "trace.duration_ms", "type": "int", "drift": "FREE", "description": "Durée par étape pour observabilité."},
+        {"name": "manifest_multiformat", "path": "data/output/{slug}/multiformat/manifest.json", "type": "file", "drift": "FREE", "description": "Audit trail multi-format : stratégie utilisée par variante (resize/crop/outpaint), modèle, coût, fallback Pro."},
+        {"name": "selected_for_pack", "path": "selection.selected_filenames", "type": "set", "drift": "HARD_CAP", "description": "Photos retenues dans le pack final (sortie scoring + ordering)."},
+        {"name": "framing_changed_post_ia", "path": "enhance.framing_changed", "type": "bool", "drift": "HARD_CAP", "description": "Détection si Nano Banana a recadré l'image → flag pour validation post-IA."},
+        {"name": "validation_post_ia", "path": "enhance.violations_detected", "type": "list", "drift": "HARD_CAP", "values": "invented_furniture | subject_on_water | scene_regenerated | architecture_changed | lighting_break", "description": "Violations détectées après IA → retry avec prompt durci → fallback original (loi L10 + filets F7/F8)."}
+      ]
+    }
+  ]
+}

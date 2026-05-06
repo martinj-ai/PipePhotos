@@ -255,7 +255,7 @@ def _aspect_ratio_label(target_size: tuple[int, int]) -> str:
 
 
 def _gemini_image_call(client, model: str, prompt: str, image_bytes: bytes, mime: str = "image/png"):
-    """Appel Gemini Image. Retourne les bytes de l'image générée ou None si texte uniquement."""
+    """Appel Gemini Image. Retourne (img_bytes, text, input_tokens, output_tokens)."""
     from google.genai import types
     response = client.models.generate_content(
         model=model,
@@ -269,7 +269,11 @@ def _gemini_image_call(client, model: str, prompt: str, image_bytes: bytes, mime
             break
         if hasattr(part, "text") and part.text:
             txt = part.text
-    return img_data, txt
+    # Extract tokens from usage_metadata if available
+    u = getattr(response, "usage_metadata", None)
+    input_tokens = (getattr(u, "prompt_token_count", 0) or 0) if u else 0
+    output_tokens = (getattr(u, "candidates_token_count", 0) or 0) if u else 0
+    return img_data, txt, input_tokens, output_tokens
 
 
 def outpaint_via_nano_banana(
@@ -306,9 +310,13 @@ def outpaint_via_nano_banana(
     aspect_label = _aspect_ratio_label(target_size)
     prompt = OUTPAINT_PROMPT_TEMPLATE.format(target_aspect_ratio=aspect_label)
     last_error = None
+    cumulated_input_tokens = 0
+    cumulated_output_tokens = 0
     for attempt in range(max_retry + 1):
         try:
-            img_data, txt = _gemini_image_call(client, model, prompt, image_bytes, "image/png")
+            img_data, txt, it, ot = _gemini_image_call(client, model, prompt, image_bytes, "image/png")
+            cumulated_input_tokens += it
+            cumulated_output_tokens += ot
             if img_data:
                 # Décode en Pillow
                 out_img = Image.open(BytesIO(img_data))
@@ -322,6 +330,8 @@ def outpaint_via_nano_banana(
                     "duration_s": duration_s,
                     "cost_usd": cost_usd,
                     "attempts": attempt + 1,
+                    "input_tokens": cumulated_input_tokens,
+                    "output_tokens": cumulated_output_tokens,
                 }
             last_error = f"no image returned (text: {(txt or '')[:120]})"
         except Exception as e:
@@ -468,6 +478,8 @@ def run_multi_format(
             "resize": 0, "crop": 0, "outpaint": 0, "skip": 0, "errors": 0,
         },
         "total_cost_usd": 0.0,
+        "total_input_tokens": 0,
+        "total_output_tokens": 0,
     }
 
     print(f"📐 Multi-format : {len(photos)} photos × {len(formats_to_run)} formats = {len(photos) * len(formats_to_run)} variantes" +
@@ -521,6 +533,8 @@ def run_multi_format(
                     manifest["summary"][strategy] += 1
                     cost = meta.get("cost_usd", 0)
                     manifest["total_cost_usd"] += cost
+                    manifest["total_input_tokens"] += meta.get("input_tokens", 0) or 0
+                    manifest["total_output_tokens"] += meta.get("output_tokens", 0) or 0
                     entry = {
                         "source": photo_path.name, "format_id": fmt["id"],
                         "output": str(variant_path.relative_to(output_dir)),
@@ -531,6 +545,8 @@ def run_multi_format(
                     if cost:
                         entry["cost_usd"] = cost
                         entry["model"] = meta.get("model")
+                        entry["input_tokens"] = meta.get("input_tokens", 0)
+                        entry["output_tokens"] = meta.get("output_tokens", 0)
                     if meta.get("fallback_pro"):
                         entry["fallback_pro"] = True
                     manifest["variants"].append(entry)

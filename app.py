@@ -791,6 +791,8 @@ def api_run():
     enhanced_dir = ROOT / "data" / "output" / slug / "enhanced"
     enhanced_results = []
     enhancement_cost_usd = 0.0
+    enhancement_input_tokens = 0
+    enhancement_output_tokens = 0
 
     # === Logique alternance STRICTE par position : slot pair = humain forcé ===
     # On force chaque slot pair (#2, #4, #6...) du pack ordonné à avoir un humain.
@@ -875,6 +877,8 @@ def api_run():
         result = enhance.enhance_one(input_path, strategy, enhanced_dir)
         enhanced_results.append({"filename": filename, "final_order_pos": i, **result})
         enhancement_cost_usd += result.get("cost_usd", 0)
+        enhancement_input_tokens += result.get("input_tokens", 0) or 0
+        enhancement_output_tokens += result.get("output_tokens", 0) or 0
         progress.update(
             f"{slug}_analyze",
             current=i,
@@ -1115,10 +1119,22 @@ def api_run():
             "analysis_output_tokens": total_output_tokens,
             "analysis_usd": round(total_cost_usd, 6),
             "enhancement_usd": round(total_enhancement_usd, 6),
+            "enhancement_input_tokens": enhancement_input_tokens,
+            "enhancement_output_tokens": enhancement_output_tokens,
+            "multiformat_usd": round((multiformat_result or {}).get("total_cost_usd", 0) or 0, 6),
+            "multiformat_input_tokens": (multiformat_result or {}).get("total_input_tokens", 0) or 0,
+            "multiformat_output_tokens": (multiformat_result or {}).get("total_output_tokens", 0) or 0,
             "vlm_dedup_usd": round(sum(p.get("cost_usd", 0) for p in vlm_dedup_results), 6),
             "amenity_verifier_usd": verifier_cost_usd,
-            "total_usd": round(total_all_usd + sum(p.get("cost_usd", 0) for p in vlm_dedup_results) + verifier_cost_usd, 6),
-            "total_eur": round((total_all_usd + sum(p.get("cost_usd", 0) for p in vlm_dedup_results) + verifier_cost_usd) * 0.92, 6),
+            "total_usd": round(
+                total_all_usd
+                + sum(p.get("cost_usd", 0) for p in vlm_dedup_results)
+                + verifier_cost_usd
+                + ((multiformat_result or {}).get("total_cost_usd", 0) or 0),
+                6),
+            "total_eur": round((total_all_usd + sum(p.get("cost_usd", 0) for p in vlm_dedup_results) + verifier_cost_usd + ((multiformat_result or {}).get("total_cost_usd", 0) or 0)) * 0.92, 6),
+            "total_input_tokens": total_input_tokens + enhancement_input_tokens + ((multiformat_result or {}).get("total_input_tokens", 0) or 0),
+            "total_output_tokens": total_output_tokens + enhancement_output_tokens + ((multiformat_result or {}).get("total_output_tokens", 0) or 0),
         },
         "vlm_dedup_results": vlm_dedup_results,
         "amenity_verifier_results": verifier_results,
@@ -1186,6 +1202,12 @@ def serve_upload(slug, filename):
 def api_output_formats():
     """Retourne le catalogue des formats de sortie pour l'UI Step 3."""
     return send_from_directory(ROOT / "config", "output_formats.json")
+
+
+@app.route("/api/mcscla-fields")
+def api_mcscla_fields():
+    """Retourne la taxonomie MCSCLA des champs photo (10 buckets) pour la doc."""
+    return send_from_directory(ROOT / "config", "mcscla_fields.json")
 
 
 @app.route("/api/download-multiformat-zip/<slug>")
