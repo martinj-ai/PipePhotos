@@ -338,6 +338,39 @@
       <h2 class="text-base font-semibold mb-1">3. Lancer l'analyse</h2>
       <p class="text-sm text-gray-500 mb-4">Pipeline complet : analyse Gemini → couverture → sélection → retouche → ajout IA → rapport.</p>
 
+      <!-- ⚡ Bandeau "Run précédent détecté" (replay) -->
+      <div id="resume-banner" class="hidden mb-5 rounded-xl border border-cyan-200 bg-gradient-to-br from-cyan-50 to-sky-50 p-4">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-base">⚡</span>
+          <span class="font-semibold text-sm text-cyan-900">Run précédent détecté</span>
+          <span id="resume-last-run" class="text-[11px] text-cyan-700 italic ml-auto"></span>
+        </div>
+        <div id="resume-status-grid" class="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-3 text-[11px]"></div>
+        <div class="space-y-1.5">
+          <label class="flex items-start gap-2 cursor-pointer p-2 rounded-lg hover:bg-white/50 transition">
+            <input type="radio" name="resume-from" value="scrape" checked class="mt-0.5 accent-cyan-600">
+            <div>
+              <div class="text-xs font-semibold">🔄 Tout re-analyser <span class="text-gray-500 font-normal">(comportement par défaut)</span></div>
+              <div class="text-[10px] text-gray-600">Ré-exécute analyse Gemini + sélection + retouches IA + multi-format. Coût et temps complets.</div>
+            </div>
+          </label>
+          <label id="resume-from-selection" class="flex items-start gap-2 cursor-pointer p-2 rounded-lg hover:bg-white/50 transition opacity-50 pointer-events-none">
+            <input type="radio" name="resume-from" value="selection" class="mt-0.5 accent-cyan-600" disabled>
+            <div>
+              <div class="text-xs font-semibold">⏩ Reprendre depuis sélection <span class="text-emerald-700 font-bold">(économie ~10min)</span></div>
+              <div class="text-[10px] text-gray-600">Skip analyse Gemini (charge JSON existants), refait sélection + retouches + multi-format. Idéal pour itérer sur les règles métier.</div>
+            </div>
+          </label>
+          <label id="resume-from-postprocess" class="flex items-start gap-2 cursor-pointer p-2 rounded-lg hover:bg-white/50 transition opacity-50 pointer-events-none">
+            <input type="radio" name="resume-from" value="postprocess" class="mt-0.5 accent-cyan-600" disabled>
+            <div>
+              <div class="text-xs font-semibold">⚡ Re-générer juste post-process <span class="text-emerald-700 font-bold">(économie ~15min)</span></div>
+              <div class="text-[10px] text-gray-600">Skip analyse + retouches (charge enhanced/ existant). Re-fait juste le multi-format crop / slowmo. Idéal pour tester de nouveaux formats.</div>
+            </div>
+          </label>
+        </div>
+      </div>
+
       <!-- Section formats de sortie (Step 5 multi-format crop) -->
       <details id="formats-section" class="mb-5 border border-dayuse-border rounded-xl overflow-hidden">
         <summary class="px-4 py-3 bg-gradient-to-br from-amber-50 to-orange-50 cursor-pointer hover:bg-amber-100/50 transition-colors flex items-center justify-between gap-3">
@@ -1659,6 +1692,8 @@ photo finale enhanced (jpeg)
         state.rp = data.data;
         renderRP(data.data);
         $("step-upload").classList.remove("opacity-50", "pointer-events-none");
+        // Replay : check si un run précédent existe pour ce slug
+        if (window.loadRunStatus) window.loadRunStatus(state.slug);
       } catch (e) {
         rpResult.classList.remove("hidden");
         rpResult.innerHTML = `<div class="text-red-600 text-sm">${e.message}</div>`;
@@ -1693,6 +1728,8 @@ photo finale enhanced (jpeg)
           if ($("booking-url")) $("booking-url").value = url;
           renderRP(data.data);
           $("step-upload").classList.remove("opacity-50", "pointer-events-none");
+          // Replay : check si un run précédent existe pour ce slug
+          if (window.loadRunStatus) window.loadRunStatus(state.slug);
         } catch (e) {
           rpResult.classList.remove("hidden");
           rpResult.innerHTML = `<div class="text-red-600 text-sm">${e.message}</div>`;
@@ -2088,11 +2125,15 @@ photo finale enhanced (jpeg)
         const outpaintQuality = (outpaintQualityEl && outpaintQualityEl.value) || 'flash';
         const slowmoToggle = document.getElementById('slowmo-toggle');
         const slowmoEnabled = !!(slowmoToggle && slowmoToggle.checked);
+        // Mode reprise : récupère la radio sélectionnée (default scrape = tout refaire)
+        const resumeRadio = document.querySelector('input[name="resume-from"]:checked');
+        const resumeFrom = (resumeRadio && resumeRadio.value) || 'scrape';
         const r = await fetch("/api/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             slug: state.slug,
+            resume_from: resumeFrom,
             deselected: [...(state.deselected || [])],
             output_formats: checkedFormats,
             outpaint_enabled: outpaintEnabled,
@@ -3326,6 +3367,74 @@ photo finale enhanced (jpeg)
 
     // Charge la config formats au boot
     loadOutputFormats();
+
+    // ━━━ Replay : détection d'un run précédent + bandeau resume ━━━
+    async function loadRunStatus(slug) {
+      const banner = document.getElementById("resume-banner");
+      if (!banner || !slug) {
+        if (banner) banner.classList.add("hidden");
+        return;
+      }
+      try {
+        const r = await fetch(`/api/run-status/${slug}`);
+        if (!r.ok) return;
+        const s = await r.json();
+        // Si rien d'utile sur disque → cache le bandeau
+        if (!s.n_sources && !s.n_analyses && !s.n_enhanced) {
+          banner.classList.add("hidden");
+          return;
+        }
+        banner.classList.remove("hidden");
+
+        // Last run timestamp
+        if (s.last_run_at) {
+          const dt = new Date(s.last_run_at * 1000);
+          document.getElementById("resume-last-run").textContent =
+            `dernier run : ${dt.toLocaleDateString('fr-FR')} ${dt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}`;
+        }
+
+        // Grid d'état
+        const grid = document.getElementById("resume-status-grid");
+        const cell = (label, n, ok) => `
+          <div class="rounded-md p-2 ${ok ? 'bg-emerald-100 text-emerald-900' : 'bg-gray-100 text-gray-500'}">
+            <div class="text-[10px] uppercase tracking-wide font-bold">${label}</div>
+            <div class="text-base font-mono font-bold">${n || 0} ${ok ? '✓' : ''}</div>
+          </div>`;
+        grid.innerHTML =
+          cell("Sources", s.n_sources, s.n_sources > 0) +
+          cell("Analyses", s.n_analyses, s.n_analyses > 0) +
+          cell("Retouchées", s.n_enhanced, s.n_enhanced > 0) +
+          cell("Multi-format", s.n_multiformat, s.n_multiformat > 0) +
+          cell("Slowmo", s.n_slowmo, s.n_slowmo > 0);
+
+        // Active les radios selon ce qui est possible
+        const selRow = document.getElementById("resume-from-selection");
+        const selInput = selRow.querySelector("input");
+        if (s.can_resume_from_selection) {
+          selRow.classList.remove("opacity-50", "pointer-events-none");
+          selInput.disabled = false;
+        } else {
+          selRow.classList.add("opacity-50", "pointer-events-none");
+          selInput.disabled = true;
+        }
+
+        const postRow = document.getElementById("resume-from-postprocess");
+        const postInput = postRow.querySelector("input");
+        if (s.can_resume_from_postprocess) {
+          postRow.classList.remove("opacity-50", "pointer-events-none");
+          postInput.disabled = false;
+          // Auto-select postprocess si tout est déjà fait
+          if (s.n_enhanced > 0) postInput.checked = true;
+        } else {
+          postRow.classList.add("opacity-50", "pointer-events-none");
+          postInput.disabled = true;
+        }
+      } catch (e) {
+        console.error("[run-status] failed", e);
+      }
+    }
+    // Expose globally pour rappel après scrape/upload
+    window.loadRunStatus = loadRunStatus;
 
     // ━━━ Taxonomie MCSCLA ━━━
     let _mcsclaData = null;

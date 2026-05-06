@@ -326,6 +326,7 @@ def analyze_batch(
     parallel: int = 5,
     output_dir: Path | None = None,
     progress_callback=None,
+    use_cache: bool = False,
 ) -> list[dict]:
     """Analyse N photos en parallèle (paid tier supporte ~1000 RPM).
 
@@ -335,6 +336,9 @@ def analyze_batch(
         parallel : nombre de workers concurrents
         output_dir : si fourni, sauve les JSON dans ce dossier au lieu de OUTPUT_DIR
         progress_callback : callable(done, total, last_filename) appelé après chaque photo
+        use_cache : si True, ré-utilise les JSON déjà présents dans output_dir au lieu
+                    de relancer Gemini. Permet de skip l'analyse pour économiser ~10min
+                    sur des tests itératifs (cf. /api/run resume_from=selection).
 
     Returns:
         Liste des payloads dans le même ordre que paths.
@@ -343,6 +347,19 @@ def analyze_batch(
 
     def _task(idx_path):
         idx, path = idx_path
+        # Cache lookup : si le JSON existe déjà → on le charge directement
+        if use_cache and output_dir:
+            cached_path = output_dir / f"{path.stem}.json"
+            if cached_path.exists():
+                try:
+                    with open(cached_path) as f:
+                        cached = json.load(f)
+                    # Marqueur pour debug : la photo a été chargée du cache, pas analysée
+                    cached["_from_cache"] = True
+                    return idx, cached
+                except Exception:
+                    # Cache corrompu → on relance l'analyse
+                    pass
         # write=False, on gère l'écriture nous-même pour pouvoir customiser output_dir
         payload = analyze_image_full(path, model, write=False)
         if output_dir:

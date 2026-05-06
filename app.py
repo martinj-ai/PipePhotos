@@ -514,6 +514,12 @@ def api_run():
     if not photo_paths:
         return jsonify({"error": "Toutes les photos désélectionnées. Coche au moins une photo."}), 400
 
+    # === Mode reprise (économise du temps sur tests itératifs) ===
+    # resume_from ∈ {"scrape" (défaut, tout refaire), "selection" (skip Gemini), "postprocess" (skip enhance)}
+    resume_from = (payload or {}).get("resume_from") or "scrape"
+    use_analysis_cache = resume_from in ("selection", "postprocess")
+    use_enhance_cache = resume_from == "postprocess"
+
     # === Étape 1 : Analyse Gemini en parallèle ===
     try:
         model = analyze.get_model()
@@ -525,11 +531,19 @@ def api_run():
     def _progress_cb(done, total, last_filename):
         # Récupère le payload du dernier traité pour cumuler le coût
         # Note : on n'a pas accès direct au payload ici, on cumule a posteriori après le batch
-        progress.increment(f"{slug}_analyze", current=done, message=f"Photo {done}/{total} : {last_filename}")
+        msg = f"Photo {done}/{total} : {last_filename}"
+        if use_analysis_cache:
+            msg = f"📂 Cache {done}/{total} : {last_filename}"
+        progress.increment(f"{slug}_analyze", current=done, message=msg)
 
     analyses_dir = ROOT / "data" / "analyses" / slug
     # parallel=3 (vs 5 avant) pour ne pas saturer le paid tier 1 sur les gros volumes
-    analyses = analyze.analyze_batch(photo_paths, model, parallel=3, output_dir=analyses_dir, progress_callback=_progress_cb)
+    analyses = analyze.analyze_batch(
+        photo_paths, model, parallel=3,
+        output_dir=analyses_dir,
+        progress_callback=_progress_cb,
+        use_cache=use_analysis_cache,
+    )
 
     # Cumul tokens & coût
     total_input_tokens = 0
@@ -877,7 +891,21 @@ def api_run():
             persona_override=persona_per_filename.get(filename),
         )
         input_path = Path(a["input"]["path_absolute"])
-        result = enhance.enhance_one(input_path, strategy, enhanced_dir)
+        # === Mode postprocess : skip enhance si fichier existe déjà ===
+        existing_enhanced = enhanced_dir / filename
+        if use_enhance_cache and existing_enhanced.exists():
+            result = {
+                "method": "cached",
+                "action": strategy.get("action", "cached"),
+                "reason": "📂 enhanced existant chargé du cache (resume_from=postprocess)",
+                "cost_usd": 0,
+                "duration_ms": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "from_cache": True,
+            }
+        else:
+            result = enhance.enhance_one(input_path, strategy, enhanced_dir)
         enhanced_results.append({"filename": filename, "final_order_pos": i, **result})
         enhancement_cost_usd += result.get("cost_usd", 0)
         enhancement_input_tokens += result.get("input_tokens", 0) or 0
@@ -1299,6 +1327,62 @@ def api_download_zip(slug):
 def serve_upload(slug, filename):
     """Sert les photos uploadées pour preview dans l'UI."""
     return send_from_directory(UPLOADS_DIR / slug, filename)
+
+
+@app.route("/api/run-status/<slug>")
+def api_run_status(slug):
+    """Détecte ce qui existe déjà sur disque pour un slug → permet de proposer
+    une reprise partielle dans l'UI Step 3 (économie de temps massif sur les
+    tests itératifs : skip analyse Gemini ~10min, skip enhance ~5min, etc.).
+    """
+    rp_path = ROOT / "data" / "rp" / f"{slug}.json"
+    sources_dir = UPLOADS_DIR / slug
+    analyses_dir = ROOT / "data" / "analyses" / slug
+    enhanced_dir = ROOT / "data" / "output" / slug / "enhanced"
+    multiformat_dir = ROOT / "data" / "output" / slug / "multiformat"
+    slowmo_dir = ROOT / "data" / "output" / slug / "slowmo"
+
+    n_sources = len([p for p in sources_dir.glob("*.jpg")] + [p for p in sources_dir.glob("*.jpeg")] + [p for p in sources_dir.glob("*.png")] + [p for p in sources_dir.glob("*.webp")]) if sources_dir.exists() else 0
+    n_analyses = len(list(analyses_dir.glob("*.json"))) if analyses_dir.exists() else 0
+    n_enhanced = len([p for p in enhanced_dir.glob("*.jpg")] + [p for p in enhanced_dir.glob("*.png")]) if enhanced_dir.exists() else 0
+    n_multiformat = 0
+    multiformat_formats = []
+    if multiformat_dir.exists():
+        for sub in multiformat_dir.iterdir():
+            if sub.is_dir():
+                count = len(list(sub.glob("*.jpg")))
+                if count > 0:
+                    multiformat_formats.append({"format_id": sub.name, "n_variants": count})
+                    n_multiformat += count
+    n_slowmo = 0
+    if slowmo_dir.exists():
+        n_slowmo = len(list(slowmo_dir.glob("*.mp4")) + list(slowmo_dir.glob("*.webm")))
+
+    # Latest run timestamp (depuis progress.json)
+    progress_path = ROOT / "data" / "progress" / f"{slug}_analyze.json"
+    last_run_at = None
+    if progress_path.exists():
+        try:
+            p = json.loads(progress_path.read_text())
+            last_run_at = p.get("updated_at")
+        except Exception:
+            pass
+
+    return jsonify({
+        "slug": slug,
+        "rp_scraped": rp_path.exists(),
+        "n_sources": n_sources,
+        "n_analyses": n_analyses,
+        "n_enhanced": n_enhanced,
+        "n_multiformat": n_multiformat,
+        "multiformat_formats": multiformat_formats,
+        "n_slowmo": n_slowmo,
+        "last_run_at": last_run_at,
+        # Niveaux de reprise possibles
+        "can_resume_from_analyze": n_sources > 0,
+        "can_resume_from_selection": n_analyses > 0 and n_sources > 0,
+        "can_resume_from_postprocess": n_enhanced > 0,  # juste re-générer multi-format/slowmo
+    })
 
 
 @app.route("/api/output-formats")
