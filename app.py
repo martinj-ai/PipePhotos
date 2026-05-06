@@ -1163,6 +1163,13 @@ def serve_enhanced(slug, filename):
     return send_from_directory(ROOT / "data" / "output" / slug / "enhanced", filename)
 
 
+@app.route("/output/<slug>/multiformat/<path:filename>")
+def serve_multiformat(slug, filename):
+    """Sert les variantes multi-format pour preview dans le rendu front.
+    Le path peut inclure le dossier format (ex: 'insta_feed/photo_01.jpg')."""
+    return send_from_directory(ROOT / "data" / "output" / slug / "multiformat", filename)
+
+
 @app.route("/api/download-zip/<slug>")
 def api_download_zip(slug):
     """Pack les photos retouchées finales en ZIP pour téléchargement."""

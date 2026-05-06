@@ -2297,6 +2297,65 @@ flowchart TD
           }
         }
 
+        // ━━ Variantes multi-format pour CETTE photo (Phase 1+2 multi-format crop) ━━
+        const multiformatStrip = (() => {
+          if (!d.multiformat || d.multiformat.error || !Array.isArray(d.multiformat.variants)) return '';
+          const variants = d.multiformat.variants.filter(v => v.source === e.filename && v.output);
+          if (variants.length === 0) return '';
+          const stratStyle = {
+            resize:   { bg: '#EFF6FF', border: '#BFDBFE', text: '#1D4ED8', icon: '↔', label: 'resize' },
+            crop:     { bg: '#ECFDF5', border: '#A7F3D0', text: '#047857', icon: '✂', label: 'crop' },
+            outpaint: { bg: '#FEF3C7', border: '#FCD34D', text: '#B45309', icon: '🎨', label: 'outpaint' },
+          };
+          const FMT_ABBR = {
+            home_card_mobile: 'Home mob.', home_card_desktop: 'Home desk.',
+            hotel_main_desktop: 'Hôtel main desk.', hotel_secondary_desktop: 'Hôtel sec. desk.',
+            hotel_main_mobile: 'Hôtel main mob.',
+            rate_plan_desktop: 'Rate plan desk.', rate_plan_mobile: 'Rate plan mob.',
+            youtube_thumbnail: 'YouTube', insta_feed: 'Insta feed',
+            insta_story: 'Insta story', linkedin_banner: 'LinkedIn',
+            facebook_og: 'Facebook OG', twitter_card: 'Twitter',
+          };
+          return `
+            <div class="px-3 pt-2.5 pb-1 border-t border-gray-100 bg-amber-50/30">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-amber-800">📐 ${variants.length} variantes multi-format</span>
+                <a href="/api/download-multiformat-zip/${d.slug}" class="text-[10px] text-amber-700 hover:text-amber-900 font-semibold">⬇ ZIP all</a>
+              </div>
+              <div class="flex gap-1.5 overflow-x-auto pb-1" style="scrollbar-width:thin;">
+                ${variants.map(v => {
+                  const s = stratStyle[v.strategy] || { bg:'#F9FAFB', border:'#E5E7EB', text:'#6B7280', icon:'•', label:v.strategy };
+                  const url = `/output/${d.slug}/multiformat/${v.output}`;
+                  const [w, h] = v.target_size || [0, 0];
+                  const ratio = h > 0 ? (w / h).toFixed(2) : '?';
+                  const abbr = FMT_ABBR[v.format_id] || v.format_id;
+                  // Largeur miniature : 90px max, hauteur calculée
+                  const thumbW = 86;
+                  const thumbH = Math.max(28, Math.min(60, Math.round(thumbW / Math.max(0.3, w / Math.max(h, 1)))));
+                  const fallback = v.fallback_pro ? '<span class="text-[8px] text-amber-700">🔄Pro</span>' : '';
+                  return `
+                    <a href="${url}" target="_blank" rel="noopener"
+                       class="flex-shrink-0 group relative rounded-md overflow-hidden border hover:shadow-md transition-all"
+                       style="background:${s.bg};border-color:${s.border};width:${thumbW}px;"
+                       title="${v.format_id} · ${w}×${h} (${ratio}:1) · ${v.strategy}${v.cost_usd ? ' · $' + v.cost_usd.toFixed(3) : ''}">
+                      <div style="width:${thumbW}px;height:${thumbH}px;background:#F3F4F6;display:flex;align-items:center;justify-content:center;overflow:hidden;">
+                        <img src="${url}" loading="lazy" alt="${v.format_id}" style="width:100%;height:100%;object-fit:cover;">
+                      </div>
+                      <div class="px-1 py-0.5" style="background:${s.bg};">
+                        <div class="text-[9px] font-semibold truncate" style="color:${s.text};">${abbr}</div>
+                        <div class="text-[8px] flex items-center justify-between" style="color:${s.text};opacity:0.75;">
+                          <span>${w}×${h}</span>
+                          <span>${s.icon}${fallback}</span>
+                        </div>
+                      </div>
+                    </a>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          `;
+        })();
+
         return `
           <div class="border border-gray-200 rounded-lg overflow-hidden bg-white">
             <div class="compare" data-idx="${i}">
@@ -2307,6 +2366,7 @@ flowchart TD
               <span class="label" style="left:8px">avant</span>
               <span class="label" style="right:8px; background:rgba(34,197,94,.85)">après</span>
             </div>
+            ${multiformatStrip}
             <div class="p-3 space-y-2">
               <div class="flex items-start justify-between gap-2">
                 <div class="flex-1">
