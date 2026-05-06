@@ -1155,5 +1155,17 @@ def serve_comparison(slug, filename="comparison.html"):
     return send_from_directory(ROOT / "data" / "output" / slug / "comparison", filename)
 
 
+@app.route("/laws-audit/")
+@app.route("/laws-audit/<path:filename>")
+def serve_laws_audit(filename="laws_audit.html"):
+    """Sert le rapport d'audit matriciel des lois (heatmaps redondance/conflit).
+
+    Documentation défendable : pour chaque paire des 20 lois (11 lois métier + 9 filets),
+    quantifie le % de redondance et de conflit sur ~73k PhotoStates simulés.
+    Cf. `laws.py` (formalisation) et `laws_matrix.py` (calcul).
+    """
+    return send_from_directory(ROOT / "data" / "output" / "laws_audit", filename)
+
+
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)

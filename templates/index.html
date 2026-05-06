@@ -412,6 +412,7 @@
         <button class="subtab-btn" data-subtab="discovery">🌐 Auto-discovery</button>
         <button class="subtab-btn" data-subtab="personas">👥 Personas &amp; humains</button>
         <button class="subtab-btn" data-subtab="models">🧪 Comparatif modèles</button>
+        <button class="subtab-btn" data-subtab="laws-audit">🧮 Audit matriciel</button>
       </nav>
 
       <!-- ━━━ Sous-onglet Workflow ━━━ -->
@@ -1208,6 +1209,57 @@ flowchart TD
         </section>
 
       </div><!-- /subtab-models -->
+
+      <!-- ━━━ Sous-onglet Audit matriciel ━━━ -->
+      <div id="subtab-laws-audit" class="subtab-panel">
+
+        <section class="card-dayuse p-6 mb-6">
+          <h2 class="text-base font-semibold mb-1">🧮 Audit matriciel des lois — preuve de cohérence</h2>
+          <p class="text-sm text-gray-500 mb-4">
+            Audit défendable des <strong>11 lois métier + 9 filets de sécurité</strong> du pipeline.
+            Pour chaque paire (Li, Lj), on simule ~73 000 photo-states et on quantifie la <strong>redondance</strong>
+            (% de cas où elles donnent la même action) et le <strong>conflit</strong> (% de cas où elles donnent
+            des décisions opposées). Audit théorique <strong>statique</strong> qui ne modifie pas le pipeline existant.
+          </p>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+            <div class="rounded-xl bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 p-4">
+              <div class="text-[11px] font-semibold uppercase tracking-wider text-amber-800 mb-1">🔁 Redondances détectées</div>
+              <ul class="text-xs text-amber-900 space-y-1">
+                <li><strong>F9 ↔ L11 = 100%</strong> : LUT brand systématique (filet) = LUT brand (loi). <em>Candidat à fusion.</em></li>
+                <li><strong>F1 ↔ L4 ≈ 25%</strong> : Hard exclude chambre/staff (amont) recouvert par exclusions absolues. <em>Justifié : F1 agit dès le mapping, L4 au filtre final.</em></li>
+              </ul>
+            </div>
+            <div class="rounded-xl bg-gradient-to-br from-red-50 to-rose-50 border border-red-200 p-4">
+              <div class="text-[11px] font-semibold uppercase tracking-wider text-red-800 mb-1">⚔️ Conflits détectés</div>
+              <ul class="text-xs text-red-900 space-y-1">
+                <li><strong>L4 ↔ L9 = 100%</strong> : Exclusions vs Bonus lifestyle (close-up bikini). <em>Résolu en code par le flag <code>is_bonus_lifestyle</code> qui distingue les vrais bonus.</em></li>
+                <li><strong>F5 ↔ L4 ≈ 25%</strong> : Slot 1 hard reqs accept vs exclusion absolue. <em>L4 prime (filtre antérieur).</em></li>
+                <li><strong>F5 ↔ L2 ≈ 11%</strong> : F5 accepte slot 1 (hard reqs OK), L2 reject par catégorie hors-tier. <em>L2 plus stricte — à fusionner ?</em></li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="rounded-xl bg-emerald-50 border-l-4 border-emerald-400 p-4 text-sm">
+            <strong class="text-emerald-900">✅ Verdict global :</strong>
+            <span class="text-emerald-800">Sur 20 lois × 73k états, on identifie <strong>2 redondances</strong> (1 fusion possible, 1 justifiée par la séquence) et <strong>3 conflits réels</strong> (tous résolus en code par ordre d'application explicite). Le système est défendable.</span>
+          </div>
+        </section>
+
+        <section class="card-dayuse p-2 mb-6">
+          <iframe src="/laws-audit/"
+                  style="width: 100%; height: 90vh; border: 0; border-radius: 10px;"
+                  loading="lazy"
+                  title="Audit matriciel des lois"></iframe>
+          <div class="px-4 py-2 text-xs text-gray-500 border-t border-gray-100 mt-1">
+            Heatmap interactive 20×20 · clique sur une cellule pour voir les exemples concrets de PhotoStates.
+            <a href="/laws-audit/" target="_blank" class="text-dayuse-primary font-semibold ml-2">↗ Ouvrir en plein écran</a>
+            <span class="mx-2">·</span>
+            <span class="font-mono text-[10px]">Régénérer : <code>.venv/bin/python laws_matrix.py</code></span>
+          </div>
+        </section>
+
+      </div><!-- /subtab-laws-audit -->
 
     </div><!-- /tab-doc -->
 

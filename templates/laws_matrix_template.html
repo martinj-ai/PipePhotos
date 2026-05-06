@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Audit matriciel des lois — Pipeline DayAccess</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Manrope', sans-serif;
+    background: #F9F9F9;
+    color: #292935;
+    line-height: 1.5;
+    padding: 24px;
+  }
+
+  header {
+    margin-bottom: 24px;
+    padding: 18px 22px;
+    background: white;
+    border-radius: 14px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  }
+  h1 {
+    font-size: 22px; font-weight: 800;
+    background: linear-gradient(90deg, #FEB900 0%, #FD7030 50%, #F66236 100%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 4px;
+  }
+  .header-sub { font-size: 13px; color: #54545D; }
+  .header-sub strong { color: #292935; }
+
+  /* Tabs (redondance / conflit) */
+  .matrix-tabs {
+    display: flex; gap: 8px;
+    margin-bottom: 16px;
+  }
+  .matrix-tab-btn {
+    padding: 10px 20px;
+    background: white; border: 1px solid #EAEAEB;
+    border-radius: 100px;
+    cursor: pointer;
+    font-family: inherit; font-size: 13px; font-weight: 600;
+    color: #54545D;
+    transition: all 0.2s ease;
+  }
+  .matrix-tab-btn.active {
+    background: linear-gradient(62deg, #FFAF36 0%, #FFC536 100%);
+    color: #292935; border-color: transparent;
+    box-shadow: 0 4px 12px rgba(255,175,54,0.3);
+  }
+  .matrix-tab-btn:not(.active):hover { background: #F5F5F7; }
+
+  .panel {
+    background: white;
+    border-radius: 14px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+    padding: 22px;
+    margin-bottom: 22px;
+  }
+
+  /* Heatmap */
+  .heatmap-wrap { overflow-x: auto; }
+  table.heatmap {
+    border-collapse: separate; border-spacing: 2px;
+    margin: 0 auto;
+  }
+  table.heatmap th, table.heatmap td {
+    text-align: center;
+    font-size: 9px;
+    font-weight: 600;
+    min-width: 28px; width: 28px; height: 28px;
+  }
+  table.heatmap thead th {
+    background: transparent;
+    color: #54545D;
+    font-weight: 700;
+    padding: 4px 2px;
+    transform: rotate(-50deg);
+    transform-origin: left bottom;
+    white-space: nowrap;
+    position: relative;
+    height: 56px;
+    min-width: 28px; width: 28px;
+    font-size: 10px;
+  }
+  table.heatmap tbody th {
+    text-align: right;
+    padding-right: 6px;
+    color: #54545D;
+    font-weight: 700;
+    font-size: 10px;
+    background: transparent;
+    width: 28px;
+  }
+  table.heatmap td {
+    border-radius: 6px;
+    color: white;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  table.heatmap td:hover {
+    transform: scale(1.15);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    z-index: 5;
+    position: relative;
+  }
+  table.heatmap td.diagonal {
+    background: #292935 !important; opacity: 0.2;
+    cursor: default;
+    color: rgba(255,255,255,0.4);
+  }
+  table.heatmap td.zero {
+    background: #F5F5F7;
+    color: #BCBCC0;
+    cursor: default;
+  }
+  table.heatmap td.zero:hover { transform: none; box-shadow: none; }
+
+  /* Color scales */
+  .legend {
+    display: flex; align-items: center; gap: 12px;
+    margin: 12px 0 6px;
+    font-size: 12px; color: #54545D;
+  }
+  .legend-gradient {
+    width: 240px; height: 12px;
+    border-radius: 100px;
+  }
+  .legend-redundancy { background: linear-gradient(90deg, #F5F5F7, #FFE4B5, #FFAF36, #F66236, #B71C1C); }
+  .legend-conflict { background: linear-gradient(90deg, #F5F5F7, #FFCDD2, #EF5350, #B71C1C, #4A148C); }
+
+  /* Top pairs */
+  .top-pairs {
+    display: grid; gap: 10px;
+    grid-template-columns: 1fr;
+  }
+  .top-pair-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 14px; background: #F9F9F9;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  .top-pair-row:hover { background: #F5F5F7; }
+  .top-pair-rank {
+    flex-shrink: 0; width: 28px; height: 28px;
+    background: linear-gradient(62deg, #FFAF36, #FFC536);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 12px;
+    color: #292935;
+  }
+  .top-pair-laws {
+    font-weight: 700; font-size: 13px; flex: 1;
+  }
+  .top-pair-laws .arrow { color: #FFAF36; margin: 0 8px; }
+  .top-pair-laws .label { font-weight: 500; color: #54545D; font-size: 11px; }
+  .top-pair-pct {
+    flex-shrink: 0; padding: 4px 10px; border-radius: 100px;
+    font-weight: 800; font-size: 12px;
+    color: white;
+  }
+
+  /* Stats */
+  .stats-grid {
+    display: grid; gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+  .stat-card {
+    padding: 12px 14px; background: #F9F9F9;
+    border-radius: 10px;
+  }
+  .stat-card-label { font-size: 11px; font-weight: 600; color: #8E8E93; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+  .stat-card-value { font-size: 18px; font-weight: 800; color: #292935; }
+
+  /* Modal */
+  .modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+    z-index: 1000;
+    align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: white;
+    border-radius: 16px;
+    max-width: 800px; width: 100%;
+    max-height: 90vh;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  }
+  .modal-header {
+    padding: 18px 22px;
+    border-bottom: 1px solid #EAEAEB;
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 12px;
+  }
+  .modal-title { font-size: 16px; font-weight: 800; }
+  .modal-pct {
+    padding: 4px 12px; border-radius: 100px;
+    font-weight: 800; font-size: 12px; color: white;
+  }
+  .modal-close {
+    width: 32px; height: 32px;
+    background: #F5F5F7; border: 0; border-radius: 50%;
+    cursor: pointer; font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .modal-body {
+    overflow-y: auto;
+    padding: 18px 22px;
+    flex: 1;
+  }
+  .modal-section {
+    margin-bottom: 18px;
+  }
+  .modal-section h3 {
+    font-size: 12px; font-weight: 700; color: #8E8E93;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    margin-bottom: 8px;
+  }
+  .example-card {
+    background: #F9F9F9; border-radius: 10px;
+    padding: 12px 14px; margin-bottom: 8px;
+    font-size: 12px; line-height: 1.5;
+  }
+  .example-state {
+    font-family: 'Courier New', monospace;
+    font-size: 11px; color: #54545D;
+    background: white; padding: 6px 10px;
+    border-radius: 6px; margin-bottom: 6px;
+  }
+  .example-decisions {
+    display: grid; gap: 6px;
+    grid-template-columns: 1fr 1fr;
+  }
+  .example-decision {
+    padding: 6px 10px; border-radius: 6px;
+    background: white;
+  }
+  .example-decision .law {
+    font-weight: 800; font-size: 11px;
+    color: #FFAF36;
+  }
+  .example-decision .reason { color: #292935; font-size: 11px; }
+
+  /* Family colors */
+  .family-loi { color: #F66236; }
+  .family-filet { color: #6E69AC; }
+
+  /* Layout 2 colonnes : matrice + légende lois */
+  .layout-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 260px;
+    gap: 18px;
+    align-items: start;
+  }
+  @media (max-width: 900px) {
+    .layout-grid { grid-template-columns: 1fr; }
+    .laws-legend { position: relative !important; top: 0 !important; max-height: none !important; }
+  }
+
+  /* Légende lois (sticky right) */
+  .laws-legend {
+    position: sticky;
+    top: 16px;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    background: white;
+    border-radius: 14px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+    padding: 14px;
+  }
+  /* Scrollbar fine */
+  .laws-legend::-webkit-scrollbar { width: 6px; }
+  .laws-legend::-webkit-scrollbar-thumb { background: #D4D4D7; border-radius: 100px; }
+  .laws-legend::-webkit-scrollbar-track { background: transparent; }
+  .laws-legend h2 {
+    font-size: 14px; font-weight: 800; margin-bottom: 4px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .laws-legend-sub {
+    font-size: 11px; color: #8E8E93; margin-bottom: 14px;
+    line-height: 1.4;
+  }
+  .laws-legend-section {
+    margin-bottom: 12px;
+  }
+  .laws-legend-section-title {
+    font-size: 10px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    color: #8E8E93;
+    margin: 12px 0 6px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #EAEAEB;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .law-row {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 6px 8px; border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+    margin-bottom: 1px;
+  }
+  .law-row:hover { background: #F9F9F9; }
+  .law-row.dimmed { opacity: 0.35; }
+  .law-id-pill {
+    flex-shrink: 0;
+    min-width: 28px; height: 20px;
+    padding: 0 6px;
+    border-radius: 5px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 800;
+    color: white;
+  }
+  .law-id-pill.loi { background: linear-gradient(62deg, #FFAF36, #FFC536); color: #292935; }
+  .law-id-pill.filet { background: linear-gradient(62deg, #6E69AC, #8B85C7); }
+  .law-row-text {
+    flex: 1; min-width: 0;
+  }
+  .law-short {
+    font-size: 11.5px; font-weight: 700; color: #292935;
+    line-height: 1.25;
+  }
+  .law-full {
+    font-size: 10px; color: #8E8E93;
+    line-height: 1.3;
+    margin-top: 1px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .law-trigger-count {
+    flex-shrink: 0;
+    font-size: 9px; font-weight: 600;
+    color: #8E8E93;
+    padding-top: 1px;
+    text-align: right;
+    min-width: 32px;
+    line-height: 1.2;
+  }
+  .law-trigger-count.zero { opacity: 0.4; }
+
+  .legend-search {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #EAEAEB;
+    border-radius: 100px;
+    font-family: inherit; font-size: 12px;
+    margin-bottom: 12px;
+    color: #292935;
+    transition: border-color 0.2s ease;
+  }
+  .legend-search:focus {
+    outline: none;
+    border-color: #FFAF36;
+  }
+
+  /* Adapt heatmap inside narrower column */
+  .heatmap-wrap { overflow-x: auto; max-width: 100%; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🧮 Audit matriciel des lois</h1>
+  <div class="header-sub">
+    <strong>__N_LAWS__</strong> lois (11 lois métier + 9 filets de sécurité) ·
+    <strong>__N_STATES__</strong> PhotoStates simulés ·
+    Audit théorique défendable de la cohérence du pipeline (5/5/2026)
+  </div>
+</header>
+
+<div class="matrix-tabs">
+  <button class="matrix-tab-btn active" onclick="setMatrixView('redundancy')">🔁 Redondance</button>
+  <button class="matrix-tab-btn" onclick="setMatrixView('conflict')">⚔️ Conflit</button>
+  <button class="matrix-tab-btn" onclick="setMatrixView('stats')">📊 Stats activation</button>
+</div>
+
+<div class="layout-grid">
+<div>
+<!-- HEATMAP -->
+<div class="panel" id="panel-heatmap">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:12px">
+    <div>
+      <div style="font-size:14px;font-weight:800;margin-bottom:2px" id="matrix-title">🔁 Matrice de redondance</div>
+      <div style="font-size:11px;color:#8E8E93" id="matrix-subtitle">% de cas où Li et Lj donnent la même action effective sur le même PhotoState</div>
+    </div>
+    <div class="legend">
+      <span>0%</span>
+      <div class="legend-gradient legend-redundancy" id="legend-gradient"></div>
+      <span>100%</span>
+    </div>
+  </div>
+
+  <div class="heatmap-wrap">
+    <table class="heatmap" id="heatmap-table"></table>
+  </div>
+</div>
+
+<!-- TOP PAIRS -->
+<div class="panel">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div>
+      <div style="font-size:14px;font-weight:800;margin-bottom:2px" id="top-title">🏆 Top 10 paires les plus redondantes</div>
+      <div style="font-size:11px;color:#8E8E93">Clique sur une paire pour voir les exemples concrets (PhotoStates).</div>
+    </div>
+  </div>
+  <div class="top-pairs" id="top-pairs"></div>
+</div>
+</div><!-- /col gauche -->
+
+<!-- LÉGENDE LOIS (sticky right) -->
+<aside class="laws-legend">
+  <h2>📋 Légende des lois</h2>
+  <div class="laws-legend-sub">
+    Clique sur une loi pour la <strong>highlighter</strong> dans la matrice et le top.
+  </div>
+
+  <input type="text" class="legend-search" id="legend-search" placeholder="🔍 Rechercher une loi..." oninput="filterLaws(this.value)">
+
+  <div id="legend-content"></div>
+</aside>
+
+</div><!-- /layout-grid -->
+
+<!-- MODAL DETAIL CELLULE -->
+<div class="modal-overlay" id="modal" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-title"></div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="modal-pct" id="modal-pct"></span>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+      </div>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<script>
+const RESULTS = __PAYLOAD__;
+let currentView = 'redundancy';
+
+const LAWS = RESULTS.laws;
+const TRIGGER_COUNT = RESULTS.trigger_count;
+
+function setMatrixView(view) {
+  currentView = view;
+  document.querySelectorAll('.matrix-tab-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+
+  const heatmapPanel = document.getElementById('panel-heatmap');
+  if (view === 'stats') {
+    heatmapPanel.innerHTML = renderStats();
+  } else {
+    heatmapPanel.innerHTML = renderHeatmapPanel();
+    renderHeatmap();
+  }
+  renderTopPairs();
+}
+
+function renderHeatmapPanel() {
+  const isRedundancy = currentView === 'redundancy';
+  const title = isRedundancy ? '🔁 Matrice de redondance' : '⚔️ Matrice de conflit';
+  const subtitle = isRedundancy
+    ? '% de cas où Li et Lj donnent la même action effective sur le même PhotoState'
+    : '% de cas où Li et Lj donnent des décisions opposées (ex: exclude vs include)';
+  const gradClass = isRedundancy ? 'legend-redundancy' : 'legend-conflict';
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:12px">
+      <div>
+        <div style="font-size:14px;font-weight:800;margin-bottom:2px">${title}</div>
+        <div style="font-size:11px;color:#8E8E93">${subtitle}</div>
+      </div>
+      <div class="legend">
+        <span>0%</span>
+        <div class="legend-gradient ${gradClass}"></div>
+        <span>100%</span>
+      </div>
+    </div>
+    <div class="heatmap-wrap">
+      <table class="heatmap" id="heatmap-table"></table>
+    </div>`;
+}
+
+function renderHeatmap() {
+  const matrix = currentView === 'redundancy' ? RESULTS.redundancy_matrix : RESULTS.conflict_matrix;
+  const table = document.getElementById('heatmap-table');
+  if (!table) return;
+
+  // Header
+  let html = '<thead><tr><th></th>';
+  for (const law of LAWS) {
+    html += `<th title="${law.label}">${law.id}</th>`;
+  }
+  html += '</tr></thead><tbody>';
+
+  for (const li of LAWS) {
+    html += `<tr><th title="${li.label}"><span class="family-${li.family}">${li.id}</span></th>`;
+    for (const lj of LAWS) {
+      const val = matrix[li.id][lj.id];
+      const isDiag = li.id === lj.id;
+      const isZero = !isDiag && val === 0;
+      const cls = isDiag ? 'diagonal' : (isZero ? 'zero' : '');
+      const bg = isDiag ? '' : (isZero ? '' : `background-color:${colorFor(val, currentView)}`);
+      const onClick = (!isDiag && !isZero) ? `onclick="openCell('${li.id}','${lj.id}')"` : '';
+      const label = isDiag ? '—' : (val > 0 ? val.toFixed(0) : '·');
+      html += `<td class="${cls}" style="${bg}" ${onClick} title="${li.id} ↔ ${lj.id}: ${val.toFixed(1)}%">${label}</td>`;
+    }
+    html += '</tr>';
+  }
+  html += '</tbody>';
+  table.innerHTML = html;
+}
+
+function colorFor(val, view) {
+  // val in [0, 100]
+  const t = Math.min(1, val / 100);
+  if (view === 'redundancy') {
+    // F5F5F7 → FFE4B5 → FFAF36 → F66236 → B71C1C
+    if (t < 0.25) return interpolate('#F5F5F7', '#FFE4B5', t / 0.25);
+    if (t < 0.50) return interpolate('#FFE4B5', '#FFAF36', (t - 0.25) / 0.25);
+    if (t < 0.75) return interpolate('#FFAF36', '#F66236', (t - 0.50) / 0.25);
+    return interpolate('#F66236', '#B71C1C', (t - 0.75) / 0.25);
+  } else {
+    if (t < 0.25) return interpolate('#F5F5F7', '#FFCDD2', t / 0.25);
+    if (t < 0.50) return interpolate('#FFCDD2', '#EF5350', (t - 0.25) / 0.25);
+    if (t < 0.75) return interpolate('#EF5350', '#B71C1C', (t - 0.50) / 0.25);
+    return interpolate('#B71C1C', '#4A148C', (t - 0.75) / 0.25);
+  }
+}
+
+function interpolate(c1, c2, t) {
+  const r1 = parseInt(c1.slice(1, 3), 16), g1 = parseInt(c1.slice(3, 5), 16), b1 = parseInt(c1.slice(5, 7), 16);
+  const r2 = parseInt(c2.slice(1, 3), 16), g2 = parseInt(c2.slice(3, 5), 16), b2 = parseInt(c2.slice(5, 7), 16);
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const b = Math.round(b1 + (b2 - b1) * t);
+  return `rgb(${r},${g},${b})`;
+}
+
+function renderTopPairs() {
+  const isStats = currentView === 'stats';
+  const titleEl = document.getElementById('top-title');
+  const wrap = document.getElementById('top-pairs');
+  if (isStats) {
+    titleEl.textContent = '📊 Activation par loi';
+    let html = '';
+    const sorted = LAWS.slice().sort((a, b) => (TRIGGER_COUNT[b.id] || 0) - (TRIGGER_COUNT[a.id] || 0));
+    for (let i = 0; i < sorted.length; i++) {
+      const law = sorted[i];
+      const count = TRIGGER_COUNT[law.id] || 0;
+      const pctActiv = (count / RESULTS.n_states * 100);
+      html += `
+        <div class="top-pair-row">
+          <div class="top-pair-rank">${i + 1}</div>
+          <div class="top-pair-laws">
+            <span class="family-${law.family}">${law.id}</span> · ${law.short_label}
+            <span class="label">— ${law.family}</span>
+          </div>
+          <div class="top-pair-pct" style="background:${count > 0 ? '#4CAF50' : '#9E9E9E'}">${count.toLocaleString()} états (${pctActiv.toFixed(0)}%)</div>
+        </div>`;
+    }
+    wrap.innerHTML = html;
+    return;
+  }
+
+  const isRedundancy = currentView === 'redundancy';
+  const pairs = isRedundancy ? RESULTS.top_redundancy : RESULTS.top_conflict;
+  titleEl.textContent = isRedundancy
+    ? '🏆 Top 10 paires les plus redondantes'
+    : '⚠️ Top 10 paires en conflit';
+
+  let html = '';
+  if (!pairs || pairs.length === 0) {
+    html = '<div style="text-align:center;color:#8E8E93;font-size:13px;padding:20px">Aucune paire détectée 🎉</div>';
+  } else {
+    for (let i = 0; i < pairs.length; i++) {
+      const p = pairs[i];
+      const liLaw = LAWS.find(l => l.id === p.li);
+      const ljLaw = LAWS.find(l => l.id === p.lj);
+      const color = colorFor(p.value, currentView);
+      html += `
+        <div class="top-pair-row" onclick="openCell('${p.li}','${p.lj}')">
+          <div class="top-pair-rank">${i + 1}</div>
+          <div class="top-pair-laws">
+            <span class="family-${liLaw.family}">${p.li}</span>
+            <span class="label">(${liLaw.short_label})</span>
+            <span class="arrow">↔</span>
+            <span class="family-${ljLaw.family}">${p.lj}</span>
+            <span class="label">(${ljLaw.short_label})</span>
+          </div>
+          <div class="top-pair-pct" style="background:${color}">${p.value.toFixed(1)}%</div>
+        </div>`;
+    }
+  }
+  wrap.innerHTML = html;
+}
+
+function renderStats() {
+  return `
+    <div style="font-size:14px;font-weight:800;margin-bottom:6px">📊 Activation par loi</div>
+    <div style="font-size:11px;color:#8E8E93;margin-bottom:14px">
+      Sur ${RESULTS.n_states.toLocaleString()} PhotoStates simulés, voici combien de fois chaque loi se déclenche.
+      Les lois scope=meta (L1, L7, L10, F2, F7, F8) ne s'activent jamais sur un PhotoState individuel — c'est attendu.
+    </div>
+    <div class="stats-grid" id="stats-grid"></div>`;
+}
+
+function openCell(li, lj) {
+  const detail = RESULTS.cell_details[li + '_' + lj];
+  if (!detail) return;
+  const matrix = currentView === 'redundancy' ? RESULTS.redundancy_matrix : RESULTS.conflict_matrix;
+  const val = matrix[li][lj];
+  const liLaw = LAWS.find(l => l.id === li);
+  const ljLaw = LAWS.find(l => l.id === lj);
+  const examples = currentView === 'redundancy' ? detail.examples_redundancy : detail.examples_conflict;
+  const counter = currentView === 'redundancy' ? detail.redundant : detail.conflict;
+  const total = currentView === 'redundancy' ? detail.either : detail.both;
+
+  document.getElementById('modal-title').innerHTML =
+    `<span class="family-${liLaw.family}">${li}</span> ↔ <span class="family-${ljLaw.family}">${lj}</span>` +
+    `<div style="font-size:11px;font-weight:500;color:#8E8E93;margin-top:2px">${liLaw.label} &nbsp;·&nbsp; ${ljLaw.label}</div>`;
+
+  const pctColor = colorFor(val, currentView);
+  document.getElementById('modal-pct').style.background = pctColor;
+  document.getElementById('modal-pct').textContent = val.toFixed(1) + '%';
+
+  let bodyHtml = `
+    <div class="modal-section">
+      <h3>📊 Statistiques</h3>
+      <div style="font-size:12px;color:#54545D;line-height:1.7">
+        Sur les ${RESULTS.n_states.toLocaleString()} PhotoStates simulés :<br>
+        - <strong>${detail.either.toLocaleString()}</strong> états où ${li} OU ${lj} se déclenche<br>
+        - <strong>${detail.both.toLocaleString()}</strong> états où LES DEUX se déclenchent en même temps<br>
+        - <strong>${detail.redundant.toLocaleString()}</strong> états où elles donnent la <strong>même action</strong> (= redondant)<br>
+        - <strong>${detail.conflict.toLocaleString()}</strong> états où elles donnent des <strong>actions opposées</strong> (= conflit)
+      </div>
+    </div>`;
+
+  if (examples && examples.length > 0) {
+    const kindLabel = currentView === 'redundancy' ? 'redondants' : 'en conflit';
+    bodyHtml += `<div class="modal-section">
+      <h3>🔍 Exemples concrets (${examples.length} ${kindLabel})</h3>`;
+    for (const ex of examples) {
+      const stateStr = formatState(ex.state);
+      bodyHtml += `
+        <div class="example-card">
+          <div class="example-state">${stateStr}</div>
+          <div class="example-decisions">
+            <div class="example-decision">
+              <div class="law">${li}</div>
+              <div class="reason">${ex.d1.reason}</div>
+            </div>
+            <div class="example-decision">
+              <div class="law">${lj}</div>
+              <div class="reason">${ex.d2.reason}</div>
+            </div>
+          </div>
+        </div>`;
+    }
+    bodyHtml += '</div>';
+  } else {
+    bodyHtml += `<div class="modal-section"><h3>🔍 Exemples</h3>
+      <div style="font-size:13px;color:#8E8E93;padding:12px;background:#F9F9F9;border-radius:8px">
+        Aucun exemple ${currentView === 'redundancy' ? 'redondant' : 'en conflit'} dans l'échantillon simulé. ✅
+      </div></div>`;
+  }
+
+  document.getElementById('modal-body').innerHTML = bodyHtml;
+  document.getElementById('modal').classList.add('open');
+}
+
+function formatState(s) {
+  const fields = ['category', 'time_of_day', 'human_count', 'shot_type', 'face_visibility',
+                  'amenity_dominance', 'hero_quality', 'is_first_slot', 'is_bonus_lifestyle',
+                  'has_clutter', 'bucket_empty'];
+  return fields.filter(f => s[f] !== undefined).map(f => {
+    const v = s[f];
+    if (v === false || v === 0 || v === 'no_face' || v === '') return '';
+    return `<strong>${f}</strong>=${v}`;
+  }).filter(Boolean).join(' · ');
+}
+
+function closeModal() {
+  document.getElementById('modal').classList.remove('open');
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+// ========== Légende des lois ==========
+let highlightedLaw = null;
+
+function renderLegend() {
+  const container = document.getElementById('legend-content');
+  const lois = LAWS.filter(l => l.family === 'loi');
+  const filets = LAWS.filter(l => l.family === 'filet');
+  const total = RESULTS.n_states;
+
+  function renderLawRow(law) {
+    const count = TRIGGER_COUNT[law.id] || 0;
+    const pct = (count / total * 100);
+    const countLabel = count > 0
+      ? `${count >= 1000 ? (count / 1000).toFixed(0) + 'k' : count} états<br>${pct.toFixed(0)}%`
+      : '<span style="opacity:0.5">jamais</span>';
+    return `
+      <div class="law-row" data-law-id="${law.id}" onclick="highlightLaw('${law.id}')">
+        <div class="law-id-pill ${law.family}">${law.id}</div>
+        <div class="law-row-text">
+          <div class="law-short">${law.short_label}</div>
+          <div class="law-full">${law.label}</div>
+        </div>
+        <div class="law-trigger-count ${count === 0 ? 'zero' : ''}">${countLabel}</div>
+      </div>`;
+  }
+
+  container.innerHTML = `
+    <div class="laws-legend-section">
+      <div class="laws-legend-section-title">
+        <span style="color:#F66236">📜 Lois métier</span>
+        <span style="font-weight:600;text-transform:none;letter-spacing:0">${lois.length}</span>
+      </div>
+      ${lois.map(renderLawRow).join('')}
+    </div>
+    <div class="laws-legend-section">
+      <div class="laws-legend-section-title">
+        <span style="color:#6E69AC">🛡 Filets de sécurité</span>
+        <span style="font-weight:600;text-transform:none;letter-spacing:0">${filets.length}</span>
+      </div>
+      ${filets.map(renderLawRow).join('')}
+    </div>`;
+}
+
+function filterLaws(query) {
+  const q = query.toLowerCase().trim();
+  document.querySelectorAll('.law-row').forEach(row => {
+    const id = row.dataset.lawId.toLowerCase();
+    const law = LAWS.find(l => l.id === row.dataset.lawId);
+    const text = (law.label + ' ' + law.short_label).toLowerCase();
+    const matches = !q || id.includes(q) || text.includes(q);
+    row.style.display = matches ? '' : 'none';
+  });
+}
+
+function highlightLaw(lawId) {
+  if (highlightedLaw === lawId) {
+    // Toggle off : remove highlight
+    highlightedLaw = null;
+    document.querySelectorAll('.law-row').forEach(r => r.classList.remove('dimmed'));
+    document.querySelectorAll('table.heatmap td, table.heatmap th').forEach(c => {
+      c.style.opacity = '';
+      c.style.outline = '';
+    });
+    document.querySelectorAll('.top-pair-row').forEach(r => r.classList.remove('dimmed'));
+    return;
+  }
+  highlightedLaw = lawId;
+
+  // Dim other law rows
+  document.querySelectorAll('.law-row').forEach(r => {
+    r.classList.toggle('dimmed', r.dataset.lawId !== lawId);
+  });
+
+  // Dim cells in heatmap : keep only row "lawId" and column "lawId"
+  document.querySelectorAll('table.heatmap thead th').forEach((c, i) => {
+    if (i === 0) return;
+    const targetId = LAWS[i - 1].id;
+    c.style.opacity = (targetId === lawId) ? '1' : '0.3';
+  });
+  document.querySelectorAll('table.heatmap tbody tr').forEach((row, rowIdx) => {
+    const rowLawId = LAWS[rowIdx].id;
+    const isInLawRow = rowLawId === lawId;
+    row.querySelectorAll('th, td').forEach((c, colIdx) => {
+      if (colIdx === 0) {
+        // header row label
+        c.style.opacity = isInLawRow ? '1' : '0.3';
+      } else {
+        const colLawId = LAWS[colIdx - 1].id;
+        const isInLawCol = colLawId === lawId;
+        const visible = isInLawRow || isInLawCol;
+        c.style.opacity = visible ? '1' : '0.18';
+        c.style.outline = (visible && (isInLawRow || isInLawCol)) ? '' : '';
+      }
+    });
+  });
+
+  // Dim top-pairs that don't include lawId
+  document.querySelectorAll('.top-pair-row').forEach(row => {
+    const text = row.textContent;
+    const matches = text.includes(lawId);
+    row.classList.toggle('dimmed', !matches);
+  });
+}
+
+renderLegend();
+renderHeatmap();
+renderTopPairs();
+</script>
+</body>
+</html>
