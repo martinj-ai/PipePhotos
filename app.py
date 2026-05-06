@@ -34,6 +34,10 @@ import progress
 import spend
 import dedup_vlm
 import amenity_verifier
+import photo_journey as photo_journey_mod
+import instagram_finder
+import instagram_scraper
+import booking_amenities_extractor
 
 ROOT = Path(__file__).parent
 UPLOADS_DIR = ROOT / "data" / "uploads"
@@ -70,6 +74,47 @@ def api_scrape():
         json.dump(result, f, indent=2, ensure_ascii=False)
 
     return jsonify({"slug": slug, "data": result})
+
+
+@app.route("/api/scrape-booking", methods=["POST"])
+def api_scrape_booking():
+    """Mode Booking-only : on récupère amenities + meta hôtel depuis Booking (sans RP).
+
+    Body : {url: "https://www.booking.com/hotel/..."}
+    Output : compatible avec /api/scrape (rp data structure équivalente).
+    Le slug est dérivé du chemin Booking (ex: booking-yotel-miami).
+    """
+    payload = request.get_json(silent=True) or {}
+    url = (payload.get("url") or "").strip()
+    if not url.startswith("https://www.booking.com/hotel/"):
+        return jsonify({"error": "URL doit être une fiche hôtel Booking."}), 400
+
+    progress.init("booking_scrape", total=2, step="extracting")
+    progress.update("booking_scrape", message="Scraping page Booking + analyse Gemini…")
+    try:
+        data = booking_amenities_extractor.extract_hotel_data_from_booking(url)
+    except Exception as e:
+        progress.finish("booking_scrape", message=f"Erreur : {str(e)[:200]}")
+        return jsonify({"error": f"Échec extraction Booking : {str(e)[:200]}"}), 500
+
+    if data.get("error"):
+        progress.finish("booking_scrape", message=f"Erreur : {data['error']}")
+        return jsonify({"error": data["error"]}), 500
+
+    # Génère un slug à partir du chemin Booking (ex: yotel-miami) ou du nom hôtel
+    parsed_path = url.rstrip("/").split("/")
+    booking_slug = parsed_path[-1].replace(".html", "") if parsed_path else "hotel"
+    slug = f"booking-{booking_slug}"
+
+    # Sauvegarde au même endroit que les scrapes RP (pour réutiliser le pipeline en aval)
+    rp_dir = ROOT / "data" / "rp"
+    rp_dir.mkdir(parents=True, exist_ok=True)
+    out_path = rp_dir / f"{slug}.json"
+    with open(out_path, "w") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+    progress.finish(f"booking_scrape", message="OK")
+    return jsonify({"slug": slug, "data": data})
 
 
 @app.route("/api/fetch-rp-photos", methods=["POST"])
@@ -228,6 +273,59 @@ def api_fetch_all_sources():
         (hotel_dir / "_rp_temp").rmdir() if (hotel_dir / "_rp_temp").exists() and not list((hotel_dir / "_rp_temp").iterdir()) else None
         sources_summary["rp"] = {"photos_downloaded": len(ok)}
 
+    # ━━━ SOURCE 4 : Instagram ━━━
+    if sources.get("instagram"):
+        progress.update(f"{slug}_fetch_all", step="instagram_finding", current=82, total=100,
+                        message="Recherche compte Instagram via Gemini…")
+        ig_finder_result = instagram_finder.find_hotel_instagram(
+            name=rp_data.get("name", ""),
+            city=rp_data.get("city", ""),
+            country=rp_data.get("country", ""),
+        )
+        if ig_finder_result and ig_finder_result.get("url"):
+            ig_url = ig_finder_result["url"]
+            progress.update(f"{slug}_fetch_all", step="instagram_scraping", current=85, total=100,
+                            message=f"Scraping {ig_url}…")
+            try:
+                ig_extract = instagram_scraper.scrape_instagram_photos(ig_url, max_photos=30)
+                ig_urls = ig_extract.get("photos") or []
+                ig_results = (booking_scraper.download_photos_to_dir(
+                    ig_urls, hotel_dir / "_instagram_temp", max_photos=30
+                ) if ig_urls else [])
+                ok = [r for r in ig_results if r["status"] == "ok"]
+                for i, r in enumerate(ok, 1):
+                    old = hotel_dir / "_instagram_temp" / r["filename"]
+                    base = r["filename"].split("_", 2)[-1] if "_" in r["filename"] else r["filename"]
+                    new_name = f"instagram_{i:03d}_{base}"
+                    new_path = hotel_dir / new_name
+                    if old.exists():
+                        old.rename(new_path)
+                        all_files.append({"name": new_name, "size": r["size"], "source": "instagram"})
+                tmp = hotel_dir / "_instagram_temp"
+                if tmp.exists() and not list(tmp.iterdir()):
+                    tmp.rmdir()
+                sources_summary["instagram"] = {
+                    "url": ig_url,
+                    "handle": ig_finder_result.get("handle"),
+                    "photos_downloaded": len(ok),
+                    "photos_found": len(ig_urls),
+                }
+                if ig_extract.get("error"):
+                    sources_summary["instagram"]["error"] = ig_extract["error"]
+            except Exception as e:
+                sources_summary["instagram"] = {
+                    "url": ig_url,
+                    "handle": ig_finder_result.get("handle"),
+                    "error": str(e)[:200],
+                    "photos_downloaded": 0,
+                }
+        else:
+            sources_summary["instagram"] = {
+                "url": None,
+                "error": (ig_finder_result or {}).get("error", "compte Instagram introuvable via Gemini"),
+                "photos_downloaded": 0,
+            }
+
     # ━━━ Dédup pHash inter-sources ━━━
     progress.update(f"{slug}_fetch_all", step="dedup", current=92, total=100,
                     message="Dédup pHash inter-sources…")
@@ -237,7 +335,7 @@ def api_fetch_all_sources():
         kept, dropped = dedup_angles.select_best_per_cluster(clusters)
         kept_set = {p.resolve() for p in kept}
         # Supprime les doublons (priorité : official > booking > rp pour conserver dans cet ordre)
-        priority = {"official": 3, "booking": 2, "rp": 1}
+        priority = {"official": 4, "booking": 3, "instagram": 2, "rp": 1}
         files_by_path = {(hotel_dir / f["name"]).resolve(): f for f in all_files}
         for cluster in clusters:
             if len(cluster) <= 1:
@@ -403,16 +501,15 @@ def api_run():
     if not hotel_dir.exists():
         return jsonify({"error": "Aucune photo uploadée pour cet hôtel."}), 400
 
-    photo_paths = sorted(p for p in hotel_dir.iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"))
-    if not photo_paths:
+    photo_paths_all = sorted(p for p in hotel_dir.iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"))
+    if not photo_paths_all:
         return jsonify({"error": "Dossier upload vide."}), 400
 
     # Filtrage manuel : photos désélectionnées par l'utilisateur dans la grille
     deselected = set((payload or {}).get("deselected") or [])
-    if deselected:
-        photo_paths = [p for p in photo_paths if p.name not in deselected]
-        if not photo_paths:
-            return jsonify({"error": "Toutes les photos désélectionnées. Coche au moins une photo."}), 400
+    photo_paths = [p for p in photo_paths_all if p.name not in deselected]
+    if not photo_paths:
+        return jsonify({"error": "Toutes les photos désélectionnées. Coche au moins une photo."}), 400
 
     # === Étape 1 : Analyse Gemini en parallèle ===
     try:
@@ -624,7 +721,12 @@ def api_run():
             continue
         if not photo_generator.can_generate(cat):
             continue  # food, pool, cabana etc. : pas de génération autorisée
-        # On a un manque ET la catégorie peut être générée
+        # ━ Génération uniquement si bucket activé par Booking (pas par les photos seulement) ━
+        # Si auto_activated_by_photos=True, c'est qu'on a des photos mais pas de mention Booking.
+        # Ne pas générer dans ce cas (risque de fabriquer un faux spa pour un hôtel sans).
+        if info.get("auto_activated_by_photos"):
+            continue
+        # On a un manque ET la catégorie peut être générée ET Booking confirme l'amenity
         gen_dir = ROOT / "data" / "uploads" / slug
         gen_path = gen_dir / f"_generated_{cat}.png"
         gen_result = photo_generator.generate_photo_for_amenity(cat, gen_path)
@@ -698,49 +800,63 @@ def api_run():
     personas_allowed = rp_data.get("personas_allowed") or []
     vibe = rp_data.get("vibe_primary")
 
-    # ━━ Alternance humain STRICTE + rotation des personas balancée ━━
-    # Règle : jamais 2 photos sans humain à la suite.
-    # Slot 1 a sa règle propre : humain obligatoire.
-    # Rotation des personas : on alterne pour varier (solos / couples / small_groups / families).
-    # Slot 1 priorise les personas "groupe" (couples / small_groups) plus aspirationnels que solos.
+    # ━━ Alternance humain STRICTE + persona contextuel par photo ━━
+    # Vibe RP supprimée → personas autorisés = liste statique [couples, small_groups, families, solos].
+    # Détection contextuelle par photo via le champ Gemini family_friendly_indicators :
+    #   - Si la photo contient toboggan / aire de jeux / kids pool / kid menu → on PEUT mettre families
+    #   - Si la photo est intimiste (bar adulte, lounge feutré) → on PRÉFÈRE couples / solos
+    #   - Sinon défaut neutre → couples (ou solos par rotation)
+    # Approche NON CONTRAIGNANTE : si pas de match clair, on tombe sur couples/solos sans risque.
+    DEFAULT_PERSONAS = ["couples", "small_groups", "solos"]  # rotation par défaut
     add_character_filenames = set()
-    persona_per_filename = {}  # filename → persona à utiliser
+    persona_per_filename = {}
 
-    # Construit l'ordre de rotation : couples/small_groups en premier si dispo, solos en fallback.
-    PERSONA_PRIORITY_FIRST = ["couples", "small_groups", "families", "groups", "solos"]
-    rotation_order = [p for p in PERSONA_PRIORITY_FIRST if p in personas_allowed] if personas_allowed else []
-    # Garde aussi les personas autorisés non priorisés (au cas où on ajoute un persona custom)
-    for p in (personas_allowed or []):
-        if p not in rotation_order:
-            rotation_order.append(p)
-
+    # Construction du pool de personas dispo : on union avec personas_allowed (rétrocompat) si fourni
+    pool_personas = list(DEFAULT_PERSONAS)
     if personas_allowed:
-        prev_will_have_human = False
-        persona_idx = 0  # rotation parmi rotation_order
-        for idx, entry in enumerate(ordered_pack, 1):
-            # Skip bonus lifestyle : elles ont déjà leur humain natif, on ne touche à rien
-            if entry.get("is_bonus_lifestyle"):
-                prev_will_have_human = True  # bonus = humain
-                continue
-            has_human_native = enhance.has_narrative_human(entry["analysis"])
-            is_candidate = enhance.is_add_character_candidate(entry["analysis"])
+        for p in personas_allowed:
+            if p not in pool_personas:
+                pool_personas.append(p)
 
-            will_add = False
-            if idx == 1 and not has_human_native and is_candidate:
-                # Slot 1 = humain obligatoire (règle brand)
-                will_add = True
-            elif not has_human_native and not prev_will_have_human and is_candidate:
-                # Alternance stricte : si précédente sans humain, on force humain ici
-                will_add = True
+    def _pick_contextual_persona(entry: dict, rotation_idx: int) -> str:
+        """Choisit le persona pour CETTE photo en regardant ses indicateurs contextuels.
 
-            if will_add:
-                fname = entry["input"]["filename"]
-                add_character_filenames.add(fname)
-                # Rotation balancée : couples/small_groups d'abord, puis solos
-                persona_per_filename[fname] = rotation_order[persona_idx % len(rotation_order)]
-                persona_idx += 1
+        Règle non-contraignante : si pas d'indicateur clair → fallback sur la rotation par défaut.
+        """
+        analysis = entry.get("analysis") or {}
+        ff = analysis.get("family_friendly_indicators") or {}
+        is_family = bool(ff.get("is_family_friendly"))
+        # Si la photo est family-friendly ET 'families' est dispo → priorité families
+        if is_family and "families" in pool_personas:
+            return "families"
+        # Sinon rotation par défaut sur DEFAULT_PERSONAS (couples > small_groups > solos)
+        order = [p for p in DEFAULT_PERSONAS if p in pool_personas]
+        if not order:
+            order = pool_personas
+        return order[rotation_idx % len(order)] if order else "couples"
 
-            prev_will_have_human = has_human_native or will_add
+    prev_will_have_human = False
+    persona_idx = 0
+    for idx, entry in enumerate(ordered_pack, 1):
+        if entry.get("is_bonus_lifestyle"):
+            prev_will_have_human = True
+            continue
+        has_human_native = enhance.has_narrative_human(entry["analysis"])
+        is_candidate = enhance.is_add_character_candidate(entry["analysis"])
+
+        will_add = False
+        if idx == 1 and not has_human_native and is_candidate:
+            will_add = True
+        elif not has_human_native and not prev_will_have_human and is_candidate:
+            will_add = True
+
+        if will_add:
+            fname = entry["input"]["filename"]
+            add_character_filenames.add(fname)
+            persona_per_filename[fname] = _pick_contextual_persona(entry, persona_idx)
+            persona_idx += 1
+
+        prev_will_have_human = has_human_native or will_add
 
     # === Boucle de retouche : on itère dans l'ORDRE FINAL du pack (slot 1, 2, ...) ===
     ordered_filenames = [e["input"]["filename"] for e in ordered_pack]
@@ -970,6 +1086,20 @@ def api_run():
         },
         "vlm_dedup_results": vlm_dedup_results,
         "amenity_verifier_results": verifier_results,
+        # ━━ Workflow visualization data ━━
+        "photo_journey": photo_journey_mod.build_photo_journey(
+            slug=slug,
+            photo_paths_all=photo_paths_all,
+            deselected_set=deselected,
+            analyses=analyses,
+            cov=cov,
+            generated_photos=generated_photos,
+            ordered_pack=ordered_pack,
+            enhanced_results=enhanced_results,
+            vlm_dedup_results=vlm_dedup_results,
+            verifier_results=verifier_results,
+        ),
+        "workflow_nodes": photo_journey_mod.NODE_DEFINITIONS,
     })
 
 
@@ -1012,6 +1142,17 @@ def api_download_zip(slug):
 def serve_upload(slug, filename):
     """Sert les photos uploadées pour preview dans l'UI."""
     return send_from_directory(UPLOADS_DIR / slug, filename)
+
+
+@app.route("/comparison/<slug>/")
+@app.route("/comparison/<slug>/<path:filename>")
+def serve_comparison(slug, filename="comparison.html"):
+    """Sert le rapport comparatif AB test (HTML + images des sous-dossiers).
+
+    Utilisé pour intégrer la documentation modèles d'image (Nano Banana vs GPT)
+    dans l'onglet Documentation > Comparatif modèles via iframe.
+    """
+    return send_from_directory(ROOT / "data" / "output" / slug / "comparison", filename)
 
 
 if __name__ == "__main__":

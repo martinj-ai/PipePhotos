@@ -212,10 +212,40 @@ CATEGORY_ACTION_HINT = {
 }
 
 
+# ━━ Arbre de décision Persona × Capacity ━━
+# Aligné sur la doc onglet Personas & humains (Vision validé Martin).
+# capacity = seats + water_zones identifiés par Gemini sur la photo.
+# Règle d'or : ne JAMAIS dépasser la capacity (pas d'invention de places).
+# Si capacity = 0 → on ne place pas d'humain (pipeline skip propre).
+PERSONA_CAPACITY_TARGET = {
+    # persona  →  fonction qui prend capacity et retourne nombre cible d'humains
+    "solos":        lambda cap: 1,
+    "couples":      lambda cap: 1 if cap == 1 else 2,
+    "small_groups": lambda cap: 1 if cap == 1 else (2 if cap in (2, 3) else 3),
+    "families":     lambda cap: 1 if cap == 1 else (2 if cap in (2, 3) else (4 if cap >= 7 else 3)),
+    "groups":       lambda cap: 1 if cap == 1 else (2 if cap == 2 else (3 if cap == 3 else (4 if cap <= 6 else 5))),
+}
+
+
+def compute_target_humans(persona: str, capacity: int) -> int:
+    """Détermine combien d'humains placer selon le persona et la capacity de la photo.
+
+    Approche NON-CONTRAIGNANTE : si capacity=0 → 0 humain. Sinon arbre selon persona.
+    """
+    if capacity <= 0:
+        return 0
+    fn = PERSONA_CAPACITY_TARGET.get(persona)
+    if not fn:
+        # Fallback sécuritaire : 1 ou 2 selon capacity
+        return 1 if capacity == 1 else 2
+    return fn(capacity)
+
+
 def build_persona_prompt(persona: str, category: str, vibe: str | None = None,
                          safe_zones: list[str] | None = None,
                          unsafe_zones: list[str] | None = None,
-                         max_humans: int | None = None) -> str:
+                         max_humans: int | None = None,
+                         capacity: int | None = None) -> str:
     """Construit le prompt ajout personnage à partir des templates validés Martin.
 
     Pattern issu de ses prompts Higgsfield :
@@ -229,6 +259,16 @@ def build_persona_prompt(persona: str, category: str, vibe: str | None = None,
     """
     persona_desc = PERSONA_TEMPLATES.get(persona, PERSONA_TEMPLATES["couples"])
     action_hint = CATEGORY_ACTION_HINT.get(category, "naturally placed in the scene, candid relaxed moment")
+
+    # ━ Arbre humains × capacity : adapte le nombre cible selon la capacity de la scène ━
+    if capacity is not None and capacity > 0:
+        target_n = compute_target_humans(persona, capacity)
+    elif max_humans is not None:
+        target_n = max_humans
+    else:
+        # Fallback : 1 ou 2 selon persona
+        target_n = 2 if persona in ("couples", "small_groups", "families", "groups") else 1
+    target_n = max(1, min(target_n, 5))  # cap dur 1-5
 
     vibe_mood = {
         "Family-Friendly": "warm family vacation energy, playful but tasteful",
@@ -323,12 +363,17 @@ ACTION & CONTEXT:
 {action_hint}. {vibe_mood}.
 Mid-action, candid moment, slight asymmetry — feels like a real captured moment, not staged.
 
-QUANTITY & SCALE (CRITICAL — bias toward LESS):
-- DEFAULT: add ONE single subject only (or one couple if persona explicitly is "couple" or "couples"). MORE PEOPLE IS RARELY BETTER.
-- HARD MAXIMUM: 3 people total, but use this only if the scene clearly has 3+ obviously empty existing seats and adding more would feel natural.
-- TRADE-OFF RULE: if you cannot place the requested number of people on EXISTING furniture without inventing, place FEWER people. A single person on the foreground lounger is far better than 2 people requiring a fabricated daybed.
-- ALL added subjects MUST share the SAME camera-relative scale: a person at 10m looks twice smaller than a person at 5m. Respect perspective rigorously.
-- Place subjects in ONE coherent group. Do not scatter people in 2+ disconnected zones.
+🔢 QUANTITY HARD LOCK — EXACTLY {target_n} HUMANS, NO MORE NO LESS:
+- 🎯 TARGET = **{target_n}** subjects (computed from persona × scene capacity).
+- This is a HARD MAX. You MUST count the humans you place and STOP at {target_n}. NEVER add a {target_n}+1th person under any pretext. {target_n} = {target_n}, period.
+- If for "compositional balance" you feel like adding one more, DON'T. The instruction is {target_n} exactly.
+- NEVER exceed the visible EMPTY capacity of the scene either. If there's only 1 empty lounger + 1 water zone → max 2 people total, even if target_n says more.
+- TRADE-OFF RULE: if you cannot place {target_n} subjects on EXISTING furniture/water WITHOUT inventing → PLACE FEWER (target_n − 1, target_n − 2, or even just 1). Better fewer than fabricated.
+- ALL added subjects share the SAME camera-relative scale (perspective). One person at 10m is half the size of one at 5m.
+- Place subjects in ONE coherent group (or 2 max if persona = families/groups). Do not scatter in 3+ disconnected zones.
+
+🔢 COUNTING DOUBLE-CHECK (before finalizing):
+Before submitting your output, count the visible humans you've added. If count > {target_n}, REMOVE the extra people. The output must have EXACTLY {target_n} ADDED humans (in addition to any humans that were already in the original photo, which you must preserve).
 
 PHYSICAL SAFETY & PLAUSIBILITY (CRITICAL — non-negotiable):
 
@@ -446,19 +491,16 @@ def _pick_main_action(
 
     # ---- Règles métier intransgressibles (priorité décroissante) ----
 
-    # 1. F&B plats : JAMAIS d'IA générative
+    # 1. F&B plats : pas d'AJOUT perso ni de génération (risque d'inventer un plat inexistant)
+    #    MAIS ai_lighting (nuit→jour) et ai_remove_clutter (retirer câbles/écrans) RESTENT autorisés —
+    #    ils ne touchent pas aux plats servis.
     is_food_only = (
         cat == "f_and_b"
         and "cocktail" not in " ".join(factual.get("subjects") or []).lower()
     )
-    if is_food_only:
-        return {
-            "action": "local_warm_boost",
-            "prompt": None,
-            "reason": "F&B plats : retouche IA interdite (risque inventer plat inexistant)",
-        }
 
     # 2. Règle stricte NUIT : on transforme en jour via IA (pas de photo de nuit en sortie)
+    #    Y compris pour F&B (transformer la lumière n'invente pas un plat — ça change juste l'éclairage).
     if has_night_clue:
         return {
             "action": "ai_lighting",
@@ -466,11 +508,16 @@ def _pick_main_action(
             "reason": f"photo de nuit/crépuscule → forcée en jour ensoleillé (règle brand stricte)",
         }
 
+    # 1.bis F&B sans nuit : si pas de clutter ni autre besoin → fallback warm boost local sans IA générative
+    if is_food_only:
+        # On laisse les autres règles tourner (clutter, lighting non-night) puis fallback warm boost
+        # On ne return pas direct, on laisse passer au cas où il y a du clutter à retirer
+        pass
+
     # 3. Ajout personnage forcé en amont (pipeline calcule l'alternance)
-    if add_character and personas_allowed:
-        # persona_override permet à app.py d'alterner solos/couples/small_groups dans le pack
+    #    Skip explicite sur F&B plats (risque inventer plat) et piscine_vue_aerienne (figure trop petite)
+    if add_character and personas_allowed and not is_food_only and cat != "piscine_vue_aerienne":
         persona = persona_override or (personas_allowed[0] if personas_allowed else "couples")
-        # Récupère les safe zones décrites par Gemini sur cette photo précise
         safe_zones_block = analysis.get("safe_zones_for_humans") or {}
         safe_zones = safe_zones_block.get("safe_areas") or []
         unsafe_zones = safe_zones_block.get("unsafe_areas") or []
@@ -480,9 +527,16 @@ def _pick_main_action(
         except (ValueError, TypeError):
             max_h = None
 
-        # ━ NEW : si pas de safe_zone OU max_recommended=0 → on ne tente PAS l'ajout ━
-        # Gemini a conclu qu'il n'y a pas de place naturelle pour un humain. Forcer l'IA
-        # à en mettre un produirait une scène modifiée (rebord inventé, etc.). Skip propre.
+        # ━ Récupère la capacity de la photo (nouveau champ Gemini) ━
+        # Sert à l'arbre persona × capacity pour adapter le nombre d'humains à placer.
+        capacity_block = analysis.get("placement_capacity") or {}
+        capacity_total = capacity_block.get("total")
+        try:
+            capacity_total = int(capacity_total) if capacity_total is not None else None
+        except (ValueError, TypeError):
+            capacity_total = None
+
+        # Skip propre si pas de safe_zone (l'IA inventerait du décor)
         if not safe_zones or (max_h is not None and max_h == 0):
             return {
                 "action": "local_warm_boost",
@@ -491,10 +545,14 @@ def _pick_main_action(
             }
         return {
             "action": "ai_add_character",
-            "prompt": build_persona_prompt(persona, cat, vibe, safe_zones=safe_zones,
-                                           unsafe_zones=unsafe_zones, max_humans=max_h),
-            "reason": f"ajout personnage IA ({persona}) sur {cat or 'scène vide'} — zone précise Gemini",
+            "prompt": build_persona_prompt(
+                persona, cat, vibe,
+                safe_zones=safe_zones, unsafe_zones=unsafe_zones,
+                max_humans=max_h, capacity=capacity_total,
+            ),
+            "reason": f"ajout personnage IA ({persona}, target={compute_target_humans(persona, capacity_total or 2)}) sur {cat or 'scène vide'}",
             "persona_used": persona,
+            "capacity_used": capacity_total,
         }
 
     # 4. Trop de monde (> 4 personnes) → suppression
@@ -664,6 +722,12 @@ def pick_strategy(
     crop_step = _maybe_crop_step(analysis)
     main_step = _pick_main_action(analysis, category, personas_allowed, vibe, add_character, persona_override)
 
+    # ━ Si on a déjà un step IA (clutter / lighting / add_character), on évite le crop additionnel ━
+    # Le crop modifie le cadrage, l'IA ensuite peut amplifier la dérive (régénération sur image cropée).
+    # On préfère 1 seul step IA propre que crop+IA chaîné.
+    if crop_step and main_step["action"].startswith("ai_"):
+        crop_step = None
+
     # Détection : photo nuit/sombre qui doit ÉGALEMENT recevoir un personnage IA
     # (alternance forcée → mais _pick_main_action a retourné ai_lighting et ignoré add_character)
     factual = (analysis or {}).get("factual") or {}
@@ -816,15 +880,25 @@ def enhance_local_crop(input_path: Path, output_path: Path, crop_box_pct: dict) 
     x_max = max(x_min + 1, min(int(w * crop_box_pct.get("x_max_pct", 100) / 100), w))
     y_max = max(y_min + 1, min(int(h * crop_box_pct.get("y_max_pct", 100) / 100), h))
 
-    # Garde-fou : si la box prend moins de 60% de l'image, on rejette (Gemini a probablement halluciné)
+    # ━ Garde-fous robustes contre les crops Gemini douteux ━
+    # 1. Si crop trop agressif (< 70% conservé) : skip, on n'est pas sûr de la fiabilité Gemini
+    # 2. Si crop trop léger (> 92% conservé) : skip aussi, le gain visuel est négligeable et
+    #    chaque crop ajoute du risque (changement aspect ratio, etc.)
     area_ratio = ((x_max - x_min) * (y_max - y_min)) / (w * h)
-    if area_ratio < 0.6:
-        # Trop agressif → on tombe sur un warm boost simple
+    if area_ratio < 0.70:
         img.save(output_path, quality=92)
         return {
             "duration_ms": int((time.time() - t0) * 1000),
             "cost_usd": 0,
-            "method": "pillow_crop_skipped (box too aggressive)",
+            "method": f"pillow_crop_skipped (box trop agressive {area_ratio:.0%} < 70%)",
+            "framing_changed": False,
+        }
+    if area_ratio > 0.92:
+        img.save(output_path, quality=92)
+        return {
+            "duration_ms": int((time.time() - t0) * 1000),
+            "cost_usd": 0,
+            "method": f"pillow_crop_skipped (gain négligeable {area_ratio:.0%} > 92%)",
             "framing_changed": False,
         }
 

@@ -193,23 +193,72 @@
     <!-- Tabs nav -->
     <nav class="flex gap-1 border-b border-gray-200 mb-6">
       <button class="tab-btn active" data-tab="pipeline">🔧 Pipeline</button>
+      <button class="tab-btn" data-tab="workflow">🌳 Workflow</button>
       <button class="tab-btn" data-tab="doc">📚 Documentation</button>
     </nav>
 
     <!-- ━━━━━━━━━━━━━━━━━━━━ Tab Pipeline (contenu original) ━━━━━━━━━━━━━━━━━━━━ -->
     <div id="tab-pipeline" class="tab-panel active">
 
-    <!-- Étape 1 — URL RP -->
+    <!-- Étape 1 — Source méta hôtel (RP ou Booking) -->
     <section class="card-dayuse p-6 mb-6">
-      <h2 class="text-base font-semibold mb-1">1. Fiche ResortPass de l'hôtel</h2>
-      <p class="text-sm text-gray-500 mb-4">Source de vérité pour les amenities, vibes et personas autorisés en ajout IA.</p>
-      <div class="flex gap-2">
-        <input id="rp-url" type="url" placeholder="https://www.resortpass.com/hotels/..."
-               class="input-dayuse flex-1">
-        <button id="btn-scrape" class="btn-dayuse-primary disabled:opacity-50">
-          Scraper
-        </button>
+      <h2 class="text-base font-semibold mb-1">1. Fiche hôtel (source des amenities)</h2>
+      <p class="text-sm text-gray-500 mb-3">Source de vérité pour les amenities. <strong>Choisis le mode</strong> : RP (legacy) ou Booking-only (indépendant de RP).</p>
+
+      <!-- Bloc explicatif détection amenities -->
+      <details class="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3 hover:bg-amber-100/50 transition">
+        <summary class="cursor-pointer font-semibold text-amber-900 text-xs select-none">ℹ️ Comment les amenities sont identifiées (et pourquoi c'est non-restrictif)</summary>
+        <div class="mt-3 text-xs text-dayuse-ink2 space-y-2">
+          <div>
+            <strong>Source primaire</strong> : Booking (mode Booking-only) ou RP (mode legacy). Gemini parse la page et extrait les amenities mentionnées dans la description, les facilités, les restaurants et les FAQ.
+          </div>
+          <div>
+            <strong>🟢 Non-restrictif sur les photos</strong> : si une amenity n'est PAS mentionnée sur Booking mais qu'on détecte <strong>≥ 2 photos</strong> qui la montrent (Gemini Vision sur chaque photo), le bucket est <strong>auto-activé par les photos</strong>. Les photos détectées sont gardées. <em>Ex : Booking ne mentionne pas de cabana mais on a 4 photos avec cabanas → bucket cabana activé.</em>
+          </div>
+          <div>
+            <strong>🎨 Génération full IA</strong> : <em>uniquement si</em> l'amenity est <strong>déclarée Booking</strong> ET aucune photo disponible. Pas de génération sur les buckets auto-activés (sécurité : on ne fabrique pas un faux spa pour un hôtel qui n'en a pas réellement).
+          </div>
+          <div>
+            <strong>📋 Catégories autorisées à la génération</strong> : spa, bar uniquement. Pool / cabana / rooftop / beach / food / gym → JAMAIS générés (risque de fabriquer une amenity centrale inexistante).
+          </div>
+          <div class="text-[11px] italic text-dayuse-ink3 pt-1">
+            Module : <code>booking_amenities_extractor.py</code> (Gemini Flash) + <code>coverage.py</code> (logique non-restrictive).
+          </div>
+        </div>
+      </details>
+
+      <!-- Toggle source RP / Booking -->
+      <div class="flex gap-2 mb-4">
+        <button id="src-mode-rp" class="subtab-btn active" data-mode="rp">📋 ResortPass</button>
+        <button id="src-mode-booking" class="subtab-btn" data-mode="booking">🛏 Booking-only (indépendant RP)</button>
       </div>
+
+      <!-- Mode RP -->
+      <div id="src-input-rp">
+        <div class="flex gap-2">
+          <input id="rp-url" type="url" placeholder="https://www.resortpass.com/hotels/..."
+                 class="input-dayuse flex-1">
+          <button id="btn-scrape" class="btn-dayuse-primary disabled:opacity-50">
+            Scraper RP
+          </button>
+        </div>
+      </div>
+
+      <!-- Mode Booking-only -->
+      <div id="src-input-booking" class="hidden">
+        <div class="flex gap-2">
+          <input id="booking-meta-url" type="url" placeholder="https://www.booking.com/hotel/..."
+                 class="input-dayuse flex-1">
+          <button id="btn-scrape-booking" class="btn-dayuse-primary disabled:opacity-50">
+            Scraper Booking
+          </button>
+        </div>
+        <div class="mt-2 text-[11px] text-dayuse-ink2 italic">
+          Mode pilote : on récupère les amenities + meta hôtel via scraping Booking + analyse Gemini.
+          Plus de dépendance à RP. <strong>Vibes RP supprimées</strong> : on utilise une détection contextuelle par photo (toboggan détecté → families autorisée, sinon couples/solos par défaut).
+        </div>
+      </div>
+
       <div id="rp-result" class="hidden mt-5 pt-5 border-t border-gray-100"></div>
     </section>
 
@@ -247,6 +296,15 @@
             <div class="text-xs text-gray-500">Photos issues du scrape RP de l'étape 1. Source fiable, fallback automatique.</div>
           </div>
         </label>
+
+        <!-- Source : Instagram -->
+        <label class="flex items-start gap-3 border border-amber-200 bg-amber-50/40 rounded-lg p-3 cursor-pointer hover:bg-amber-50">
+          <input type="checkbox" id="src-instagram" class="mt-0.5 w-4 h-4 accent-dayuse-primary">
+          <div class="flex-1">
+            <div class="text-sm font-semibold">📷 Instagram <span class="text-amber-700 text-[10px] font-normal">(expérimental — bloqué par Instagram en 2026)</span></div>
+            <div class="text-xs text-gray-600 mt-0.5">⚠️ <strong>Instagram bloque le scraping anonyme</strong> depuis 2024. Pour rendre cette source viable, il faudrait brancher une API tierce (RapidAPI Instagram Scraper ~$10/mo) ou un login Instagram (risque de ban). En l'état, cette case ne ramènera presque jamais de photos. Auto-discovery via Gemini conservée pour quand on aura une API.</div>
+          </div>
+        </label>
       </div>
 
       <button id="btn-fetch-all" class="btn-dayuse-primary w-full disabled:opacity-50">
@@ -280,6 +338,67 @@
 
     </div><!-- /tab-pipeline -->
 
+    <!-- ━━━━━━━━━━━━━━━━━━━━ Tab Workflow (visualisation pipeline) ━━━━━━━━━━━━━━━━━━━━ -->
+    <div id="tab-workflow" class="tab-panel">
+      <section class="card-dayuse p-6 mb-6">
+        <div class="flex items-start justify-between gap-4 mb-4">
+          <div class="flex-1">
+            <h2 class="text-base font-semibold mb-1">🌳 Visualisation du workflow photo</h2>
+            <p class="text-sm text-dayuse-ink2">
+              Trajet de chaque photo à travers les <strong>14 nœuds</strong> du pipeline. Click sur une photo
+              pour voir son chemin complet. Click sur un nœud pour filtrer.
+            </p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="wf-btn-replay" class="btn-dayuse-primary text-xs disabled:opacity-50" style="padding: 8px 16px;">▶ Rejouer le pipeline</button>
+            <button id="wf-btn-reset" class="btn-dayuse-ghost text-xs" style="padding: 8px 16px;">↺ Réinitialiser</button>
+          </div>
+        </div>
+        <div id="wf-empty-state" class="text-center text-sm text-dayuse-ink3 italic py-12 bg-dayuse-bg2 rounded-lg">
+          Lance d'abord un run dans l'onglet Pipeline.<br>
+          Le workflow apparaîtra ici une fois l'analyse terminée.
+        </div>
+        <div id="wf-content" class="hidden">
+          <!-- Stats globales -->
+          <div id="wf-stats" class="grid grid-cols-4 gap-3 mb-6"></div>
+          <!-- Sidebar détails (apparait au click sur photo) -->
+          <div id="wf-detail" class="hidden mb-6 card-dayuse p-4 border-l-4 border-dayuse-primary"></div>
+
+          <!-- Légende -->
+          <div class="flex flex-wrap items-center gap-4 mb-3 text-[10px] text-dayuse-ink2">
+            <div class="flex items-center gap-1.5"><span class="w-4 h-0.5 bg-emerald-500 rounded"></span> Continue</div>
+            <div class="flex items-center gap-1.5"><span class="w-4 h-0.5 bg-red-500 rounded"></span> Arrêt</div>
+            <div class="flex items-center gap-1.5"><span class="w-4 h-0.5 bg-orange-400 rounded"></span> Retry / Warn</div>
+            <div class="flex items-center gap-1.5"><span class="w-4 h-0.5 bg-fuchsia-500 rounded"></span> Injection IA</div>
+          </div>
+
+          <!-- Canvas workflow style Braze -->
+          <div id="wf-canvas" style="position:relative; padding: 20px 0;">
+            <svg id="wf-arrows" style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:1; overflow:visible">
+              <defs>
+                <marker id="arrow-pass" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#10b981"/>
+                </marker>
+                <marker id="arrow-stop" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#ef4444"/>
+                </marker>
+                <marker id="arrow-warn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#f97316"/>
+                </marker>
+                <marker id="arrow-inject" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#d946ef"/>
+                </marker>
+              </defs>
+            </svg>
+            <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 80px; position:relative; z-index:2;">
+              <div id="wf-main-column" class="space-y-6"></div>
+              <div id="wf-stop-column" style="position:relative;"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div><!-- /tab-workflow -->
+
     <!-- ━━━━━━━━━━━━━━━━━━━━ Tab Documentation ━━━━━━━━━━━━━━━━━━━━ -->
     <div id="tab-doc" class="tab-panel">
 
@@ -288,6 +407,11 @@
         <button class="subtab-btn active" data-subtab="workflow">📊 Workflow</button>
         <button class="subtab-btn" data-subtab="scoring">🎯 Scoring</button>
         <button class="subtab-btn" data-subtab="rules">📜 Règles métier</button>
+        <button class="subtab-btn" data-subtab="exclusions">🚫 Exclusions</button>
+        <button class="subtab-btn" data-subtab="vision">🔮 Vision &amp; Roadmap</button>
+        <button class="subtab-btn" data-subtab="discovery">🌐 Auto-discovery</button>
+        <button class="subtab-btn" data-subtab="personas">👥 Personas &amp; humains</button>
+        <button class="subtab-btn" data-subtab="models">🧪 Comparatif modèles</button>
       </nav>
 
       <!-- ━━━ Sous-onglet Workflow ━━━ -->
@@ -689,6 +813,402 @@ flowchart TD
 
       </div><!-- /subtab-rules -->
 
+      <!-- ━━━ Sous-onglet Exclusions ━━━ -->
+      <div id="subtab-exclusions" class="subtab-panel">
+
+      <section class="card-dayuse p-6 mb-6">
+        <h2 class="text-base font-semibold mb-1">🚫 Exclusions absolues du pack</h2>
+        <p class="text-sm text-dayuse-ink2 mb-4">
+          Catégories de photos qui ne sont <strong>jamais</strong> incluses dans le pack final, peu importe la qualité.
+          Ces règles sont hardcodées dans le filtrage Gemini et le scoring.
+        </p>
+
+        <div class="grid grid-cols-2 gap-3">
+          <!-- Catégories Gemini exclues -->
+          <div class="border-l-4 border-red-500 pl-3 py-2 bg-red-50/50 rounded-r">
+            <div class="text-sm font-semibold text-red-900 mb-1">🛏 Chambres d'hôtel</div>
+            <div class="text-xs text-dayuse-ink2">Day Pass = pas de nuitée. Une chambre n'a aucune raison d'être sur la fiche. Si Gemini classe en <code class="text-red-700">primary=chambre</code>, exclusion immédiate, peu importe les secondaires.</div>
+          </div>
+
+          <div class="border-l-4 border-red-500 pl-3 py-2 bg-red-50/50 rounded-r">
+            <div class="text-sm font-semibold text-red-900 mb-1">👔 Photos de staff</div>
+            <div class="text-xs text-dayuse-ink2">Les employés en uniforme (concierge, serveur, etc.) ne sont pas aspirationnels pour un client Day Pass. <code class="text-red-700">primary=staff</code> → exclu.</div>
+          </div>
+
+          <!-- Lifestyle non qualifié -->
+          <div class="border-l-4 border-red-500 pl-3 py-2 bg-red-50/50 rounded-r">
+            <div class="text-sm font-semibold text-red-900 mb-1">🏃 Décapités / focus body</div>
+            <div class="text-xs text-dayuse-ink2">Photos où Gemini détecte <code class="text-red-700">face_visibility ∈ {cropped, not_visible}</code> (visage coupé hors cadre, ou focus torse seul, ou de dos) → rejetées. Pas d'humain anonyme.</div>
+          </div>
+
+          <div class="border-l-4 border-red-500 pl-3 py-2 bg-red-50/50 rounded-r">
+            <div class="text-sm font-semibold text-red-900 mb-1">📸 Close-up portrait sans contexte</div>
+            <div class="text-xs text-dayuse-ink2">Heuristique Python : photo avec subjects = <code class="text-red-700">[bikini, maillot, torse, underwater, portrait, selfie]</code> + ≤ 2 humains + pas de contexte amenity (skyline, vue d'ensemble, etc.) → score plombé × 0.45 puis exclu du top.</div>
+          </div>
+
+          <!-- Vue aérienne avec humain -->
+          <div class="border-l-4 border-red-500 pl-3 py-2 bg-red-50/50 rounded-r">
+            <div class="text-sm font-semibold text-red-900 mb-1">🚁 Drone shot focus humain</div>
+            <div class="text-xs text-dayuse-ink2">Vue aérienne (<code class="text-red-700">shot_type=aerial</code>) avec ≤ 2 humains visibles dominants et amenity_dominance &lt; 50% → reléguée. Une drone shot d'une nageuse seule sur un fond bleu n'apporte rien à la fiche.</div>
+          </div>
+
+          <!-- Hors-amenity banales -->
+          <div class="border-l-4 border-red-500 pl-3 py-2 bg-red-50/50 rounded-r">
+            <div class="text-sm font-semibold text-red-900 mb-1">🏢 Vue urbaine banale en hero_ext</div>
+            <div class="text-xs text-dayuse-ink2">Photo extérieure avec <code class="text-red-700">pillar &lt; 130</code> OU contenant des issues comme « absence d'amenity Dayuse » / « ne correspond pas DO visuels » → exclue. Une façade d'immeuble urbain banal = rejet.</div>
+          </div>
+
+          <!-- F&B avec retouche IA -->
+          <div class="border-l-4 border-red-500 pl-3 py-2 bg-red-50/50 rounded-r">
+            <div class="text-sm font-semibold text-red-900 mb-1">🍽 F&amp;B avec retouche IA</div>
+            <div class="text-xs text-dayuse-ink2">Photos <code class="text-red-700">primary=f_and_b</code> avec plats servis ne reçoivent <strong>jamais</strong> de retouche IA générative (risque d'inventer un plat inexistant). Seul un warm boost local + LUT brand est appliqué.</div>
+          </div>
+
+          <!-- Pictos / logos / watermarks -->
+          <div class="border-l-4 border-red-500 pl-3 py-2 bg-red-50/50 rounded-r">
+            <div class="text-sm font-semibold text-red-900 mb-1">📐 Pictos &amp; logos</div>
+            <div class="text-xs text-dayuse-ink2">Filtrage à l'extraction (hotel_gallery_extractor.py) : URLs contenant <code class="text-red-700">/icon</code>, <code class="text-red-700">/logo</code>, <code class="text-red-700">favicon</code>, <code class="text-red-700">sprite</code>, <code class="text-red-700">/ui/</code>, formats <code class="text-red-700">.svg</code> ou <code class="text-red-700">.gif</code> exclus avant analyse.</div>
+          </div>
+
+          <!-- Résolution insuffisante -->
+          <div class="border-l-4 border-red-500 pl-3 py-2 bg-red-50/50 rounded-r">
+            <div class="text-sm font-semibold text-red-900 mb-1">🔍 Résolution insuffisante</div>
+            <div class="text-xs text-dayuse-ink2">Photos &lt; <strong>500×320 pixels</strong> rejetées au stade ingestion (N1). Pas exploitables pour une fiche premium. Le rejet est exposé dans le journal photo (« ingestion : résolution trop faible »).</div>
+          </div>
+
+          <!-- Slot 1 incompatible -->
+          <div class="border-l-4 border-amber-500 pl-3 py-2 bg-amber-50/50 rounded-r">
+            <div class="text-sm font-semibold text-amber-900 mb-1">⚠ Slot 1 : exclusions par règle de tier</div>
+            <div class="text-xs text-dayuse-ink2">Slot 1 (couverture) limité à tier 1 = <code class="text-amber-800">pool / cabana / rooftop / beach</code> en priorité. Tier 2 = spa. Tier 3 = bar/food/gym (fallback ultime). Photos f_and_b / chambre / staff <strong>jamais</strong> en slot 1.</div>
+          </div>
+        </div>
+
+        <div class="mt-5 p-3 bg-slate-50 rounded text-xs text-dayuse-ink2">
+          <strong>Statistiques typiques par run</strong> sur ~30 photos uploadées : ~5-10 sont rejetées par ces filtres, dont 60% au stade « close-up disguised » et 30% au stade « catégorie hors scope ». Le reste passe au scoring.
+        </div>
+      </section>
+
+      </div><!-- /subtab-exclusions -->
+
+      <!-- ━━━ Sous-onglet Vision & Roadmap ━━━ -->
+      <div id="subtab-vision" class="subtab-panel">
+
+      <section class="card-dayuse p-6 mb-6">
+        <h2 class="text-base font-semibold mb-2">🔮 Vision : pourquoi ces règles ?</h2>
+        <p class="text-sm text-dayuse-ink2 mb-4">
+          La majorité des règles actuelles sont des <strong>heuristiques métier hardcodées</strong>.
+          C'est un parti pris assumé en mode « no-data first » : on n'a pas encore de données comportement utilisateur réelles
+          pour piloter ces choix par signal.
+        </p>
+
+        <div class="border-l-4 border-purple-500 pl-4 py-3 bg-purple-50/40 rounded-r mb-4">
+          <h3 class="text-sm font-semibold text-purple-900 mb-1.5">📊 Aujourd'hui : règles statiques</h3>
+          <ul class="text-xs text-dayuse-ink2 space-y-1 ml-4 list-disc">
+            <li>Slot 1 = pool en priorité absolue (parce qu'on suppose que la piscine est l'amenity la plus universelle)</li>
+            <li>Alternance humain stricte 1 sur 2 (pour éviter les packs « morts » sans personnes)</li>
+            <li>Bar/Food/Gym max 1 chacun (pour pousser les amenities aspirationnelles)</li>
+            <li>Etc — toutes définies au feeling Martin/brand</li>
+          </ul>
+        </div>
+
+        <div class="border-l-4 border-emerald-500 pl-4 py-3 bg-emerald-50/40 rounded-r mb-4">
+          <h3 class="text-sm font-semibold text-emerald-900 mb-1.5">🚀 Demain : règles dynamiques pilotées par data</h3>
+          <p class="text-xs text-dayuse-ink2 mb-2">
+            Une fois que les photos sont taggées (catégorie + amenity + persona) et qu'on a la donnée comportementale Dayuse :
+          </p>
+          <ul class="text-xs text-dayuse-ink2 space-y-1.5 ml-4 list-disc">
+            <li>
+              <strong>Corrélation intent ↔ photo</strong> : on regarde quels patterns de photos convertissent le plus
+              pour chaque type de recherche utilisateur (« cabana à Miami », « rooftop à Paris », « spa à Marrakech »…)
+            </li>
+            <li>
+              <strong>Slot 1 dynamique selon filtre user</strong> : si l'utilisateur filtre « cabana », on remonte automatiquement
+              la photo cabana en slot 1, pas la pool. Aujourd'hui c'est fixe ; demain c'est piloté par l'intent affiché.
+            </li>
+            <li>
+              <strong>Persona contextuel</strong> : on n'a pas besoin de la « vibe » RP. L'IA détecte directement les
+              indicateurs dans la photo (toboggan + aire de jeux → families ; rooftop bar à cocktails → couples) et adapte.
+            </li>
+            <li>
+              <strong>Auto-tuning des seuils</strong> : MIN_BRAND_SCORE, MIN_PILLAR_FOR_NON_AMENITY, ratio alternance humain
+              — actuellement fixes (80, 130, 1/2). Demain : optimisés par bandit sur le taux de conversion observé.
+            </li>
+            <li>
+              <strong>Génération full IA contextualisée</strong> : actuellement on génère du spa générique. Demain : on génère
+              en respectant le brand visuel précis de l'hôtel (palette détectée sur ses autres photos, mobilier identifié).
+            </li>
+          </ul>
+        </div>
+
+        <div class="border-l-4 border-blue-500 pl-4 py-3 bg-blue-50/40 rounded-r">
+          <h3 class="text-sm font-semibold text-blue-900 mb-1.5">🎯 Ce que cette approche garantit dès aujourd'hui</h3>
+          <ul class="text-xs text-dayuse-ink2 space-y-1 ml-4 list-disc">
+            <li>Cohérence inter-hôtels : tous les packs respectent les mêmes règles brand</li>
+            <li>Reproductibilité : 2 runs sur le même hôtel donnent ~le même résultat (modulo aléatoire IA)</li>
+            <li>Auditabilité : chaque décision est tracée dans <code>photo_journey</code> et visible dans l'onglet Workflow</li>
+            <li>Itérabilité : on peut tweaker une règle (ex: max=2 pour bar) et voir l'impact immédiatement</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="card-dayuse p-6 mb-6">
+        <h2 class="text-base font-semibold mb-3">🗺 Roadmap technique</h2>
+        <table class="w-full text-xs">
+          <thead class="bg-slate-50 text-left text-slate-600 uppercase">
+            <tr>
+              <th class="px-3 py-2 font-semibold">Item</th>
+              <th class="px-3 py-2 font-semibold">Statut</th>
+              <th class="px-3 py-2 font-semibold">Note</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            <tr><td class="px-3 py-2">Catégorisation hôtel sans RP (via Booking)</td><td class="px-3 py-2"><span class="text-amber-700 font-semibold">🚧 En cours</span></td><td class="px-3 py-2 text-gray-600">Scraping page Booking pour extraire amenities → mapping vers taxo interne</td></tr>
+            <tr><td class="px-3 py-2">Suppression du concept « vibe RP »</td><td class="px-3 py-2"><span class="text-amber-700 font-semibold">🚧 En cours</span></td><td class="px-3 py-2 text-gray-600">Remplacé par détection contextuelle Gemini sur les photos (kids amenities → families)</td></tr>
+            <tr><td class="px-3 py-2">Arbre humains × capacity de la photo</td><td class="px-3 py-2"><span class="text-amber-700 font-semibold">🚧 Validé</span></td><td class="px-3 py-2 text-gray-600">Persona × seats détectés → nombre de personnes adapté (1 à 5 max)</td></tr>
+            <tr><td class="px-3 py-2">Instagram via API tierce</td><td class="px-3 py-2"><span class="text-gray-500 font-semibold">⏸ Backlog</span></td><td class="px-3 py-2 text-gray-600">RapidAPI Instagram Scraper $10-30/mo, ou ScrapingBee Insta endpoint</td></tr>
+            <tr><td class="px-3 py-2">Cloudflare bypass (chaînes hôtelières)</td><td class="px-3 py-2"><span class="text-gray-500 font-semibold">⏸ Backlog</span></td><td class="px-3 py-2 text-gray-600">Patchright (gratuit, 50%) ou ScrapingBee (95%)</td></tr>
+            <tr><td class="px-3 py-2">Filtre user → priorité slot 1 dynamique</td><td class="px-3 py-2"><span class="text-gray-500 font-semibold">⏸ Backlog</span></td><td class="px-3 py-2 text-gray-600">Si user filtre « cabana » → cabana en slot 1 au lieu de pool</td></tr>
+            <tr><td class="px-3 py-2">A/B testing taux conversion par variante</td><td class="px-3 py-2"><span class="text-gray-500 font-semibold">⏸ Backlog</span></td><td class="px-3 py-2 text-gray-600">2 packs alternatifs par hôtel, mesurer le winner</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      </div><!-- /subtab-vision -->
+
+      <!-- ━━━ Sous-onglet Auto-discovery ━━━ -->
+      <div id="subtab-discovery" class="subtab-panel">
+
+      <section class="card-dayuse p-6 mb-6">
+        <h2 class="text-base font-semibold mb-2">🌐 Comment l'outil trouve l'URL site officiel / Insta / Booking</h2>
+        <p class="text-sm text-dayuse-ink2 mb-4">
+          Trois mécanismes auto-discovery pilotés par Gemini, pour ne demander à l'utilisateur que le strict minimum.
+        </p>
+
+        <div class="space-y-4">
+          <!-- Site officiel -->
+          <div class="border border-dayuse-border rounded-lg p-4">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-2xl">🌐</span>
+              <h3 class="text-sm font-bold text-dayuse-ink">Site officiel de l'hôtel</h3>
+              <span class="bg-emerald-100 text-emerald-800 text-[10px] px-2 py-0.5 rounded-full font-semibold">Implémenté</span>
+            </div>
+            <ol class="text-xs text-dayuse-ink2 space-y-1.5 ml-5 list-decimal">
+              <li><strong>Input minimal</strong> : nom de l'hôtel + ville + pays (récupérés depuis RP ou saisis manuellement)</li>
+              <li><strong>Gemini 2.5 Flash</strong> reçoit un prompt strict : « Quel est le site web officiel de cet hôtel ? Pas de plateforme de réservation. Format JSON. »</li>
+              <li><strong>Validation Playwright stealth</strong> : on visite l'URL, vérifie HTTP 200, vérifie que le titre contient un mot du nom de l'hôtel</li>
+              <li><strong>Whitelist chaînes</strong> : pour Hyatt / Marriott / Hilton (Cloudflare bloque le check), on fait confiance à Gemini sans valider</li>
+              <li><strong>Blacklist plateformes</strong> : booking.com, expedia, tripadvisor, hotels.com, etc. exclus</li>
+            </ol>
+            <p class="mt-2 text-[11px] text-dayuse-ink3 italic">Module : <code>hotel_site_finder.py</code></p>
+          </div>
+
+          <!-- Booking page -->
+          <div class="border border-dayuse-border rounded-lg p-4">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-2xl">🛏</span>
+              <h3 class="text-sm font-bold text-dayuse-ink">Page Booking.com</h3>
+              <span class="bg-amber-100 text-amber-800 text-[10px] px-2 py-0.5 rounded-full font-semibold">Implémenté (URL manuelle)</span>
+            </div>
+            <p class="text-xs text-dayuse-ink2 mb-2">
+              L'URL Booking est aujourd'hui collée manuellement par l'utilisateur. À court terme, on va aussi automatiser :
+            </p>
+            <ol class="text-xs text-dayuse-ink2 space-y-1.5 ml-5 list-decimal">
+              <li><strong>Gemini search</strong> : « URL Booking.com de cet hôtel ? Format strict booking.com/hotel/&lt;country&gt;/&lt;slug&gt;.html »</li>
+              <li><strong>Validation</strong> : check HTTP 200 et que la page renvoie bien un hôtel (pas une page de recherche)</li>
+              <li><strong>Extraction amenities</strong> (à venir) : scrape la section « Most popular facilities » de Booking → mapping vers taxonomie interne (pool, cabana, rooftop, spa, beach, food, bar, gym)</li>
+              <li><strong>Remplacement RP</strong> : à terme, l'amenity list Booking remplace l'amenity_normalized RP. L'outil deviendra indépendant de RP.</li>
+            </ol>
+            <p class="mt-2 text-[11px] text-dayuse-ink3 italic">Module : <code>booking_scraper.py</code> (extension à venir : <code>booking_amenities_extractor.py</code>)</p>
+          </div>
+
+          <!-- Instagram -->
+          <div class="border border-dayuse-border rounded-lg p-4">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-2xl">📷</span>
+              <h3 class="text-sm font-bold text-dayuse-ink">Compte Instagram</h3>
+              <span class="bg-rose-100 text-rose-800 text-[10px] px-2 py-0.5 rounded-full font-semibold">Bloqué (anti-bot Instagram 2024+)</span>
+            </div>
+            <ol class="text-xs text-dayuse-ink2 space-y-1.5 ml-5 list-decimal">
+              <li><strong>Gemini search</strong> : « Compte Instagram officiel de cet hôtel ? »</li>
+              <li><strong>Validation</strong> : impossible (Instagram bloque tous les bots anonymes — affiche « Profile isn't available » même pour les vrais profils)</li>
+              <li><strong>Solutions futures</strong> : RapidAPI Instagram Scraper (~$10-30/mo), ScrapingBee Insta endpoint, ou login Insta de service (risque ban)</li>
+              <li><strong>État actuel</strong> : la checkbox Instagram est désactivée par défaut, fonctionnalité expérimentale</li>
+            </ol>
+            <p class="mt-2 text-[11px] text-dayuse-ink3 italic">Module : <code>instagram_finder.py</code> + <code>instagram_scraper.py</code></p>
+          </div>
+
+          <!-- Concurrents -->
+          <div class="border border-dayuse-border rounded-lg p-4 bg-slate-50">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-2xl">🏆</span>
+              <h3 class="text-sm font-bold text-dayuse-ink">Concurrents proches (idée backlog)</h3>
+              <span class="bg-gray-200 text-gray-700 text-[10px] px-2 py-0.5 rounded-full font-semibold">Idée</span>
+            </div>
+            <p class="text-xs text-dayuse-ink2 mb-2">
+              Pour chaque hôtel, identifier 3-5 concurrents directs (même ville, mêmes amenities, même gamme de prix)
+              et comparer leurs visuels :
+            </p>
+            <ol class="text-xs text-dayuse-ink2 space-y-1.5 ml-5 list-decimal">
+              <li>Gemini : « Top 5 hôtels concurrents directs de [hotel] à [ville] avec amenités similaires ? »</li>
+              <li>Pour chaque concurrent : scrape ses photos (site officiel ou Booking)</li>
+              <li>Compare les patterns visuels brand : palette dominante, ratio humain/sans, type d'angles</li>
+              <li>Output : recommandations de positionnement visuel pour notre hôtel cible</li>
+            </ol>
+            <p class="mt-2 text-[11px] text-dayuse-ink3 italic">Pas dans la roadmap immédiate, mais discutable.</p>
+          </div>
+        </div>
+      </section>
+
+      </div><!-- /subtab-discovery -->
+
+      <!-- ━━━ Sous-onglet Personas & humains ━━━ -->
+      <div id="subtab-personas" class="subtab-panel">
+
+      <section class="card-dayuse p-6 mb-6">
+        <h2 class="text-base font-semibold mb-2">👥 Personas, humains et arbre de décision</h2>
+        <p class="text-sm text-dayuse-ink2 mb-4">
+          Détail complet de la logique d'ajout d'humains IA dans les photos : alternance, choix du persona,
+          et nouveau arbre <strong>capacity × persona</strong> (à venir).
+        </p>
+
+        <!-- Règle alternance -->
+        <div class="border-l-4 border-orange-400 pl-3 py-3 bg-orange-50/50 rounded-r mb-4">
+          <h3 class="text-sm font-bold text-orange-900 mb-1.5">⚖ Règle d'alternance (1 photo sur 2)</h3>
+          <ul class="text-xs text-dayuse-ink2 space-y-1 ml-4 list-disc">
+            <li><strong>Slot 1</strong> : humain obligatoire (natif ou ajouté IA). Photo de couverture sans humain = manque chaleureux.</li>
+            <li><strong>Slots N &gt; 1</strong> : alternance stricte. Si la photo précédente n'a pas d'humain, la suivante DOIT en avoir.</li>
+            <li><strong>Jamais 2 photos sans humain à la suite</strong>, sauf cas de force majeure (toutes les photos restantes sont des catégories interdites à l'ajout : f_and_b plats, vue aérienne, etc.).</li>
+            <li><strong>Bonus lifestyle</strong> : déjà des humains natifs, donc traitées comme « avec humain » dans l'alternance.</li>
+          </ul>
+        </div>
+
+        <!-- Catégories OK / KO -->
+        <div class="grid grid-cols-2 gap-3 mb-4">
+          <div class="border-l-4 border-emerald-500 pl-3 py-3 bg-emerald-50/40 rounded-r">
+            <h3 class="text-sm font-bold text-emerald-900 mb-1.5">✅ Catégories autorisées à l'ajout IA</h3>
+            <div class="text-xs text-dayuse-ink2">
+              piscine · cabana · transat · rooftop · spa · beach · exterieur · interieur_commun · gym
+            </div>
+          </div>
+          <div class="border-l-4 border-red-500 pl-3 py-3 bg-red-50/50 rounded-r">
+            <h3 class="text-sm font-bold text-red-900 mb-1.5">🚫 Catégories interdites à l'ajout IA</h3>
+            <div class="text-xs text-dayuse-ink2">
+              f_and_b plats (risque inventer plat) · piscine_vue_aerienne (humain serait minuscule) · chambre · staff · facade · detail
+            </div>
+          </div>
+        </div>
+
+        <!-- Rotation persona -->
+        <div class="border-l-4 border-purple-500 pl-3 py-3 bg-purple-50/40 rounded-r mb-4">
+          <h3 class="text-sm font-bold text-purple-900 mb-1.5">🔄 Rotation des personas dans le pack</h3>
+          <p class="text-xs text-dayuse-ink2 mb-2">
+            Aujourd'hui, basée sur la « vibe RP » (Family-Friendly / Trendy / Luxe / Party / Serene) qui dicte
+            les personas autorisés. <strong>Demain (suppression vibe)</strong> : détection contextuelle directement par Gemini
+            sur la photo (toboggan + aire de jeux → families, rooftop intimiste → couples).
+          </p>
+          <table class="w-full text-xs mt-2">
+            <thead class="bg-purple-100 text-purple-900 text-left">
+              <tr><th class="px-2 py-1">Persona</th><th class="px-2 py-1">Nb humains</th><th class="px-2 py-1">Description</th></tr>
+            </thead>
+            <tbody class="divide-y divide-purple-200">
+              <tr><td class="px-2 py-1 font-semibold">solos</td><td class="px-2 py-1">1</td><td class="px-2 py-1">Femme adulte stylée, swimwear, regard hors-cadre, pose éditoriale candid</td></tr>
+              <tr><td class="px-2 py-1 font-semibold">couples</td><td class="px-2 py-1">2</td><td class="px-2 py-1">Couple mixed-race 30s, swimwear, chemistry candid (chatting, sharing)</td></tr>
+              <tr><td class="px-2 py-1 font-semibold">small_groups</td><td class="px-2 py-1">2-3</td><td class="px-2 py-1">Trio de friends 20-30s, urban-leisure, casual relaxed</td></tr>
+              <tr><td class="px-2 py-1 font-semibold">families</td><td class="px-2 py-1">3-4</td><td class="px-2 py-1">Parents mixed-race + 1-2 enfants 5-10 ans, casual vacation</td></tr>
+              <tr><td class="px-2 py-1 font-semibold">groups</td><td class="px-2 py-1">3-5</td><td class="px-2 py-1">Friends 20-30s en mode festif tasteful, mid-action</td></tr>
+            </tbody>
+          </table>
+          <p class="text-[11px] text-dayuse-ink3 italic mt-2">
+            Ordre de rotation actuel : <code>couples → small_groups → families → groups → solos</code>. Slot 1 prioritise les groupes (plus aspirationnels).
+          </p>
+        </div>
+
+        <!-- Arbre humains × capacity -->
+        <div class="border-l-4 border-emerald-500 pl-3 py-3 bg-emerald-50/40 rounded-r">
+          <h3 class="text-sm font-bold text-emerald-900 mb-1.5">🌳 Arbre humains × capacity de la scène (à implémenter)</h3>
+          <p class="text-xs text-dayuse-ink2 mb-2">
+            Aujourd'hui, le persona dicte le nombre fixe d'humains (couples=2, families=4...). Mais une cabana avec 8 places vide
+            a l'air... vide avec 2 personnes seulement. Inversement, mettre une famille de 4 sur 1 transat unique = invention.
+          </p>
+          <p class="text-xs text-dayuse-ink2 mb-2"><strong>Solution</strong> : Gemini compte la « capacity » de la photo (sièges, transats, zones d'eau exploitables) et on adapte :</p>
+          <table class="w-full text-xs mt-2">
+            <thead class="bg-emerald-100 text-emerald-900 text-left">
+              <tr>
+                <th class="px-2 py-1">Persona</th>
+                <th class="px-2 py-1 text-center">N=1</th>
+                <th class="px-2 py-1 text-center">N=2-3</th>
+                <th class="px-2 py-1 text-center">N=4-6</th>
+                <th class="px-2 py-1 text-center">N≥7</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-emerald-200">
+              <tr><td class="px-2 py-1 font-semibold">solos</td><td class="px-2 py-1 text-center">1</td><td class="px-2 py-1 text-center">1</td><td class="px-2 py-1 text-center">1</td><td class="px-2 py-1 text-center">1</td></tr>
+              <tr><td class="px-2 py-1 font-semibold">couples</td><td class="px-2 py-1 text-center">1</td><td class="px-2 py-1 text-center">2</td><td class="px-2 py-1 text-center">2</td><td class="px-2 py-1 text-center">2</td></tr>
+              <tr><td class="px-2 py-1 font-semibold">small_groups</td><td class="px-2 py-1 text-center">1</td><td class="px-2 py-1 text-center">2-3</td><td class="px-2 py-1 text-center">3</td><td class="px-2 py-1 text-center">3</td></tr>
+              <tr><td class="px-2 py-1 font-semibold">families</td><td class="px-2 py-1 text-center">1</td><td class="px-2 py-1 text-center">2</td><td class="px-2 py-1 text-center">3-4</td><td class="px-2 py-1 text-center">4</td></tr>
+              <tr><td class="px-2 py-1 font-semibold">groups</td><td class="px-2 py-1 text-center">1</td><td class="px-2 py-1 text-center">2-3</td><td class="px-2 py-1 text-center">4</td><td class="px-2 py-1 text-center">5</td></tr>
+            </tbody>
+          </table>
+          <div class="mt-3 text-xs text-dayuse-ink2 space-y-1">
+            <div><strong>Règle d'or</strong> : ne JAMAIS dépasser la capacity de la scène. Jamais inventer une place pour caser quelqu'un.</div>
+            <div><strong>Capacity = sièges + zones eau</strong> : un transat = 1 place, une cabana 6 places = 6, une piscine = 2-3 zones (un nageur + un au bord).</div>
+            <div><strong>Implémentation</strong> : nouveau champ Gemini <code>placement_capacity</code> dans l'analyse, lu par <code>build_persona_prompt</code> pour adapter <code>max_humans</code>.</div>
+          </div>
+        </div>
+
+      </section>
+
+      </div><!-- /subtab-personas -->
+
+      <!-- ━━━ Sous-onglet Comparatif modèles ━━━ -->
+      <div id="subtab-models" class="subtab-panel">
+
+        <section class="card-dayuse p-6 mb-6">
+          <h2 class="text-base font-semibold mb-1">🧪 Test AB modèles d'image — décision Nano Banana</h2>
+          <p class="text-sm text-gray-500 mb-4">
+            Le 5 mai 2026, on a comparé <strong>GPT Image 2</strong> (low/medium/high) face à <strong>Nano Banana</strong> (v1 / v2 / Pro)
+            sur 6 photos cibles du run Yotel Miami avec scénarios fixés (couple dans l'eau, gym, lounge, etc.). 36 versions générées · $2.59 · ~33min.
+          </p>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+            <div class="rounded-xl bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 p-4">
+              <div class="text-[11px] font-semibold uppercase tracking-wider text-green-800 mb-1">Modèle adopté</div>
+              <div class="text-base font-bold text-green-900">🥇 Nano Banana 2</div>
+              <div class="text-xs text-green-800 mt-1">3.1 Flash Image Preview · score 4.2/5</div>
+            </div>
+            <div class="rounded-xl bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 p-4">
+              <div class="text-[11px] font-semibold uppercase tracking-wider text-amber-800 mb-1">Fallback cas critiques</div>
+              <div class="text-base font-bold text-amber-900">🥈 Nano Banana Pro</div>
+              <div class="text-xs text-amber-800 mt-1">3 Pro Image · score 3.5/5 · lighting + quantité humaine</div>
+            </div>
+            <div class="rounded-xl bg-gradient-to-br from-red-50 to-rose-50 border border-red-200 p-4">
+              <div class="text-[11px] font-semibold uppercase tracking-wider text-red-800 mb-1">Écarté</div>
+              <div class="text-base font-bold text-red-900">❌ GPT Image 2</div>
+              <div class="text-xs text-red-800 mt-1">Lettrebox systématique + reconstruction sur lighting</div>
+            </div>
+          </div>
+
+          <div class="rounded-xl bg-amber-50 border-l-4 border-amber-400 p-4 text-sm">
+            <strong class="text-amber-900">📌 Décision retenue (06/05/2026) :</strong>
+            <span class="text-amber-800">Nano Banana 2 par défaut pour les retouches IA.
+            Nano Banana Pro pour les photos critiques (lighting transformation, quantité humaine sensible).
+            GPT Image 2 non recommandé tant que le problème de lettrebox n'est pas résolu côté API.</span>
+          </div>
+        </section>
+
+        <section class="card-dayuse p-2 mb-6">
+          <iframe src="/comparison/booking-yotel-miami/"
+                  style="width: 100%; height: 80vh; border: 0; border-radius: 10px;"
+                  loading="lazy"
+                  title="Comparatif modèles GPT Image 2 vs Nano Banana"></iframe>
+          <div class="px-4 py-2 text-xs text-gray-500 border-t border-gray-100 mt-1">
+            Rapport interactif : 6 photos × 6 versions, slider before/after, mode comparaison 2 versions, verdicts détaillés par cellule.
+            <a href="/comparison/booking-yotel-miami/" target="_blank" class="text-dayuse-primary font-semibold ml-2">↗ Ouvrir en plein écran</a>
+          </div>
+        </section>
+
+      </div><!-- /subtab-models -->
+
     </div><!-- /tab-doc -->
 
   </div>
@@ -735,6 +1255,13 @@ flowchart TD
             renderMermaidOnce();
           }
         }
+        // Re-render workflow viz si on entre sur le tab (les getBoundingClientRect échouent en display:none)
+        if (tab === 'workflow' && state.lastRun) {
+          // Petit delay pour que le tab-panel soit display:block effectivement
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => renderWorkflow(state.lastRun));
+          });
+        }
       });
     });
 
@@ -761,6 +1288,16 @@ flowchart TD
     const dropzone = $("dropzone"), fileInput = $("file-input");
     const uploadSummary = $("upload-summary"), uploadPreview = $("upload-preview");
 
+    // ----- Toggle mode RP / Booking-only -----
+    document.querySelectorAll('[data-mode]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const mode = btn.dataset.mode;
+        document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+        $("src-input-rp").classList.toggle('hidden', mode !== 'rp');
+        $("src-input-booking").classList.toggle('hidden', mode !== 'booking');
+      });
+    });
+
     // ----- Scrape RP -----
     btnScrape.onclick = async () => {
       const url = $("rp-url").value.trim();
@@ -778,16 +1315,50 @@ flowchart TD
         state.slug = data.slug;
         state.rp = data.data;
         renderRP(data.data);
-        // débloque l'étape 2
         $("step-upload").classList.remove("opacity-50", "pointer-events-none");
       } catch (e) {
         rpResult.classList.remove("hidden");
         rpResult.innerHTML = `<div class="text-red-600 text-sm">${e.message}</div>`;
       } finally {
         btnScrape.disabled = false;
-        btnScrape.textContent = "Scraper";
+        btnScrape.textContent = "Scraper RP";
       }
     };
+
+    // ----- Scrape Booking-only (mode indépendant RP) -----
+    const btnScrapeBooking = $("btn-scrape-booking");
+    if (btnScrapeBooking) {
+      btnScrapeBooking.onclick = async () => {
+        const url = $("booking-meta-url").value.trim();
+        if (!url.startsWith("https://www.booking.com/hotel/")) {
+          alert("Colle une URL Booking valide (https://www.booking.com/hotel/...)");
+          return;
+        }
+        btnScrapeBooking.disabled = true;
+        btnScrapeBooking.textContent = "Scraping Booking...";
+        try {
+          const r = await fetch("/api/scrape-booking", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url }),
+          });
+          const data = await r.json();
+          if (!r.ok) throw new Error(data.error || "Erreur");
+          state.slug = data.slug;
+          state.rp = data.data;  // on stocke au même endroit (format compatible)
+          // Pré-remplit l'URL Booking dans l'étape 2 pour qu'on puisse scraper les photos
+          if ($("booking-url")) $("booking-url").value = url;
+          renderRP(data.data);
+          $("step-upload").classList.remove("opacity-50", "pointer-events-none");
+        } catch (e) {
+          rpResult.classList.remove("hidden");
+          rpResult.innerHTML = `<div class="text-red-600 text-sm">${e.message}</div>`;
+        } finally {
+          btnScrapeBooking.disabled = false;
+          btnScrapeBooking.textContent = "Scraper Booking";
+        }
+      };
+    }
 
     function renderRP(d) {
       const allCats = ["pool", "cabana", "food", "bar", "spa", "beach", "rooftop", "gym"];
@@ -869,9 +1440,10 @@ flowchart TD
       // files = [{name, source}]
       uploadPreview.classList.remove("hidden");
       const SOURCE_BADGE = {
-        official: { label: "officiel", color: "bg-dayuse-primary" },
-        booking:  { label: "booking",  color: "bg-blue-500" },
-        rp:       { label: "RP",       color: "bg-purple-500" },
+        official:  { label: "officiel",  color: "bg-dayuse-primary" },
+        booking:   { label: "booking",   color: "bg-blue-500" },
+        rp:        { label: "RP",        color: "bg-purple-500" },
+        instagram: { label: "instagram", color: "bg-pink-500" },
       };
       uploadPreview.innerHTML = `
         <div class="text-xs text-gray-600 mb-2">
@@ -940,6 +1512,7 @@ flowchart TD
         official: $("src-official").checked,
         booking: $("src-booking").checked,
         rp: $("src-rp").checked,
+        instagram: $("src-instagram").checked,
       };
       if (!sources.official && !sources.booking && !sources.rp) {
         alert("Coche au moins une source.");
@@ -994,7 +1567,7 @@ flowchart TD
       if (!sources) { el.classList.add("hidden"); return; }
       el.classList.remove("hidden");
       const rows = [];
-      const SOURCE_LABELS = { official: "Site officiel", booking: "Booking.com", rp: "ResortPass" };
+      const SOURCE_LABELS = { official: "Site officiel", booking: "Booking.com", rp: "ResortPass", instagram: "Instagram" };
       for (const [key, info] of Object.entries(sources)) {
         const label = SOURCE_LABELS[key] || key;
         if (info.error) {
@@ -1180,6 +1753,9 @@ flowchart TD
         requestAnimationFrame(() => {
           requestAnimationFrame(initCompareSliders);  // double RAF = paint terminé
         });
+        // Stocke les data du run pour la viz workflow + render
+        state.lastRun = data;
+        renderWorkflow(data);
       } catch (e) {
         stopPoll();
         runResult.innerHTML = `<div class="text-red-600 text-sm">${e.message}</div>`;
@@ -1733,6 +2309,369 @@ flowchart TD
         _applyComparePos(compare, 50);
       });
     }
+
+    // ━━━━━━━━━━━━━━━━━━━━ Workflow visualization ━━━━━━━━━━━━━━━━━━━━
+
+    const NODE_RESULT_STYLES = {
+      pass:                { color: 'border-emerald-300 bg-emerald-50', symbol: '✓', text: 'text-emerald-700' },
+      stop:                { color: 'border-red-300 bg-red-50',         symbol: '✗', text: 'text-red-700' },
+      skip:                { color: 'border-gray-200 bg-gray-50',       symbol: '○', text: 'text-gray-400' },
+      warn:                { color: 'border-amber-300 bg-amber-50',     symbol: '⚠', text: 'text-amber-700' },
+      retry:               { color: 'border-orange-300 bg-orange-50',   symbol: '🔁', text: 'text-orange-700' },
+      fallback_original:   { color: 'border-blue-300 bg-blue-50',       symbol: '↩', text: 'text-blue-700' },
+      downgraded:          { color: 'border-orange-300 bg-orange-50',   symbol: '↓', text: 'text-orange-700' },
+    };
+
+    const FINAL_STATUS_STYLES = {
+      in_final_pack:       { label: '✓ Pack final', color: 'bg-emerald-600' },
+      in_pack_no_enhance:  { label: '✓ Pack (pas de retouche)', color: 'bg-emerald-500' },
+      duplicate_phash:     { label: '✗ Doublon pHash', color: 'bg-red-500' },
+      gemini_failed:       { label: '✗ Gemini échouée', color: 'bg-red-600' },
+      ingestion_failed:    { label: '✗ Ingestion échouée', color: 'bg-red-600' },
+      coverage_rejected:   { label: '✗ Score insuffisant', color: 'bg-red-500' },
+      unmapped:            { label: '✗ Non mappée', color: 'bg-red-400' },
+      out_of_top_N:        { label: '✗ Hors top-N', color: 'bg-orange-500' },
+      not_in_final_pack:   { label: '✗ Hors pack final', color: 'bg-orange-500' },
+      user_deselected:     { label: '✗ Désélectionnée', color: 'bg-gray-500' },
+    };
+
+    function renderWorkflow(d) {
+      const journey = d.photo_journey || [];
+      const nodes = d.workflow_nodes || [];
+      if (!journey.length) return;
+      $("wf-empty-state").classList.add('hidden');
+      $("wf-content").classList.remove('hidden');
+      $("wf-detail").classList.add('hidden');
+
+      // ━ Stats globales ━
+      const totalIn = journey.length;
+      const inFinal = journey.filter(j => j.final_status === 'in_final_pack').length;
+      const stopped = journey.filter(j => j.final_status !== 'in_final_pack' && j.final_status !== 'in_pack_no_enhance').length;
+      const generated = journey.filter(j => j.is_generated).length;
+
+      $("wf-stats").innerHTML = `
+        <div class="card-dayuse p-3 text-center">
+          <div class="text-2xl font-bold text-dayuse-ink">${totalIn}</div>
+          <div class="text-[11px] text-dayuse-ink2">photos en entrée</div>
+        </div>
+        <div class="card-dayuse p-3 text-center" style="background: linear-gradient(135deg, #FFF8ED, #FFFBF5);">
+          <div class="text-2xl font-bold" style="color:#FF9F26">${inFinal}</div>
+          <div class="text-[11px] text-dayuse-ink2">dans le pack final</div>
+        </div>
+        <div class="card-dayuse p-3 text-center">
+          <div class="text-2xl font-bold text-red-600">${stopped}</div>
+          <div class="text-[11px] text-dayuse-ink2">arrêtées en route</div>
+        </div>
+        <div class="card-dayuse p-3 text-center">
+          <div class="text-2xl font-bold text-fuchsia-700">${generated}</div>
+          <div class="text-[11px] text-dayuse-ink2">générées full IA</div>
+        </div>
+      `;
+
+      // ━━ Helpers ━━
+      const tileHtml = (photo, opts = {}) => {
+        const { showCross, showInjected } = opts;
+        return `
+          <div class="wf-photo relative cursor-pointer" data-filename="${photo.filename}"
+               style="width:42px;height:42px;border-radius:7px;overflow:hidden;border:2px solid transparent;transition:all .2s">
+            <img src="${photo.thumb_url}" class="w-full h-full object-cover" loading="lazy">
+            ${showCross ? `<span class="absolute inset-0 bg-red-500/40 flex items-center justify-center text-white font-bold text-base">✗</span>` : ''}
+            ${(showInjected || photo.is_generated) ? `<span class="absolute top-0 right-0 bg-fuchsia-600 text-white text-[7px] px-0.5 rounded-bl font-bold">IA</span>` : ''}
+          </div>
+        `;
+      };
+
+      // ━━ COLONNE PRINCIPALE : nœuds en ligne droite (les "passes") ━━
+      // Pour chaque nœud, on montre les photos qui PASSENT (continuent) ou les variantes neutres
+      const mainHtml = nodes.map((node, idx) => {
+        const photosAtNode = journey.filter(j => (j.events || []).some(e => e.node === node.id));
+        const passing = [];
+        const others = []; // pass/skip/retry/etc. all considered "continuing"
+        photosAtNode.forEach(j => {
+          const ev = j.events.find(e => e.node === node.id);
+          if (ev.result === 'pass' || ev.result === 'skip' || ev.result === 'retry' || ev.result === 'warn' || ev.result === 'downgraded' || ev.result === 'fallback_original') {
+            passing.push({ photo: j, event: ev });
+          }
+        });
+
+        const passingTiles = passing.slice(0, 14).map(({ photo }) =>
+          tileHtml(photo, { showInjected: photo.is_generated })
+        ).join('');
+        const moreCount = passing.length > 14 ? `<div class="flex items-center justify-center text-[10px] font-semibold text-dayuse-ink2 px-2" style="height:42px">+${passing.length - 14}</div>` : '';
+
+        // Couleur du bord gauche selon le nœud (alternance pour rythme visuel)
+        const accents = ['#FFAF36', '#51B0B0', '#6E69AC', '#F66236'];
+        const accent = accents[idx % accents.length];
+
+        const descHtml = (node.description || node.test) ? `
+          <details class="text-[10px] mt-2 mb-2 bg-slate-50 rounded px-2 py-1 hover:bg-slate-100 transition border border-slate-200">
+            <summary class="cursor-pointer font-semibold text-slate-700 select-none">ℹ️ Que teste ce nœud ?</summary>
+            ${node.description ? `<div class="mt-1 text-slate-700 leading-relaxed">${node.description}</div>` : ''}
+            ${node.test ? `<div class="mt-1.5 text-slate-600 italic"><strong>Test :</strong> ${node.test}</div>` : ''}
+          </details>
+        ` : '';
+        return `
+          <div id="wf-mnode-${node.id}" class="wf-node-main relative" data-node-id="${node.id}"
+               style="background:white; border-radius:12px; box-shadow:0 2px 12px rgba(0,0,0,0.06); border-left:4px solid ${accent}; padding: 14px 16px;">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-lg">${node.icon}</span>
+              <span class="text-[11px] font-bold text-dayuse-ink2">${idx + 1}.</span>
+              <h3 class="text-sm font-bold text-dayuse-ink flex-1">${node.label}</h3>
+              <span class="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">${passing.length} passées</span>
+            </div>
+            ${descHtml}
+            <div class="flex flex-wrap gap-1">${passingTiles}${moreCount}</div>
+          </div>
+        `;
+      }).join('');
+      $("wf-main-column").innerHTML = mainHtml;
+
+      // ━━ COLONNE STOPS : pour chaque nœud avec des stops, une boîte alignée ━━
+      // Positionnement absolu pour aligner avec le nœud main correspondant
+      const stopColumnHtml = nodes.map((node, idx) => {
+        const photosAtNode = journey.filter(j => (j.events || []).some(e => e.node === node.id));
+        const stopped = [];
+        photosAtNode.forEach(j => {
+          const ev = j.events.find(e => e.node === node.id);
+          if (ev.result === 'stop') {
+            stopped.push({ photo: j, event: ev });
+          }
+        });
+        if (stopped.length === 0) return '';
+
+        // Group raisons
+        const reasons = {};
+        stopped.forEach(({ event }) => {
+          const r = event.reason || 'arrêtée';
+          reasons[r] = (reasons[r] || 0) + 1;
+        });
+        const topReasons = Object.entries(reasons).sort((a, b) => b[1] - a[1]).slice(0, 3);
+
+        const stopTiles = stopped.slice(0, 10).map(({ photo }) =>
+          tileHtml(photo, { showCross: true })
+        ).join('');
+        const moreCount = stopped.length > 10 ? `<div class="flex items-center justify-center text-[10px] font-semibold text-red-600 px-1" style="height:42px">+${stopped.length - 10}</div>` : '';
+
+        return `
+          <div id="wf-snode-${node.id}" class="wf-node-stop" data-node-id="${node.id}"
+               style="background:white; border-radius:12px; box-shadow:0 2px 12px rgba(239,68,68,0.10); border-left:4px solid #ef4444; padding:12px 14px;">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="text-red-600 font-bold text-base leading-none">✗</span>
+              <h4 class="text-xs font-bold text-red-700 flex-1">${stopped.length} arrêtée${stopped.length > 1 ? 's' : ''} ici</h4>
+            </div>
+            <div class="text-[10px] text-dayuse-ink2 mb-1.5 italic">
+              ${topReasons.map(([r, n]) => `<div>• ${n}× ${r.length > 90 ? r.substring(0, 88) + '…' : r}</div>`).join('')}
+            </div>
+            <div class="flex flex-wrap gap-1">${stopTiles}${moreCount}</div>
+          </div>
+        `;
+      }).join('');
+      $("wf-stop-column").innerHTML = stopColumnHtml;
+
+      // ━━ Aligne verticalement chaque stop-box avec son nœud main correspondant ━━
+      requestAnimationFrame(() => {
+        const mainCol = $("wf-main-column");
+        const stopCol = $("wf-stop-column");
+        const mainTop = mainCol.getBoundingClientRect().top;
+        nodes.forEach(node => {
+          const mainNode = document.getElementById(`wf-mnode-${node.id}`);
+          const stopNode = document.getElementById(`wf-snode-${node.id}`);
+          if (!mainNode || !stopNode) return;
+          const mainRect = mainNode.getBoundingClientRect();
+          const stopColRect = stopCol.getBoundingClientRect();
+          // Position absolue par rapport à stopCol
+          stopNode.style.position = 'absolute';
+          stopNode.style.top = `${mainRect.top - stopColRect.top}px`;
+          stopNode.style.left = '0';
+          stopNode.style.right = '0';
+        });
+        // Ajuste la hauteur de stop-col pour qu'il match main-col
+        stopCol.style.minHeight = `${mainCol.getBoundingClientRect().height}px`;
+
+        // ━━ Dessine les flèches SVG ━━
+        drawWorkflowArrows(nodes);
+      });
+
+      // ━ Click sur photo → affiche les détails de son chemin complet ━
+      $("wf-canvas").querySelectorAll('.wf-photo').forEach(el => {
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const fname = el.dataset.filename;
+          const photo = journey.find(j => j.filename === fname);
+          if (!photo) return;
+
+          // Highlight la photo dans tous les nœuds + atténuer les autres
+          document.querySelectorAll('.wf-photo').forEach(p => {
+            if (p.dataset.filename === fname) {
+              p.style.borderColor = '#FFAF36';
+              p.style.boxShadow = '0 0 0 3px rgba(255,175,54,0.25)';
+              p.style.opacity = '1';
+            } else {
+              p.style.borderColor = 'transparent';
+              p.style.boxShadow = '';
+              p.style.opacity = '0.3';
+            }
+          });
+
+          // Affiche les détails dans le panneau supérieur
+          const finalStyle = FINAL_STATUS_STYLES[photo.final_status] || { label: photo.final_status, color: 'bg-gray-500' };
+          const eventsHtml = (photo.events || []).map((ev, i) => {
+            const nodeDef = nodes.find(n => n.id === ev.node) || { label: ev.node, icon: '•' };
+            const style = NODE_RESULT_STYLES[ev.result] || NODE_RESULT_STYLES.pass;
+            const detailsLines = ev.details ? Object.entries(ev.details).filter(([_, v]) => v !== null && v !== undefined && v !== '').map(([k, v]) => {
+              if (Array.isArray(v) || typeof v === 'object') return `<span class="text-[10px] text-gray-500">${k} = ${JSON.stringify(v).substring(0, 80)}</span>`;
+              return `<span class="text-[10px] text-gray-500">${k}: <strong>${v}</strong></span>`;
+            }).join(' · ') : '';
+            const reasonHtml = ev.reason ? `<div class="text-[11px] text-red-700 italic mt-0.5">⚠ ${ev.reason}</div>` : '';
+            return `
+              <div class="flex items-start gap-2 py-1.5 border-l-2 ${style.color} pl-3">
+                <div class="flex-shrink-0 text-base">${nodeDef.icon}</div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="text-xs font-semibold text-dayuse-ink">${nodeDef.label}</span>
+                    <span class="text-[10px] font-bold ${style.text}">${style.symbol} ${ev.result}</span>
+                  </div>
+                  ${detailsLines ? `<div class="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">${detailsLines}</div>` : ''}
+                  ${reasonHtml}
+                </div>
+              </div>
+            `;
+          }).join('');
+
+          $("wf-detail").innerHTML = `
+            <div class="flex items-start gap-3">
+              <img src="${photo.thumb_url}" class="rounded-lg" style="width:96px;height:96px;object-fit:cover">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 flex-wrap mb-1">
+                  <span class="text-sm font-bold text-dayuse-ink">${photo.filename}</span>
+                  <span class="${finalStyle.color} text-white text-[10px] px-2 py-0.5 rounded-full font-semibold">${finalStyle.label}</span>
+                </div>
+                <div class="text-[11px] text-dayuse-ink2">Source : <strong>${photo.source}</strong>${photo.stopped_at_node ? ` · Arrêtée à : <strong>${photo.stopped_at_node}</strong>` : ''}</div>
+              </div>
+              <button onclick="document.getElementById('wf-detail').classList.add('hidden'); document.querySelectorAll('.wf-photo').forEach(p => { p.style.borderColor='transparent'; p.style.boxShadow=''; p.style.opacity='1'; });" class="text-dayuse-ink3 hover:text-dayuse-ink text-xl leading-none">×</button>
+            </div>
+            <div class="mt-3 space-y-0.5">${eventsHtml}</div>
+          `;
+          $("wf-detail").classList.remove('hidden');
+          $("wf-detail").scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      });
+
+      // Reset
+      $("wf-btn-reset").onclick = () => {
+        document.querySelectorAll('.wf-photo').forEach(p => { p.style.borderColor='transparent'; p.style.boxShadow=''; p.style.opacity='1'; });
+        $("wf-detail").classList.add('hidden');
+      };
+
+      // Replay : cascade des nœuds main + stops + flèches
+      $("wf-btn-replay").onclick = async () => {
+        const mainEls = document.querySelectorAll('.wf-node-main');
+        const stopEls = document.querySelectorAll('.wf-node-stop');
+        const svgPaths = $("wf-arrows").querySelectorAll('path.wf-arrow');
+        // Reset
+        mainEls.forEach(el => { el.style.opacity = '0'; el.style.transform = 'translateX(-12px)'; el.style.transition = 'all 0.4s ease'; });
+        stopEls.forEach(el => { el.style.opacity = '0'; el.style.transform = 'translateX(12px)'; el.style.transition = 'all 0.4s ease'; });
+        svgPaths.forEach(p => { p.style.opacity = '0'; p.style.transition = 'opacity 0.3s ease'; });
+        $("wf-detail").classList.add('hidden');
+        // Cascade
+        for (let i = 0; i < mainEls.length; i++) {
+          await new Promise(r => setTimeout(r, 280));
+          mainEls[i].style.opacity = '1';
+          mainEls[i].style.transform = 'translateX(0)';
+          // Active la flèche partant de ce nœud (pass + stop)
+          svgPaths.forEach(p => {
+            if (p.dataset.fromNode === nodes[i].id) {
+              p.style.opacity = '1';
+            }
+          });
+          // Stop box associée
+          const stopBox = document.getElementById(`wf-snode-${nodes[i].id}`);
+          if (stopBox) {
+            stopBox.style.opacity = '1';
+            stopBox.style.transform = 'translateX(0)';
+          }
+        }
+      };
+    }
+
+    // ━━━ Dessine les flèches SVG entre nœuds ━━━
+    function drawWorkflowArrows(nodes) {
+      const svg = $("wf-arrows");
+      const canvas = $("wf-canvas");
+      if (!svg || !canvas) return;
+      // Clear paths existantes
+      svg.querySelectorAll('path.wf-arrow').forEach(p => p.remove());
+      const cr = canvas.getBoundingClientRect();
+
+      const mkPath = (d, color, fromNodeId, kind = 'pass') => {
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', d);
+        path.setAttribute('class', 'wf-arrow');
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', color);
+        path.setAttribute('stroke-width', '2.5');
+        path.setAttribute('stroke-linecap', 'round');
+        const markerMap = { pass: 'arrow-pass', stop: 'arrow-stop', warn: 'arrow-warn', inject: 'arrow-inject' };
+        path.setAttribute('marker-end', `url(#${markerMap[kind]})`);
+        path.dataset.fromNode = fromNodeId;
+        path.dataset.kind = kind;
+        svg.appendChild(path);
+      };
+
+      nodes.forEach((node, idx) => {
+        const mainEl = document.getElementById(`wf-mnode-${node.id}`);
+        const stopEl = document.getElementById(`wf-snode-${node.id}`);
+        if (!mainEl) return;
+        const mr = mainEl.getBoundingClientRect();
+
+        // ━ Flèche vers le nœud suivant (pass) ━
+        if (idx < nodes.length - 1) {
+          const nextEl = document.getElementById(`wf-mnode-${nodes[idx + 1].id}`);
+          if (nextEl) {
+            const nr = nextEl.getBoundingClientRect();
+            const x = mr.left + mr.width / 2 - cr.left;
+            const y1 = mr.bottom - cr.top;
+            const y2 = nr.top - cr.top;
+            mkPath(`M ${x} ${y1} L ${x} ${y2 - 2}`, '#10b981', node.id, 'pass');
+          }
+        }
+
+        // ━ Flèche vers la stop-box (si elle existe) ━
+        if (stopEl) {
+          const sr = stopEl.getBoundingClientRect();
+          const x1 = mr.right - cr.left;
+          const y = mr.top + mr.height / 2 - cr.top;
+          const x2 = sr.left - cr.left;
+          // Courbe douce horizontale
+          const midX = (x1 + x2) / 2;
+          mkPath(`M ${x1} ${y} C ${midX} ${y}, ${midX} ${y}, ${x2 - 2} ${y}`, '#ef4444', node.id, 'stop');
+        }
+      });
+    }
+
+    // Re-dessine les flèches au resize de la fenêtre
+    let _wfResizeTimer;
+    window.addEventListener('resize', () => {
+      clearTimeout(_wfResizeTimer);
+      _wfResizeTimer = setTimeout(() => {
+        if (state.lastRun) {
+          const nodes = state.lastRun.workflow_nodes || [];
+          // Repositionne les stops + redessine les flèches
+          const mainCol = $("wf-main-column");
+          const stopCol = $("wf-stop-column");
+          if (!mainCol || !stopCol) return;
+          nodes.forEach(node => {
+            const mainNode = document.getElementById(`wf-mnode-${node.id}`);
+            const stopNode = document.getElementById(`wf-snode-${node.id}`);
+            if (!mainNode || !stopNode) return;
+            const mainRect = mainNode.getBoundingClientRect();
+            const stopColRect = stopCol.getBoundingClientRect();
+            stopNode.style.top = `${mainRect.top - stopColRect.top}px`;
+          });
+          drawWorkflowArrows(nodes);
+        }
+      }, 200);
+    });
   </script>
 </body>
 </html>

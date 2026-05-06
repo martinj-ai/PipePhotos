@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Comparaison GPT Image vs Nano Banana — Yotel Miami</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { overflow-x: hidden; }
+  body {
+    font-family: 'Manrope', sans-serif;
+    background: #F9F9F9;
+    color: #292935;
+    line-height: 1.5;
+  }
+
+  /* === Header === */
+  header {
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    padding: 14px 32px;
+  }
+  .header-row { display: flex; justify-content: space-between; align-items: center; gap: 24px; flex-wrap: wrap; }
+  h1 {
+    font-size: 22px; font-weight: 700;
+    background: linear-gradient(90deg, #FEB900 0%, #FD7030 50%, #F66236 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .stats { display: flex; gap: 20px; font-size: 13px; color: #54545D; align-items: center; }
+  .stat strong { color: #292935; font-weight: 700; }
+
+  /* === Photo nav (thumbnails) === */
+  .photo-nav {
+    display: flex; gap: 10px; padding: 14px 32px;
+    overflow-x: auto;
+    background: white; border-bottom: 1px solid #EAEAEB;
+    scrollbar-width: thin;
+  }
+  .photo-thumb {
+    flex-shrink: 0; width: 110px; height: 78px;
+    border-radius: 8px; overflow: hidden;
+    cursor: pointer; border: 2px solid transparent;
+    transition: all 0.2s ease;
+    position: relative;
+  }
+  .photo-thumb:hover { transform: translateY(-2px); border-color: #EAEAEB; }
+  .photo-thumb.active { border-color: #FFAF36; box-shadow: 0 4px 14px rgba(255, 175, 54, 0.4); }
+  .photo-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .photo-thumb-num {
+    position: absolute; top: 4px; left: 4px;
+    background: rgba(0,0,0,0.7); color: white;
+    font-size: 11px; font-weight: 700;
+    padding: 1px 6px; border-radius: 6px;
+  }
+
+  /* === Main viewport === */
+  main { padding: 24px 32px 140px; max-width: 1920px; margin: 0 auto; }
+
+  .photo-title {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 20px; flex-wrap: wrap; gap: 12px;
+  }
+  .photo-title-left { display: flex; align-items: center; gap: 12px; }
+  .badge {
+    background: linear-gradient(62deg, #FFAF36 0%, #FFC536 100%);
+    color: #292935;
+    padding: 6px 14px; border-radius: 100px;
+    font-weight: 700; font-size: 13px;
+  }
+  .photo-id {
+    font-size: 13px; color: #8E8E93;
+    font-family: 'Courier New', monospace;
+  }
+  .compare-btn {
+    background: rgba(41,41,53,0.06);
+    border: 1px solid rgba(41,41,53,0.14);
+    border-radius: 100px;
+    padding: 10px 18px;
+    font-family: inherit; font-size: 13px; font-weight: 600;
+    color: #292935;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .compare-btn:hover { background: rgba(41,41,53,0.10); border-color: rgba(41,41,53,0.26); }
+  .compare-btn.active {
+    background: #292935; color: white;
+    border-color: #292935;
+  }
+
+  /* === Verdicts === */
+  .verdict-badge {
+    position: absolute; top: 8px; left: 8px;
+    z-index: 5;
+    padding: 4px 10px;
+    border-radius: 100px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  }
+  .verdict-badge.winner { background: rgba(76,175,80,0.95); color: white; }
+  .verdict-badge.strong { background: rgba(139,195,74,0.95); color: #1b5e20; }
+  .verdict-badge.ok { background: rgba(255,193,7,0.95); color: #5d4037; }
+  .verdict-badge.weak { background: rgba(255,152,0,0.95); color: white; }
+  .verdict-badge.fail { background: rgba(244,67,54,0.95); color: white; }
+  .verdict-score {
+    display: inline-block;
+    background: rgba(255,255,255,0.3);
+    padding: 0 6px; margin-left: 4px;
+    border-radius: 8px;
+  }
+  .verdict-detail {
+    padding: 10px 12px;
+    background: #FAFAFC;
+    border-top: 1px solid #EAEAEB;
+    font-size: 11px;
+    line-height: 1.45;
+  }
+  .verdict-detail-row {
+    display: flex; gap: 6px; margin-bottom: 4px;
+  }
+  .verdict-detail-row:last-child { margin-bottom: 0; }
+  .verdict-detail-icon { flex-shrink: 0; font-size: 11px; line-height: 1.5; }
+  .verdict-detail ul { list-style: none; padding: 0; margin: 0; }
+  .verdict-detail li { color: #54545D; }
+
+  /* === Global summary card === */
+  .summary-card {
+    margin-bottom: 28px;
+    background: white;
+    border-radius: 14px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+    padding: 20px 24px;
+  }
+  .summary-card h2 {
+    font-size: 16px; font-weight: 800;
+    margin-bottom: 14px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  .summary-item { padding: 12px 14px; background: #F9F9F9; border-radius: 10px; }
+  .summary-item-label { font-size: 11px; font-weight: 600; color: #8E8E93; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+  .summary-item-value { font-size: 14px; font-weight: 700; color: #292935; }
+  .summary-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+  .summary-bar-label { flex: 0 0 240px; font-size: 12px; font-weight: 600; }
+  .summary-bar-track { flex: 1; height: 10px; background: #F5F5F7; border-radius: 100px; overflow: hidden; }
+  .summary-bar-fill { height: 100%; border-radius: 100px; background: linear-gradient(90deg, #FFAF36, #FFC536); transition: width 0.5s ease; }
+  .summary-bar-score { flex: 0 0 60px; font-size: 12px; font-weight: 800; color: #292935; text-align: right; }
+  .summary-patterns ul { list-style: none; padding: 0; margin: 0; }
+  .summary-patterns li {
+    padding: 8px 12px; margin-bottom: 6px;
+    background: #FFF8ED; border-left: 3px solid #FFAF36;
+    border-radius: 6px; font-size: 12px; line-height: 1.5;
+  }
+  .summary-reco {
+    margin-top: 14px;
+    padding: 14px 18px;
+    background: linear-gradient(135deg, #E8F5E9 0%, #F1F8E9 100%);
+    border-radius: 10px;
+    font-size: 13px;
+    border-left: 4px solid #4CAF50;
+    line-height: 1.55;
+  }
+  .summary-reco strong { color: #2E7D32; }
+
+  /* === Action banner & prompt drawer === */
+  .action-banner {
+    margin-bottom: 16px;
+    padding: 14px 18px;
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.5;
+    display: flex; align-items: center; gap: 12px;
+    background: linear-gradient(135deg, #FFF8ED 0%, #FFFBF5 100%);
+    border: 1px solid rgba(255, 175, 54, 0.3);
+  }
+  .action-banner.lighting {
+    background: linear-gradient(135deg, #E3F2FD 0%, #F0F8FE 100%);
+    border-color: rgba(33, 150, 243, 0.3);
+  }
+  .action-banner-icon {
+    font-size: 22px; flex-shrink: 0;
+  }
+  .action-banner-content { flex: 1; }
+  .action-banner-title {
+    font-weight: 700; font-size: 14px; color: #292935;
+    margin-bottom: 2px;
+  }
+  .action-banner-reason { color: #54545D; font-size: 12px; }
+
+  .prompt-drawer {
+    display: none;
+    margin-bottom: 20px;
+    background: white;
+    border: 1px solid #EAEAEB;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+  }
+  .prompt-drawer.open { display: block; }
+  .prompt-drawer-header {
+    padding: 12px 16px;
+    background: #F9F9F9;
+    font-size: 13px; font-weight: 700;
+    border-bottom: 1px solid #EAEAEB;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .prompt-drawer pre {
+    padding: 16px;
+    font-family: 'Courier New', Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #292935;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  /* === Layout grille === */
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(380px, 1fr) minmax(800px, 2.4fr);
+    gap: 28px;
+    margin-bottom: 32px;
+  }
+  @media (max-width: 1280px) { .layout { grid-template-columns: 1fr; } }
+
+  .original-pane {
+    background: white; border-radius: 14px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+    padding: 20px;
+    position: sticky; top: 200px; align-self: start;
+  }
+  .original-pane h3 {
+    font-size: 15px; font-weight: 700; margin-bottom: 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .original-pane img {
+    width: 100%; border-radius: 10px; cursor: zoom-in;
+    transition: transform 0.2s ease;
+  }
+  .original-pane img:hover { transform: scale(1.01); }
+
+  /* === Grilles versions === */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+  }
+  @media (max-width: 720px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+
+  .row-header {
+    grid-column: 1 / -1;
+    font-size: 13px; font-weight: 700; color: #292935;
+    padding: 10px 0 6px; text-transform: uppercase; letter-spacing: 0.05em;
+    border-bottom: 1px solid #EAEAEB;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .row-header .total { color: #8E8E93; font-weight: 500; text-transform: none; letter-spacing: 0; font-size: 12px; }
+
+  .cell {
+    background: white; border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+    overflow: hidden;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: 2px solid transparent;
+    position: relative;
+  }
+  .cell:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12); }
+  .cell.compare-selected {
+    border-color: #FFAF36;
+    box-shadow: 0 6px 24px rgba(255, 175, 54, 0.4);
+  }
+  .cell.compare-selected::after {
+    position: absolute; top: 8px; right: 8px;
+    width: 28px; height: 28px;
+    background: #FFAF36; color: #292935;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 14px;
+    box-shadow: 0 2px 8px rgba(255, 175, 54, 0.6);
+  }
+  .cell.compare-1::after { content: '1'; }
+  .cell.compare-2::after { content: '2'; }
+
+  .cell-img-wrap { position: relative; aspect-ratio: 4/3; background: #F5F5F7; }
+  .cell-img-wrap img { width: 100%; height: 100%; object-fit: cover; }
+  .cell-img-wrap.error {
+    display: flex; align-items: center; justify-content: center;
+    color: #F45C5A; font-size: 12px; padding: 12px; text-align: center;
+  }
+  .cell-info {
+    padding: 12px 14px;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 11px;
+  }
+  .level-badge {
+    padding: 4px 10px; border-radius: 100px; font-weight: 700; font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .level-low { background: #E8F5E9; color: #2E7D32; }
+  .level-medium { background: #FFF3E0; color: #F57C00; }
+  .level-high { background: #FCE4EC; color: #C2185B; }
+  .cell-meta { color: #8E8E93; font-size: 11px; font-weight: 500; }
+
+  /* === Nav fixe en bas === */
+  .nav-bar {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    z-index: 90;
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: 100px;
+    padding: 8px 14px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .nav-btn {
+    background: linear-gradient(62deg, #FFAF36 0%, #FFC536 100%);
+    color: #292935;
+    border: none;
+    border-radius: 100px;
+    padding: 12px 22px;
+    font-family: inherit; font-size: 14px; font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .nav-btn:hover:not(:disabled) {
+    background: linear-gradient(62deg, #FF9F26 0%, #FFB526 100%);
+    transform: translateY(-1px);
+  }
+  .nav-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .nav-counter {
+    font-weight: 700; font-size: 14px; color: #292935;
+    min-width: 80px; text-align: center;
+  }
+
+  /* === Lightbox === */
+  .lightbox {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0, 0, 0, 0.96);
+    z-index: 1000;
+    flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 32px;
+  }
+  .lightbox.open { display: flex; }
+  .lightbox-content {
+    position: relative;
+    max-width: 95vw;
+    max-height: 86vh;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* === Slider before/after === */
+  .slider-wrap {
+    position: relative;
+    overflow: hidden;
+    border-radius: 12px;
+    user-select: none;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  }
+  .slider-wrap img {
+    display: block;
+    max-height: 86vh;
+    max-width: 95vw;
+    -webkit-user-drag: none;
+    user-drag: none;
+  }
+  .slider-after-wrap {
+    position: absolute; top: 0; left: 0;
+    height: 100%; overflow: hidden;
+    width: 50%;
+  }
+  .slider-after-wrap img {
+    position: absolute; top: 0; left: 0;
+    height: 100%; width: auto;
+    max-width: none;
+  }
+  .slider-handle {
+    position: absolute; top: 0; bottom: 0; width: 4px;
+    background: white;
+    box-shadow: 0 0 16px rgba(0,0,0,0.6);
+    left: 50%; transform: translateX(-50%);
+    cursor: ew-resize;
+    z-index: 10;
+  }
+  .slider-handle::before {
+    content: '⇄'; position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    background: white; color: #292935;
+    width: 48px; height: 48px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; font-weight: 700;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  }
+  .slider-label {
+    position: absolute; top: 16px;
+    background: rgba(0, 0, 0, 0.75); color: white;
+    padding: 8px 16px; border-radius: 100px;
+    font-size: 13px; font-weight: 700;
+    z-index: 5;
+    pointer-events: none;
+    backdrop-filter: blur(8px);
+  }
+  .slider-label-before { left: 16px; }
+  .slider-label-after { right: 16px; }
+
+  /* === Side by side compare === */
+  .sbs-wrap {
+    display: flex; gap: 16px;
+    max-width: 95vw;
+    align-items: center;
+  }
+  .sbs-pane {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center;
+    max-width: 47vw;
+  }
+  .sbs-pane img {
+    max-width: 100%; max-height: 78vh;
+    border-radius: 12px; object-fit: contain;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  }
+  .sbs-label {
+    margin-top: 14px;
+    background: rgba(255, 255, 255, 0.95);
+    color: #292935;
+    padding: 8px 16px;
+    border-radius: 100px;
+    font-size: 13px; font-weight: 700;
+  }
+
+  /* === Lightbox controls === */
+  .lightbox-close {
+    position: absolute; top: 24px; right: 24px;
+    width: 48px; height: 48px;
+    background: rgba(255, 255, 255, 0.15);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: white;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 22px;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s ease;
+    z-index: 10;
+  }
+  .lightbox-close:hover { background: rgba(255, 255, 255, 0.25); transform: rotate(90deg); }
+  .lightbox-info {
+    position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: rgba(255, 255, 255, 0.92);
+    color: #292935;
+    padding: 10px 20px; border-radius: 100px;
+    font-size: 13px; font-weight: 700;
+    backdrop-filter: blur(12px);
+  }
+
+  .keyboard-hint {
+    position: fixed; bottom: 26px; right: 26px;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    padding: 10px 16px; border-radius: 100px;
+    font-size: 11px; color: #54545D;
+    z-index: 80;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+  }
+  kbd {
+    background: #F5F5F7; border: 1px solid #D4D4D7;
+    padding: 2px 7px; border-radius: 5px;
+    font-family: inherit; font-size: 10px; font-weight: 700;
+  }
+  @media (max-width: 768px) {
+    .keyboard-hint { display: none; }
+    .nav-btn { padding: 10px 16px; font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-row">
+    <h1>🎨 Comparaison GPT Image vs Nano Banana — Yotel Miami</h1>
+    <div class="stats">
+      <span class="stat"><strong>__N_PHOTOS__</strong> photos</span>
+      <span class="stat"><strong>__N_OK__</strong>/__N_TOTAL__ versions</span>
+      <span class="stat">Coût total : <strong>$__TOTAL_COST__</strong></span>
+    </div>
+  </div>
+</header>
+
+<nav class="photo-nav" id="photo-nav"></nav>
+
+<main>
+  <div id="global-summary"></div>
+
+  <div class="photo-title">
+    <div class="photo-title-left" id="photo-title"></div>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <button class="compare-btn" id="prompt-btn" onclick="togglePromptDrawer()">
+        📝 Voir le prompt
+      </button>
+      <button class="compare-btn" id="compare-btn" onclick="toggleCompareMode()">
+        🔀 Mode comparaison 2 versions
+      </button>
+    </div>
+  </div>
+
+  <div id="action-banner" class="action-banner"></div>
+
+  <div id="prompt-drawer" class="prompt-drawer">
+    <div class="prompt-drawer-header">
+      <span>📝 Prompt utilisé (identique pour les 6 versions)</span>
+      <button class="compare-btn" onclick="togglePromptDrawer()" style="padding:4px 10px;font-size:11px">✕</button>
+    </div>
+    <pre id="prompt-content"></pre>
+  </div>
+
+  <div class="layout">
+    <div class="original-pane">
+      <h3>📸 Source originale <span style="font-weight:400;color:#8E8E93;font-size:11px">— clique pour zoomer</span></h3>
+      <img id="original-img" src="" alt="original">
+    </div>
+    <div>
+      <div class="grid" id="gpt-grid">
+        <div class="row-header">
+          <span>🤖 GPT Image 2 (gpt-image-2)</span>
+          <span class="total" id="gpt-total"></span>
+        </div>
+      </div>
+      <div style="height: 18px"></div>
+      <div class="grid" id="gemini-grid">
+        <div class="row-header">
+          <span>🍌 Nano Banana — v1 / 2 / Pro</span>
+          <span class="total" id="gemini-total"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- Nav fixe -->
+<div class="nav-bar">
+  <button class="nav-btn" id="prev-btn" onclick="navPrev()">⬅ Précédent</button>
+  <span class="nav-counter" id="nav-counter">1 / 19</span>
+  <button class="nav-btn" id="next-btn" onclick="navNext()">Suivant ➡</button>
+</div>
+
+<!-- Lightbox -->
+<div class="lightbox" id="lightbox">
+  <button class="lightbox-close" onclick="closeLightbox()">✕</button>
+  <div class="lightbox-content" id="lightbox-content"></div>
+  <div class="lightbox-info" id="lightbox-info"></div>
+</div>
+
+<div class="keyboard-hint">
+  <kbd>←</kbd><kbd>→</kbd> photos · <kbd>1</kbd>-<kbd>6</kbd> compare original/version · <kbd>C</kbd> mode 2-versions · <kbd>Esc</kbd> fermer
+</div>
+
+<script>
+const PHOTOS = __PAYLOAD__;
+const GLOBAL_SUMMARY = __GLOBAL_SUMMARY__;
+let currentIdx = 0;
+let compareMode = false;
+let compareSelection = []; // [cellKey1, cellKey2]
+
+const LEVEL_LABELS = { low: 'Low', medium: 'Medium', high: 'High' };
+const MODEL_LABELS = {
+  'gpt-image-2': 'GPT Image 2',
+  'gpt-image-1': 'GPT Image 1 (legacy)',
+  'gemini-2.5-flash-image': 'Nano Banana v1 (2.5 Flash)',
+  'gemini-3.1-flash-image-preview': 'Nano Banana 2 (3.1 Flash)',
+  'gemini-3-pro-image-preview': 'Nano Banana Pro (3 Pro Image)'
+};
+
+function renderGlobalSummary() {
+  const el = document.getElementById('global-summary');
+  if (!GLOBAL_SUMMARY || !GLOBAL_SUMMARY.model_score_avg_out_of_5) {
+    el.innerHTML = '';
+    return;
+  }
+  const scores = GLOBAL_SUMMARY.model_score_avg_out_of_5;
+  const sorted = Object.entries(scores).sort((a,b) => b[1] - a[1]);
+  const winners = GLOBAL_SUMMARY.winners_by_photo || {};
+  const patterns = GLOBAL_SUMMARY.patterns_observed || [];
+  const reco = GLOBAL_SUMMARY.recommandation_finale || '';
+
+  let barsHtml = '';
+  for (const [model, score] of sorted) {
+    const pct = (score / 5) * 100;
+    barsHtml += `
+      <div class="summary-bar">
+        <div class="summary-bar-label">${model}</div>
+        <div class="summary-bar-track"><div class="summary-bar-fill" style="width:${pct}%"></div></div>
+        <div class="summary-bar-score">${score.toFixed(1)} / 5</div>
+      </div>`;
+  }
+
+  let winnersHtml = '';
+  for (const [photo, winner] of Object.entries(winners)) {
+    winnersHtml += `
+      <div class="summary-item">
+        <div class="summary-item-label">${photo}</div>
+        <div class="summary-item-value">🏆 ${winner}</div>
+      </div>`;
+  }
+
+  let patternsHtml = '<ul>';
+  for (const p of patterns) patternsHtml += `<li>${p}</li>`;
+  patternsHtml += '</ul>';
+
+  el.innerHTML = `
+    <div class="summary-card">
+      <h2>📊 Synthèse globale du test AB</h2>
+      <div style="margin-bottom: 18px;">
+        <div style="font-size:12px;font-weight:700;color:#8E8E93;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em">Score moyen par modèle</div>
+        ${barsHtml}
+      </div>
+      <div style="font-size:12px;font-weight:700;color:#8E8E93;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em">Vainqueur par photo</div>
+      <div class="summary-grid">${winnersHtml}</div>
+      <div style="font-size:12px;font-weight:700;color:#8E8E93;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em">Patterns observés</div>
+      <div class="summary-patterns">${patternsHtml}</div>
+      <div class="summary-reco"><strong>📌 Recommandation finale :</strong> ${reco}</div>
+    </div>`;
+}
+
+function buildNav() {
+  const nav = document.getElementById('photo-nav');
+  PHOTOS.forEach((p, i) => {
+    const div = document.createElement('div');
+    div.className = 'photo-thumb' + (i === currentIdx ? ' active' : '');
+    div.onclick = () => selectPhoto(i);
+    div.innerHTML = '<span class="photo-thumb-num">' + (i+1) + '</span><img src="' + p.original + '" alt="">';
+    nav.appendChild(div);
+  });
+}
+
+function selectPhoto(idx) {
+  currentIdx = idx;
+  compareSelection = [];
+  const p = PHOTOS[idx];
+
+  document.querySelectorAll('.photo-thumb').forEach((t, i) => {
+    t.classList.toggle('active', i === idx);
+  });
+
+  document.getElementById('photo-title').innerHTML =
+    '<span class="badge">Photo ' + (idx + 1) + ' / ' + PHOTOS.length + '</span>' +
+    '<code class="photo-id">' + p.id + '</code>';
+
+  // Action banner
+  const banner = document.getElementById('action-banner');
+  if (p.action) {
+    const isLighting = p.action === 'ai_lighting';
+    banner.className = 'action-banner' + (isLighting ? ' lighting' : '');
+    const icon = isLighting ? '🌙' : '👤';
+    const title = p.scenario_label || (isLighting ? 'Transformation crépuscule → jour' : 'Ajout de personnages IA');
+    banner.innerHTML =
+      '<span class="action-banner-icon">' + icon + '</span>' +
+      '<div class="action-banner-content">' +
+        '<div class="action-banner-title">' + title + '</div>' +
+        '<div class="action-banner-reason">' + (p.reason || '') + '</div>' +
+      '</div>';
+    banner.style.display = 'flex';
+  } else {
+    banner.style.display = 'none';
+  }
+
+  // Prompt drawer content
+  document.getElementById('prompt-content').textContent = p.prompt || '(prompt non disponible)';
+
+  const origImg = document.getElementById('original-img');
+  origImg.src = p.original;
+  origImg.onclick = () => openSliderCompare(p.original, p.original, 'Original', 'Original');
+
+  buildRow('gpt-grid', p, 'gpt');
+  buildRow('gemini-grid', p, 'gemini');
+
+  const gptCost = ['low', 'medium', 'high'].reduce((s, l) => s + (p.cells['gpt_' + l]?.cost_usd || 0), 0);
+  const gemCost = ['low', 'medium', 'high'].reduce((s, l) => s + (p.cells['gemini_' + l]?.cost_usd || 0), 0);
+  document.getElementById('gpt-total').textContent = '1 photo: $' + gptCost.toFixed(3);
+  document.getElementById('gemini-total').textContent = '1 photo: $' + gemCost.toFixed(3);
+
+  document.getElementById('nav-counter').textContent = (idx + 1) + ' / ' + PHOTOS.length;
+  document.getElementById('prev-btn').disabled = idx === 0;
+  document.getElementById('next-btn').disabled = idx === PHOTOS.length - 1;
+
+  document.querySelectorAll('.photo-thumb')[idx]?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+}
+
+function buildRow(gridId, p, family) {
+  const grid = document.getElementById(gridId);
+  while (grid.children.length > 1) grid.removeChild(grid.lastChild);
+
+  ['low', 'medium', 'high'].forEach(level => {
+    const cell = p.cells[family + '_' + level];
+    const cellKey = family + '_' + level;
+    const div = document.createElement('div');
+    div.className = 'cell';
+    div.dataset.key = cellKey;
+
+    if (cell.error) {
+      div.innerHTML =
+        '<div class="cell-img-wrap error">⚠️ ' + cell.error.substring(0, 200) + '</div>' +
+        '<div class="cell-info">' +
+          '<span class="level-badge level-' + level + '">' + LEVEL_LABELS[level] + '</span>' +
+          '<span class="cell-meta">échec</span>' +
+        '</div>';
+    } else {
+      const modelLabel = MODEL_LABELS[cell.model] || cell.model;
+      const verdictBadge = cell.verdict
+        ? '<span class="verdict-badge ' + cell.verdict + '">' + cell.verdict +
+          (cell.score !== undefined ? '<span class="verdict-score">' + cell.score + '/5</span>' : '') +
+          '</span>'
+        : '';
+
+      let verdictDetail = '';
+      if (cell.respected || cell.failed) {
+        const respectedLis = (cell.respected || []).map(r => '<li>✅ ' + r + '</li>').join('');
+        const failedLis = (cell.failed || []).map(f => '<li>❌ ' + f + '</li>').join('');
+        verdictDetail = '<div class="verdict-detail"><ul>' + respectedLis + failedLis + '</ul></div>';
+      }
+
+      div.innerHTML =
+        '<div class="cell-img-wrap">' + verdictBadge +
+          '<img src="' + cell.output + '" alt="' + level + '" loading="lazy">' +
+        '</div>' +
+        '<div class="cell-info">' +
+          '<span class="level-badge level-' + level + '">' + LEVEL_LABELS[level] + '</span>' +
+          '<span class="cell-meta">' + cell.duration_s + 's · $' + cell.cost_usd.toFixed(3) + '</span>' +
+        '</div>' +
+        verdictDetail;
+      const img = div.querySelector('img');
+      img.onclick = (e) => { e.stopPropagation(); onCellClick(cellKey, cell.output, modelLabel + ' — ' + LEVEL_LABELS[level]); };
+      div.onclick = () => onCellClick(cellKey, cell.output, modelLabel + ' — ' + LEVEL_LABELS[level]);
+    }
+    grid.appendChild(div);
+  });
+}
+
+function onCellClick(cellKey, src, label) {
+  const p = PHOTOS[currentIdx];
+  if (compareMode) {
+    if (compareSelection.includes(cellKey)) {
+      compareSelection = compareSelection.filter(k => k !== cellKey);
+    } else {
+      compareSelection.push(cellKey);
+      if (compareSelection.length > 2) compareSelection.shift();
+    }
+    refreshCompareSelection();
+
+    if (compareSelection.length === 2) {
+      const [k1, k2] = compareSelection;
+      const c1 = p.cells[k1];
+      const c2 = p.cells[k2];
+      const l1 = (MODEL_LABELS[c1.model] || c1.model) + ' — ' + LEVEL_LABELS[c1.level];
+      const l2 = (MODEL_LABELS[c2.model] || c2.model) + ' — ' + LEVEL_LABELS[c2.level];
+      openSideBySide(c1.output, c2.output, l1, l2);
+    }
+  } else {
+    openSliderCompare(p.original, src, 'Original', label);
+  }
+}
+
+function refreshCompareSelection() {
+  document.querySelectorAll('.cell').forEach(c => {
+    const idx = compareSelection.indexOf(c.dataset.key);
+    c.classList.toggle('compare-selected', idx !== -1);
+    c.classList.toggle('compare-1', idx === 0);
+    c.classList.toggle('compare-2', idx === 1);
+  });
+}
+
+function togglePromptDrawer() {
+  const d = document.getElementById('prompt-drawer');
+  d.classList.toggle('open');
+  document.getElementById('prompt-btn').classList.toggle('active', d.classList.contains('open'));
+}
+
+function toggleCompareMode() {
+  compareMode = !compareMode;
+  compareSelection = [];
+  refreshCompareSelection();
+  const btn = document.getElementById('compare-btn');
+  btn.classList.toggle('active', compareMode);
+  btn.textContent = compareMode
+    ? '✓ Sélectionne 2 cellules à comparer'
+    : '🔀 Mode comparaison 2 versions';
+}
+
+function openSliderCompare(beforeSrc, afterSrc, beforeLabel, afterLabel) {
+  const content = document.getElementById('lightbox-content');
+  content.innerHTML =
+    '<div class="slider-wrap" id="slider-wrap">' +
+      '<span class="slider-label slider-label-before">' + beforeLabel + '</span>' +
+      '<span class="slider-label slider-label-after">' + afterLabel + '</span>' +
+      '<img src="' + beforeSrc + '" id="slider-before" draggable="false">' +
+      '<div class="slider-after-wrap" id="slider-after-wrap">' +
+        '<img src="' + afterSrc + '" id="slider-after" draggable="false">' +
+      '</div>' +
+      '<div class="slider-handle" id="slider-handle"></div>' +
+    '</div>';
+  document.getElementById('lightbox-info').textContent = beforeLabel + ' ⇄ ' + afterLabel;
+  document.getElementById('lightbox').classList.add('open');
+
+  const beforeImg = document.getElementById('slider-before');
+  if (beforeImg.complete) setupSlider();
+  else beforeImg.onload = () => setupSlider();
+}
+
+function setupSlider() {
+  const beforeImg = document.getElementById('slider-before');
+  const afterImg = document.getElementById('slider-after');
+  const wrap = document.getElementById('slider-wrap');
+  const afterWrap = document.getElementById('slider-after-wrap');
+  const handle = document.getElementById('slider-handle');
+
+  const setW = () => {
+    const w = beforeImg.offsetWidth;
+    const h = beforeImg.offsetHeight;
+    afterImg.style.width = w + 'px';
+    afterImg.style.height = h + 'px';
+  };
+  setW();
+  window.addEventListener('resize', setW);
+
+  let drag = false;
+  const move = (clientX) => {
+    const rect = wrap.getBoundingClientRect();
+    const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
+    const pct = (x / rect.width) * 100;
+    afterWrap.style.width = pct + '%';
+    handle.style.left = pct + '%';
+  };
+
+  wrap.addEventListener('mousedown', (e) => { drag = true; move(e.clientX); });
+  document.addEventListener('mouseup', () => { drag = false; });
+  document.addEventListener('mousemove', (e) => { if (drag) move(e.clientX); });
+  wrap.addEventListener('touchstart', (e) => { drag = true; move(e.touches[0].clientX); });
+  document.addEventListener('touchend', () => { drag = false; });
+  document.addEventListener('touchmove', (e) => { if (drag) move(e.touches[0].clientX); });
+}
+
+function openSideBySide(src1, src2, label1, label2) {
+  const content = document.getElementById('lightbox-content');
+  content.innerHTML =
+    '<div class="sbs-wrap">' +
+      '<div class="sbs-pane">' +
+        '<img src="' + src1 + '">' +
+        '<div class="sbs-label">' + label1 + '</div>' +
+      '</div>' +
+      '<div class="sbs-pane">' +
+        '<img src="' + src2 + '">' +
+        '<div class="sbs-label">' + label2 + '</div>' +
+      '</div>' +
+    '</div>';
+  document.getElementById('lightbox-info').textContent = label1 + ' vs ' + label2;
+  document.getElementById('lightbox').classList.add('open');
+}
+
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('open');
+}
+
+function navPrev() { if (currentIdx > 0) selectPhoto(currentIdx - 1); }
+function navNext() { if (currentIdx < PHOTOS.length - 1) selectPhoto(currentIdx + 1); }
+
+document.addEventListener('keydown', (e) => {
+  if (document.getElementById('lightbox').classList.contains('open')) {
+    if (e.key === 'Escape') closeLightbox();
+    return;
+  }
+  if (e.key === 'ArrowRight') navNext();
+  else if (e.key === 'ArrowLeft') navPrev();
+  else if (e.key === 'c' || e.key === 'C') toggleCompareMode();
+  else if (e.key >= '1' && e.key <= '6') {
+    // 1-3 = GPT low/med/high, 4-6 = Gemini low/med/high
+    const map = ['gpt_low', 'gpt_medium', 'gpt_high', 'gemini_low', 'gemini_medium', 'gemini_high'];
+    const cellKey = map[parseInt(e.key) - 1];
+    const cell = document.querySelector('.cell[data-key="' + cellKey + '"]');
+    if (cell) cell.click();
+  }
+});
+
+renderGlobalSummary();
+buildNav();
+selectPhoto(0);
+</script>
+</body>
+</html>

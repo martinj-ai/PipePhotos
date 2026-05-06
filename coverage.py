@@ -336,13 +336,35 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
     """
     amenities = rp_data.get("amenities_normalized", {})
 
-    # 1) Shopping list active : on ne garde que les catégories pertinentes pour cet hôtel
+    # ━━ Compte les photos qui tagguent chaque amenity (avant filtrage) ━━
+    # Sert à activer un bucket même si Booking/RP n'a pas listé l'amenity (mais qu'on voit
+    # 2+ photos qui suggèrent qu'elle existe — l'hôtel a peut-être un spa que Booking n'a pas
+    # déclaré explicitement). Le rôle de l'utilisateur des photos est de COMPLÉTER, pas restreindre.
+    amenity_photo_counts: dict[str, int] = {}
+    for entry in analyses:
+        targets = gemini_categories_to_targets(entry.get("analysis") or {})
+        for t in targets:
+            amenity_photo_counts[t] = amenity_photo_counts.get(t, 0) + 1
+
+    PHOTOS_THRESHOLD_FOR_AUTO_ACTIVATION = 2
+
+    # 1) Shopping list active : amenity Booking OU 2+ photos identifient cette amenity
     active_targets = {}
+    auto_activated: dict[str, bool] = {}  # buckets activés par photos (pas par Booking)
     for cat, conf in TARGETS.items():
         req = conf["required_amenity"]
-        # required_amenity = None → toujours actif (detail, hero_ext)
-        if req is None or amenities.get(req):
-            active_targets[cat] = conf
+        if req is None:
+            active_targets[cat] = dict(conf)
+        elif amenities.get(req):
+            # Activé par Booking/RP — on fait confiance, on peut générer si manquant
+            active_targets[cat] = dict(conf)
+            auto_activated[cat] = False
+        elif amenity_photo_counts.get(cat, 0) >= PHOTOS_THRESHOLD_FOR_AUTO_ACTIVATION:
+            # Activé par les photos uniquement — on garde les photos mais on NE GÉNÈRE PAS d'IA
+            # (génération réservée aux amenities déclarées Booking, pour éviter de fabriquer
+            # un faux spa pour un hôtel qui n'en a pas)
+            active_targets[cat] = dict(conf)
+            auto_activated[cat] = True
 
     # 2) Bucket les photos par catégories cibles (multi-tagging : 1 photo peut être dans plusieurs buckets)
     buckets: dict[str, list[dict]] = {cat: [] for cat in active_targets}
@@ -533,6 +555,7 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
             "target_max": conf["max"],
             "found": found,
             "kept_estimate": keep,
+            "auto_activated_by_photos": auto_activated.get(cat, False),
             "photos": [
                 {
                     "filename": e["input"]["filename"],
@@ -543,7 +566,7 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
                 for idx, e in enumerate(buckets[cat])
             ],
             "status": status,
-            "message": msg,
+            "message": msg + (" (bucket activé par les photos détectées, pas par Booking)" if auto_activated.get(cat, False) else ""),
         }
 
     # 5) Photos non-mappées (chambre, staff, catégorie absente du shopping list...)
