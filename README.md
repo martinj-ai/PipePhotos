@@ -40,3 +40,19 @@ Pour chaque photo, un JSON dans `data/output/{name}.json` contenant :
 - Ajouter nœud outil Lumière (transformation)
 - Brancher fal.ai pour l'ajout personnage
 - Interface canvas React Flow (voir `../canvas_tech_reco.md`)
+
+## 📚 Documentation
+
+| Fichier | Contenu |
+|---|---|
+| [`docs/MULTI_FORMAT_CROP_SPEC.md`](docs/MULTI_FORMAT_CROP_SPEC.md) | Spec multi-format crop (13 formats, outpainting Nano Banana 2) |
+| [`docs/SLOWMO_SPEC.md`](docs/SLOWMO_SPEC.md) | Spec slow-motion via Higgsfield Kling 2.1 Pro |
+| [`docs/PROD_MIGRATION.md`](docs/PROD_MIGRATION.md) | **Checklist d'adaptation prod Railway** — à maintenir à chaque feature |
+| [`CLAUDE.md`](CLAUDE.md) | Méthodologie de travail pour les itérations Claude |
+
+## ⚠️ Ce qui est local-only à industrialiser
+
+L'outil tourne actuellement en **POC local** (filesystem, pas de DB, pas de queue async).
+Avant de déployer sur Railway, voir [`docs/PROD_MIGRATION.md`](docs/PROD_MIGRATION.md)
+qui répertorie tous les points à adapter (CDN pour les médias, Postgres pour les
+analyses, Redis pour le cache de progress, RQ/Celery pour les pipelines longs).
