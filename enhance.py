@@ -176,7 +176,8 @@ Loose objects:
 - Forgotten items (cups, water bottles, used glasses, crumpled towels, trash, plastic bags, beach toys, plastic toys, sand buckets/spades, beach balls, kid floats abandoned on furniture)
 - Personal belongings left behind (piled sandals/flip-flops, scattered clothing, open beach bags, sunscreen bottles)
 - Unsightly signage, posters, "out of order" notices, plastic A-boards, price tags
-- Construction debris, hazard barriers, tape, hose, fire-extinguisher boxes on a wall
+- Construction-site hazard tape, plastic safety cones, temporary site barriers, hose lying on the ground, fire-extinguisher boxes on a wall
+  ⛔ DO NOT TOUCH permanent safety barriers : glass/metal/wire pool fences, spa safety fences, balcony or rooftop railings, terrace balustrades — these are LEGALLY REQUIRED and removing them ruins the photo (it makes the pool look unsafe = legal red flag). Permanent pool/balcony/rooftop fences and railings ALWAYS STAY. Same for pool steps, pool ladders, handrails of stairs.
 
 Technical / structural eyesores (accept the small risk of bavure):
 - Visible surveillance cameras / CCTV (mounted on poles, walls, ceilings)
@@ -195,6 +196,7 @@ Replace the logo area with a neutral matching color/texture (the parasol's main 
 KEEP EXACTLY IDENTICAL:
 - All hospitality furniture (loungers, daybeds, parasols, tables, chairs, sofas)
 - All structures, lighting fixtures, plants, water, sky, architecture proper
+- **Permanent safety fences / railings** : pool fences (glass, metal, wire mesh, wooden), spa enclosure fences, balcony railings, rooftop balustrades, terrace handrails, pool ladders, pool steps, pool grab-rails. Even if they look "industrial" or "ugly" — they MUST stay. Their absence makes the photo unusable (safety liability).
 - Any food/drinks SERVED on a dining table (cocktail, plate of food → keep; abandoned dirty glass on a lounger → remove)
 - All people present in the scene
 
@@ -206,6 +208,7 @@ NEGATIVE PROMPT (HARD avoid):
 - ANY new element added to the scene (cranes, scaffolding, trucks, vehicles, construction, birds, people, plants, decorations, signs, text overlays)
 - "improvements" that go beyond cleaning (do NOT add a sky, do NOT add clouds, do NOT add greenery)
 - removed furniture, altered architecture, missing decor, ghost outlines, blurred patches, CGI artifacts, structural deformation
+- **removed pool fence / safety railing / glass pool barrier / balcony railing / rooftop balustrade / pool ladder / pool steps / handrail** (these are mandatory safety elements — never erase them, even partially)
 - removed served food or cocktails on a dining table, removed people
 - duplicated parts of the scene (a wall section pasted twice, water duplicated)
 - color shifts in regions that were not edited"""
@@ -885,8 +888,10 @@ You MUST NEVER add ANY of the following — NO EXCEPTIONS:
 - Any modification to existing pool water shape, decking size, walls, doors, windows, pillars, plants, fences, railings"""
         pool_float_block = f"""
 
-🍩 POOL FLOAT (OPTIONAL, ONLY IF NATURAL) :
-You MAY introduce ONE pool float in the water — specifically : {pool_float_hint}.
+🍩 POOL FLOAT (MANDATORY — must appear in the final image) :
+You MUST add ONE pool float in the water — specifically : {pool_float_hint}.
+
+This pool float is a CRITICAL element of the final composition — its absence breaks the brand intent. The float MUST be visible and identifiable in the output image. Do NOT skip it.
 
 Strict rules for the float:
 - Place it IN the water of the existing pool, in a zone that is ALREADY empty water (not over the existing decking, not blocking existing furniture).
@@ -895,9 +900,9 @@ Strict rules for the float:
 - Realistic interaction with water : water displacement around the float, subtle wake if motion implied, partial reflection on water surface.
 - Color/style must remain photorealistic — no over-saturated CGI candy palette. Slight wear/use is fine.
 - The float counts AS the subject's support : if the subject is ON the float, the water-depth rules above are relaxed (they can be at the surface, lying on the float). But the float must look stable, not tipping.
-- If the pool is too small (< 3m × 3m visible water surface), DO NOT add a float — return without one.
-- If the scene aesthetic is clearly minimalist / spa / serene (sleek architecture, dark water, no warm colors), DO NOT add a float — return without one.
 - The float CANNOT replace any existing furniture or decor.
+
+ONLY EXCEPTION where the float may be omitted : the visible water surface is < 2m × 2m (= float would be impossible to place at realistic scale). In that ONE case, return the image without the float. In ALL other cases, the float MUST be present in the output.
 
 If you cannot place this float naturally according to ALL the rules above → DO NOT add it. The photo without a float is always acceptable.
 """
@@ -1085,9 +1090,27 @@ def _pick_main_action(
 
     # Mots-clés signalant un problème de lumière (cross-checks ambiance Gemini parfois incohérente)
     DARK_KEYWORDS = ("sombre", "manque de lumière", "manque de lumiere", "peu lumineux", "obscur", "ombrageux")
-    NIGHT_KEYWORDS = ("nuit", "nocturne", "couché de soleil", "couche de soleil", "crépuscule", "crepuscule", "twilight")
     has_dark_issue = any(k in issues_str for k in DARK_KEYWORDS)
-    has_night_clue = time_of_day in ("nuit", "aube_crepuscule") or any(k in issues_str for k in NIGHT_KEYWORDS)
+
+    # ━━ Détection "nuit" ROBUSTE (regex avec contexte) ━━━━━━━━━━━━━━━━━━━━━━━━
+    # Bug observé Martin (11/05/2026) sur booking_022 : issue "présence d'un parking
+    # avec voitures en arrière-plan qui NUIT à l'ambiance évasion" → le mot "nuit"
+    # (verbe nuire conjugué) matchait NIGHT_KEYWORDS générique → has_night_clue=True
+    # → ai_lighting déclenché à tort sur une photo de JOUR + ai_remove_clutter
+    # JAMAIS exécuté (parking voitures pas retiré).
+    # Fix : on exige un CONTEXTE qui rend "nuit" sans ambiguïté (substantif), pas
+    # un simple match de substring. Le verbe nuire conjugué ("qui nuit à...") n'est
+    # plus capté à tort. Si Gemini retourne explicitement time_of_day=nuit/crépuscule
+    # côté factual, on l'utilise direct (canal le plus fiable).
+    night_issue_patterns = (
+        " de nuit", " la nuit", "scène nocturne", "ambiance nocturne",
+        "ambiance de nuit", "photo de nuit", "shot de nuit", "prise de nuit",
+        "en pleine nuit", "vue de nuit", "image de nuit", "cliché de nuit",
+        "nocturne", "couché de soleil", "couche de soleil",
+        "crépuscule", "crepuscule", "twilight",
+    )
+    has_night_keyword_in_issues = any(p in issues_str for p in night_issue_patterns)
+    has_night_clue = time_of_day in ("nuit", "aube_crepuscule") or has_night_keyword_in_issues
 
     # ---- Règles métier intransgressibles (priorité décroissante) ----
 
@@ -1136,15 +1159,40 @@ def _pick_main_action(
         except (ValueError, TypeError):
             capacity_total = None
 
-        # Skip propre si pas de safe_zone (l'IA inventerait du décor)
-        if not safe_zones or (max_h is not None and max_h == 0):
+        # ━ Skip strict UNIQUEMENT si Gemini a explicitement dit max_h == 0 ━
+        # max_h == 0 = Gemini certain qu'il n'y a aucune place (ex: vue purement
+        # architecturale, gros plan objet). On respecte.
+        if max_h is not None and max_h == 0:
             return {
                 "action": "local_warm_boost",
                 "prompt": None,
-                "reason": "ajout perso skip (Gemini : aucune safe_zone identifiée — l'IA inventerait du décor)",
+                "reason": "ajout perso skip (Gemini : max_h=0, photo non habitée par design)",
             }
+
+        # ━ Fallback safe_zones si Gemini retourne vide MAIS la photo est candidate ━
+        # Avant : skip strict si safe_zones=[] → trop conservateur, on ratait des slots 1
+        # pour des photos évidentes (piscine avec transats vides). Maintenant : on injecte
+        # des safe_zones GÉNÉRIQUES MAIS SÛRES par catégorie (toujours en référence à du
+        # mobilier visible courant pour cette catégorie). Gemini Image reste contraint
+        # par le prompt persona qui dit "NE PAS INVENTER de décor".
+        used_fallback = False
+        if not safe_zones:
+            fallback = _fallback_safe_zones_by_category(cat)
+            if fallback:
+                safe_zones = fallback
+                used_fallback = True
+
+        # Si même après fallback c'est vide (catégorie pas listée) → skip propre
+        if not safe_zones:
+            return {
+                "action": "local_warm_boost",
+                "prompt": None,
+                "reason": f"ajout perso skip (catégorie '{cat}' sans fallback safe_zone disponible)",
+            }
+
         # ━ Pool float occasionnel (déterministe par filename, voir pick_pool_float_hint) ━
         pool_float = pick_pool_float_hint(cat, vibe, photo_filename)
+        fallback_tag = " [fallback safe_zones]" if used_fallback else ""
         return {
             "action": "ai_add_character",
             "prompt": build_persona_prompt(
@@ -1153,10 +1201,11 @@ def _pick_main_action(
                 max_humans=max_h, capacity=capacity_total,
                 pool_float_hint=pool_float,
             ),
-            "reason": f"ajout personnage IA ({persona}, target={compute_target_humans(persona, capacity_total or 2)}) sur {cat or 'scène vide'}" + (f" + bouée 🍩 {pool_float[:30]}…" if pool_float else ""),
+            "reason": f"ajout personnage IA ({persona}, target={compute_target_humans(persona, capacity_total or 2)}) sur {cat or 'scène vide'}{fallback_tag}" + (f" + bouée 🍩 {pool_float[:30]}…" if pool_float else ""),
             "persona_used": persona,
             "capacity_used": capacity_total,
             "pool_float_used": pool_float,
+            "safe_zones_fallback_used": used_fallback,
         }
 
     # 4. Trop de monde (> 4 personnes) → suppression
@@ -1175,7 +1224,10 @@ def _pick_main_action(
         # objets non-aspirationnels élargis
         "sceau", "seau", "bucket", "pelle", "spade", "jouet", "toy",
         "ballon", "sandale", "flip-flop", "serviette", "towel",
-        "sac", "bag", "extincteur", "barrière", "hose", "tuyau",
+        "sac", "bag", "extincteur", "hose", "tuyau",
+        # NB : "barrière" retiré — trop générique, déclenchait à tort sur pool fences.
+        # Les vraies barrières temporaires (chantier, hazard tape) sont identifiées via
+        # "détritus" ou figurent dans clutter_to_remove explicite avec un wording précis.
         # Eyesores techniques/structurels
         "caméra", "camera", "surveillance", "cctv",
         "escalier de secours", "fire escape", "issue de secours",
@@ -1310,6 +1362,68 @@ def _has_clutter(analysis: dict | None) -> bool:
         "logo", "logos", "branding", "marque", "brand", "label", "sponsor",
     )
     return any(k in issues_str for k in keywords)
+
+
+# ━━ Fallback safe_zones par catégorie ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Quand Gemini Vision retourne safe_zones_for_humans.safe_areas = [] sur une
+# photo qui est manifestement candidate (transats vides + piscine bien cadrée),
+# on doit pouvoir quand même placer un humain SANS que l'IA invente du décor.
+# La stratégie : fournir des safe_zones GÉNÉRIQUES qui réfèrent toujours à du
+# mobilier ou éléments QUASI-CERTAINS d'être visibles dans la catégorie. Le
+# prompt persona reste contraint par "DO NOT INVENT decor" — donc même si la
+# safe_zone ne matche pas pile l'image, l'IA n'inventera pas (elle skippera).
+#
+# IMPORTANT : ces strings doivent être SUFFISAMMENT GÉNÉRIQUES pour rester
+# valables sur 80%+ des photos de chaque catégorie, mais SPÉCIFIQUES sur le
+# type de surface utilisé (mobilier existant uniquement).
+_FALLBACK_SAFE_ZONES = {
+    "piscine": [
+        "allongée sur un transat libre visible au bord de la piscine (premier plan latéral)",
+        "debout sur le carrelage/dallage existant du bord de piscine, face caméra, à environ 1m de l'eau",
+        "assise sur le rebord de la piscine (uniquement si rebord plat et large visible), jambes dans l'eau",
+    ],
+    "cabana": [
+        "allongée sur le lit/sofa de la cabana visible, position lecture détendue",
+        "assise sur le bord du daybed de la cabana, face caméra ou de 3/4",
+    ],
+    "transat": [
+        "allongée sur un transat libre identifiable au premier plan, serviette discrète sous le corps",
+    ],
+    "rooftop": [
+        "debout sur la terrasse, côté intérieur du garde-corps/balustrade, face caméra à environ 1.5m du bord",
+        "assise sur un siège/banc/sofa existant visible sur la terrasse",
+    ],
+    "beach": [
+        "allongée sur une serviette posée sur le sable, à l'ombre/proche d'un parasol visible",
+        "debout sur le sable, face caméra à l'avant du cadre",
+    ],
+    "spa": [
+        "assise sur un banc ou rebord existant de la salle de soin, peignoir blanc",
+    ],
+    "f_and_b": [
+        "assise à une table dressée existante, face caméra ou de 3/4, posture conviviale",
+    ],
+    "interieur_commun": [
+        "assise sur un fauteuil/sofa/canapé existant visible au premier plan, posture lecture/détente",
+    ],
+    "exterieur": [
+        "debout sur le sol carrelé/dallé/wood deck visible, face caméra à l'avant du cadre",
+    ],
+    "gym": [
+        "utilisant un appareil de musculation/yoga visible, posture concentrée",
+    ],
+}
+
+
+def _fallback_safe_zones_by_category(cat: str | None) -> list[str]:
+    """Retourne 1-3 safe_zones génériques compatibles avec la catégorie quand
+    Gemini Vision n'en a pas identifié. Liste vide si la catégorie n'est pas
+    couverte (photo type 'detail'/'facade'/'piscine_vue_aerienne' où on ne
+    peut pas placer d'humain à 100% sans risque).
+    """
+    if not cat:
+        return []
+    return _FALLBACK_SAFE_ZONES.get(cat.lower(), [])
 
 
 def pick_strategy(
@@ -1487,21 +1601,47 @@ def has_narrative_human(analysis: dict) -> bool:
     return human_count > 0 and face_visible
 
 
+_BUSINESS_RULE_EXCLUDED_CATS = {
+    # Catégories où enhance.py va SKIPPER l'ajout perso quoi qu'il arrive (règles métier
+    # hard-codées plus bas dans pick_strategy). On exclut DE TÊTE pour que l'alternance
+    # `prev_will_have_human` (calculée en app.py AVANT pick_strategy) ne compte pas
+    # faussement ces photos comme "humain ajouté".
+    "piscine_vue_aerienne",  # figure trop petite vue aérienne
+    "f_and_b",                # risque d'inventer un plat
+    "chambre",                # règle Day Pass : pas de chambre
+    "staff",                  # photo dédiée staff, on n'ajoute pas un client par-dessus
+    "detail",                 # gros plan d'un objet, pas de place pour humain
+    "facade",                 # vue purement architecturale du bâtiment
+    "autre",                  # cat fourre-tout, par défaut pas de candidat
+}
+
+
 def is_add_character_candidate(analysis: dict) -> bool:
     """Vrai si la photo est candidate à un ajout personnage IA.
 
     Source de vérité (par ordre) :
-      1. Champ explicite Gemini ai_add_character_candidate.is_candidate
-      2. Heuristique : catégorie ∈ AI_OK + pas de présence humaine narrative
+      1. Guard CATÉGORIES MÉTIER EXCLUES (priorité absolue) : si la cat est dans
+         _BUSINESS_RULE_EXCLUDED_CATS, on retourne False MÊME SI Gemini dit candidate=True.
+         Sans ce guard, l'alternance app.py compte faussement un "humain ajouté" sur ces
+         slots qui seront skippés par enhance.py → casse l'alternance → cascade de slots
+         sans humain (bug observé Martin 11/05/2026 sur pack avec piscine_vue_aerienne + f_and_b).
+      2. Champ explicite Gemini ai_add_character_candidate.is_candidate
+      3. Heuristique : catégorie ∈ AI_OK + pas de présence humaine narrative
     """
     if not analysis:
         return False
+
+    factual = analysis.get("factual") or {}
+    cat = (factual.get("category") or "").lower()
+
+    # ━ Guard #1 : catégories métier exclues — court-circuit indépendant de Gemini ━
+    if cat in _BUSINESS_RULE_EXCLUDED_CATS:
+        return False
+
     ai_block = analysis.get("ai_add_character_candidate")
     if isinstance(ai_block, dict) and isinstance(ai_block.get("is_candidate"), bool):
         return ai_block["is_candidate"]
 
-    factual = analysis.get("factual") or {}
-    cat = (factual.get("category") or "").lower()
     if cat not in AI_ADD_OK_CATEGORIES:
         return False
     # Si déjà un humain narratif (pas juste mains) → pas besoin d'ajouter

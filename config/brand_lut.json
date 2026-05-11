@@ -1,9 +1,10 @@
 {
   "_doc": "LUT brand Dayuse — appliquée en post-traitement à toutes les photos finales pour cohérence colorimétrique inter-photos et inter-hôtels. Modifie ces valeurs pour ajuster le ton brand sans toucher au code.",
+  "_version": "v2 — 11/05/2026 : bump pour effet 'soleil de jour' plus marqué. Martin retour visuel : les photos finales (v1 : sat+12% contraste+6% lum+2% warmth R+4% B-3%) ne paraissaient pas vraiment ensoleillées. v2 : on pousse saturation, contraste, luminosité et surtout warmth (retire +5% de bleu en plus, ajoute +4% de rouge en plus) pour donner une dominante dorée chaude façon golden hour ambiante.",
 
-  "saturation": 1.12,
-  "contrast": 1.06,
-  "brightness": 1.02,
-  "warmth_r": 1.04,
-  "warmth_b": 0.97
+  "saturation": 1.18,
+  "contrast": 1.10,
+  "brightness": 1.05,
+  "warmth_r": 1.08,
+  "warmth_b": 0.92
 }

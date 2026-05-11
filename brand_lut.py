@@ -17,17 +17,19 @@ from PIL import Image, ImageEnhance
 ROOT = Path(__file__).parent
 CONFIG_PATH = ROOT / "config" / "brand_lut.json"
 
-# Paramètres par défaut — calibrés pour reproduire le "ton Dayuse" :
-# - saturation +12% (pop des couleurs sans tomber dans HDR)
-# - contraste +6% (pop sans écraser)
-# - luminosité +2% (légère)
-# - warmth +4% sur R, -3% sur B (push tons chauds, baisse tons bleus parasites)
+# Paramètres par défaut — v2 (11/05/2026) calibrés pour "soleil de jour Dayuse" :
+# - saturation +18% (pop couleurs, encore en-dessous du seuil HDR ~1.25)
+# - contraste +10% (donne du punch aux ombres/lumières sans écraser)
+# - luminosité +5% (effet de scène ensoleillée, pas surex)
+# - warmth +8% R, -8% B (ambiance dorée golden hour, retire les tons bleus parasites)
+# Martin v1 (sat+12%, lum+2%, warmth R+4% B-3%) trouvait que l'effet n'était pas assez
+# ensoleillé sur les photos finales — bump cohérent pour passer "ambiance neutre" → "soleil chaud".
 DEFAULT_PARAMS = {
-    "saturation": 1.12,
-    "contrast": 1.06,
-    "brightness": 1.02,
-    "warmth_r": 1.04,
-    "warmth_b": 0.97,
+    "saturation": 1.18,
+    "contrast": 1.10,
+    "brightness": 1.05,
+    "warmth_r": 1.08,
+    "warmth_b": 0.92,
 }
 
 

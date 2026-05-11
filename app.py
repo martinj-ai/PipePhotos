@@ -1022,11 +1022,22 @@ def api_run():
             order = pool_personas
         return order[rotation_idx % len(order)] if order else "couples"
 
+    # ━━ Alternance humains : on essaie 1/2 mais avec garde-fou anti-cascade ━━
+    # Bug observé Martin (11/05/2026) : sur un pack avec piscine_vue_aerienne + f_and_b
+    # (catégories où enhance.py skip l'ajout pour règle métier), `prev_will_have_human`
+    # devenait True à tort → cascade de slots sans humain.
+    # Fix 1 (côté enhance.is_add_character_candidate) : exclut ces cat de tête → is_candidate=False
+    # → l'alternance ne les compte pas faussement comme "humain ajouté".
+    # Fix 2 (ici, garde-fou) : si 2 slots consécutifs n'ont PAS d'humain (natif ni ajouté), on
+    # FORCE l'ajout sur le slot suivant SI is_candidate (peu importe l'alternance 1/2). Évite
+    # de se retrouver avec 3+ photos sans humain à la suite.
     prev_will_have_human = False
+    consecutive_no_human = 0
     persona_idx = 0
     for idx, entry in enumerate(ordered_pack, 1):
         if entry.get("is_bonus_lifestyle"):
             prev_will_have_human = True
+            consecutive_no_human = 0
             continue
         has_human_native = enhance.has_narrative_human(entry["analysis"])
         is_candidate = enhance.is_add_character_candidate(entry["analysis"])
@@ -1036,6 +1047,9 @@ def api_run():
             will_add = True
         elif not has_human_native and not prev_will_have_human and is_candidate:
             will_add = True
+        # ━ Garde-fou : ≥ 2 slots consécutifs sans humain → forcer si candidate ━
+        elif not has_human_native and consecutive_no_human >= 2 and is_candidate:
+            will_add = True
 
         if will_add:
             fname = entry["input"]["filename"]
@@ -1043,7 +1057,9 @@ def api_run():
             persona_per_filename[fname] = _pick_contextual_persona(entry, persona_idx)
             persona_idx += 1
 
-        prev_will_have_human = has_human_native or will_add
+        slot_has_human = has_human_native or will_add
+        prev_will_have_human = slot_has_human
+        consecutive_no_human = 0 if slot_has_human else consecutive_no_human + 1
 
     # === Boucle de retouche : on itère dans l'ORDRE FINAL du pack (slot 1, 2, ...) ===
     # ━━ Parallélisation : 3 workers ThreadPool (I/O-bound — chaque enhance fait des
@@ -1306,7 +1322,20 @@ def api_run():
     for ph in photos_summary:
         ph["cluster_id"] = cluster_map.get(ph["filename"])
 
-    progress.finish(f"{slug}_analyze", message="Pipeline terminé")
+    # ━━ NB : progress.finish() est déplacé en FIN de api_run() (juste avant le return) ━━
+    # Avant : finish ici → côté front, le polling voyait done=true et affichait "Pipeline
+    # terminé" pendant que le serveur passait 5-15s à construire enhanced_summary +
+    # photos_summary pour la réponse JSON. Résultat : bouton bloqué "Analyse en cours…",
+    # progress UI à 100% mais aucun résultat affiché. Maintenant finish() fire juste avant
+    # return → done=true coïncide avec la dispo de la réponse → bouton réactivé en même
+    # temps que les résultats s'affichent.
+    # On affiche un step "finalizing" intermédiaire pour que le front voit le pipe
+    # encore vivant pendant la construction de la payload.
+    progress.update(
+        f"{slug}_analyze",
+        step="finalizing",
+        message="Construction de la réponse (lecture des analyses + transformations)…",
+    )
 
     # Cumul des dépenses sur tous les runs (data/spend.json)
     spend.add_run(slug, {
@@ -1415,6 +1444,11 @@ def api_run():
 
     pipeline_completed_at = time.time()
     pipeline_duration_s = round(pipeline_completed_at - pipeline_started_at, 1)
+
+    # ━━ Maintenant que la payload est prête, on peut marquer "done" — coïncide avec
+    #    la dispo de la réponse côté front (plus de fenêtre où progress=done mais
+    #    fetch /api/run encore en attente).
+    progress.finish(f"{slug}_analyze", message="Pipeline terminé")
 
     return jsonify({
         "slug": slug,

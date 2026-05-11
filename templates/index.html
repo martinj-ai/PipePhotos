@@ -1876,7 +1876,7 @@ photo finale enhanced (jpeg)
             return;
           }
 
-          if (!s.done && (s.current > 0 || s.total > 0 || s.step === "starting" || s.step === "analyzing" || s.step === "analyzing_rich" || s.step === "downloading" || s.step === "scraping_booking" || s.step === "enhancing" || s.step === "dedup" || s.step === "dedup_vlm" || s.step === "amenity_verify" || s.step === "official_finding" || s.step === "official_extracting" || s.step === "booking" || s.step === "rp" || s.step === "multi_format" || s.step === "multi_format_done")) {
+          if (!s.done && (s.current > 0 || s.total > 0 || s.step === "starting" || s.step === "analyzing" || s.step === "analyzing_rich" || s.step === "downloading" || s.step === "scraping_booking" || s.step === "enhancing" || s.step === "dedup" || s.step === "dedup_vlm" || s.step === "amenity_verify" || s.step === "official_finding" || s.step === "official_extracting" || s.step === "booking" || s.step === "rp" || s.step === "multi_format" || s.step === "multi_format_done" || s.step === "finalizing")) {
             sawInProgress = true;
           }
           onUpdate(s);
