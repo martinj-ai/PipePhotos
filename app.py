@@ -556,16 +556,57 @@ def api_run():
     total_output_tokens = 0
     total_cost_usd = 0.0
     analyses_from_cache = 0
+    failed_analyses = []
     for a in analyses:
         if a.get("_from_cache"):
             analyses_from_cache += 1
             continue
-        for t in a.get("trace", []):
-            if t.get("node") == "N2_analyze_gemini" and t.get("result") == "pass":
-                u = t.get("usage", {})
-                total_input_tokens += u.get("input_tokens", 0)
-                total_output_tokens += u.get("output_tokens", 0)
-                total_cost_usd += u.get("cost_usd", 0)
+        n2 = next((t for t in a.get("trace", []) if t.get("node") == "N2_analyze_gemini"), None)
+        if n2 and n2.get("result") == "pass":
+            u = n2.get("usage", {})
+            total_input_tokens += u.get("input_tokens", 0)
+            total_output_tokens += u.get("output_tokens", 0)
+            total_cost_usd += u.get("cost_usd", 0)
+        else:
+            failed_analyses.append({
+                "filename": a.get("input", {}).get("filename"),
+                "error": (n2 or {}).get("error", "unknown"),
+            })
+
+    # ━━ Garde : si trop d'échecs Gemini, on abort avec message explicite ━━
+    # Cas typique : projet en spend cap dépassé → 100% des photos échouent. Sans
+    # cette garde, on continuait dans dedup/coverage/ordering avec des analyses
+    # vides et le pipeline crashait plus loin sans contexte clair.
+    fresh_attempted = len(analyses) - analyses_from_cache
+    if fresh_attempted > 0:
+        fail_rate = len(failed_analyses) / fresh_attempted
+        if fail_rate >= 0.3:
+            sample_err = failed_analyses[0]["error"] if failed_analyses else "?"
+            # Détection du spend cap → message ultra-clair pour Martin
+            is_spend_cap = "spend" in sample_err.lower() or "spending" in sample_err.lower() or "billing" in sample_err.lower()
+            if is_spend_cap:
+                user_msg = (
+                    f"❌ Spend cap Gemini API dépassé ({len(failed_analyses)}/{fresh_attempted} photos en erreur). "
+                    f"Va sur https://ai.studio/spend pour lever le plafond, puis relance."
+                )
+            else:
+                user_msg = (
+                    f"❌ {len(failed_analyses)}/{fresh_attempted} analyses Gemini en erreur. "
+                    f"Première erreur : {sample_err[:200]}"
+                )
+            progress.update(
+                f"{slug}_analyze",
+                step="error",
+                done=True,
+                message=user_msg,
+            )
+            return jsonify({
+                "error": user_msg,
+                "failed_count": len(failed_analyses),
+                "fresh_attempted": fresh_attempted,
+                "sample_errors": [f["error"][:200] for f in failed_analyses[:3]],
+            }), 502
+
     progress.update(
         f"{slug}_analyze",
         cost_usd_cumulated=round(total_cost_usd, 6),
@@ -825,6 +866,100 @@ def api_run():
         bonus_lifestyle_entries=bonus_entries,
     )
     final_order = {entry["input"]["filename"]: idx + 1 for idx, entry in enumerate(ordered_pack)}
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Étape 4.c — Pass 2 RICH : complète les 4 sections lourdes (safe_zones_for_humans,
+    # crop_safe_zones, recommended_crop, slowmo_potential) UNIQUEMENT sur les
+    # ~12-18 photos finalistes (ordered_pack). Économise les tokens vs générer
+    # ces champs sur les 25 photos initiales (~60% des sections rich tombent à
+    # la poubelle si on les met dans la pass1 et qu'elles concernent des photos
+    # rejetées par dedup/coverage/ordering).
+    #
+    # Skip si :
+    #   - mode use_analysis_cache : les rich sont déjà dans les JSON cache
+    #   - mode use_enhance_cache : pas la peine, on ne re-retouche pas
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Skip pass2 UNIQUEMENT en mode postprocess (use_enhance_cache=True) : enhance et
+    # multi_format ne re-tournent pas, les rich ne servent à rien. En mode "selection"
+    # (use_analysis_cache=True mais use_enhance_cache=False), on doit produire les rich
+    # pour les finalistes qui n'en ont pas encore (sélection user a pu changer).
+    rich_paths = []
+    if not use_enhance_cache:
+        for entry in ordered_pack:
+            p_str = entry.get("input", {}).get("path_absolute")
+            if not p_str:
+                continue
+            p = Path(p_str)
+            if not p.exists():
+                continue
+            a = entry.get("analysis") or {}
+            # Si une analyse rich a déjà été produite (run précédent partiel), skip
+            if a.get("safe_zones_for_humans") and a.get("crop_safe_zones"):
+                continue
+            rich_paths.append(p)
+
+    if rich_paths:
+        progress.update(
+            f"{slug}_analyze",
+            step="analyzing_rich",
+            current=0,
+            total=len(rich_paths),
+            message=f"Détails IA finalistes (0/{len(rich_paths)})",
+        )
+
+        # threading n'est importé que plus bas dans la fonction (bloc enhance) — on
+        # l'importe ici localement pour le lock de cumul cost/tokens (rich_cost).
+        import threading as _threading
+        rich_cost = {"usd": 0.0, "in_tokens": 0, "out_tokens": 0}
+        rich_cost_lock = _threading.Lock()
+
+        def _rich_progress_cb(done, total, last_filename, usage=None, error=None, **kw):
+            if usage:
+                with rich_cost_lock:
+                    rich_cost["usd"] += usage.get("cost_usd", 0)
+                    rich_cost["in_tokens"] += usage.get("input_tokens", 0)
+                    rich_cost["out_tokens"] += usage.get("output_tokens", 0)
+            msg = f"Détails IA finalistes {done}/{total} : {last_filename}"
+            if error:
+                msg = f"⚠️ {last_filename} : {str(error)[:80]}"
+            progress.increment(f"{slug}_analyze", current=done, message=msg)
+
+        print(f"🔍 Pass2 RICH sur {len(rich_paths)} photos finalistes (parallel={analyze_workers})")
+        rich_results = analyze.analyze_rich_batch(
+            rich_paths, model,
+            parallel=analyze_workers,
+            output_dir=analyses_dir,
+            progress_callback=_rich_progress_cb,
+        )
+
+        # Cumul tokens/coût dans la même tirelire que pass1
+        progress.update(
+            f"{slug}_analyze",
+            cost_usd_cumulated=round(total_cost_usd + rich_cost["usd"], 6),
+            input_tokens_cumulated=total_input_tokens + rich_cost["in_tokens"],
+            output_tokens_cumulated=total_output_tokens + rich_cost["out_tokens"],
+        )
+        total_cost_usd += rich_cost["usd"]
+        total_input_tokens += rich_cost["in_tokens"]
+        total_output_tokens += rich_cost["out_tokens"]
+
+        # Merge des champs RICH dans by_filename + ordered_pack (les consommateurs
+        # — enhance, multi_format, slowmo — lisent dans entry["analysis"] ou
+        # by_filename[...].get("analysis"))
+        for entry in ordered_pack:
+            fname = entry["input"]["filename"]
+            stem = Path(fname).stem
+            rich_a = rich_results.get(stem)
+            if not rich_a:
+                continue
+            existing = entry.get("analysis") or {}
+            for k in ("safe_zones_for_humans", "recommended_crop", "crop_safe_zones", "slowmo_potential"):
+                if k in rich_a:
+                    existing[k] = rich_a[k]
+            entry["analysis"] = existing
+            if fname in by_filename:
+                by_filename[fname]["analysis"] = existing
+        print(f"  ✓ Pass2 mergée dans {len(rich_results)}/{len(rich_paths)} analyses")
 
     progress.update(f"{slug}_analyze", step="enhancing", current=0, total=len(selected_filenames))
 
@@ -1292,6 +1427,10 @@ def api_run():
             "stars": rp_data["star_classification"],
             "vibe": rp_data["vibe_primary"],
             "personas_allowed": rp_data["personas_allowed"],
+            # Liste des URLs des photos ResortPass dans l'ordre original RP (pour la
+            # prévisualisation comparative côte-à-côte dans le pack final).
+            "rp_image_urls": rp_data.get("image_urls") or [],
+            "rp_url": rp_data.get("url"),
         },
         "photos": photos_summary,
         "coverage": cov,
