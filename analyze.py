@@ -41,12 +41,27 @@ MIN_RESOLUTION = (500, 320)  # seuil bas : les variants Drupal 540x336 et autres
 # Si ANALYZE_RATE_LIMIT=0 dans .env → pas de sleep (paid tier).
 # Sinon valeur en secondes entre appels (défaut 13s = free tier 5 RPM).
 RATE_LIMIT_SLEEP = float(os.getenv("ANALYZE_RATE_LIMIT", "0"))
-MAX_RETRIES = 6  # paid tier rate limit peut taper sur de gros batchs
+# Retry policy assouplie : 3 tentatives au lieu de 6, wait max 30s (vs 90s avant).
+# Worst case par photo : 4+8+16 = 28s d'attente au lieu de 4+8+16+32+64+90+90 = 304s.
+# Sur 8 workers en // si Gemini throttle, ça évite de bloquer le wall-time.
+# Bug Martin (mai 2026) : projet en spend cap → chaque photo bouffait 5 min de
+# retry avant d'abandonner. Aujourd'hui : fail fast + erreur explicite remontée.
+MAX_RETRIES = 3
 
 # Pricing Gemini 2.5 Flash paid tier 1 (avril 2026, USD/M tokens)
 GEMINI_PRICE_INPUT_USD_PER_M = 0.30
 GEMINI_PRICE_OUTPUT_USD_PER_M = 2.50
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Pipeline en 2 passes (perf) : LIGHT pour TOUTES les photos (dedup/coverage/ordering),
+# RICH seulement sur les photos finalistes (enhance/multi_format/slowmo).
+#
+# Avant : 1 seule passe avec ~4600 tokens input + ~1500 tokens output par photo
+#         = ~16s/photo médian → 25 photos en parallel=8 → ~50s+ + variance
+# Après : pass1 ~3400 input + ~900 output (~10s) sur 25 + pass2 ~1500 input
+#         + ~600 output (~7s) sur ~12 finalistes → gain ~30-40% sur le wall-time
+#         de l'étape "Analyse Gemini Vision".
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SYSTEM_PROMPT = """Tu es un analyseur d'images pour Dayuse, plateforme hôtelière de location à la journée.
 
 Tu regardes une photo d'hôtel et tu retournes UNIQUEMENT un objet JSON strict (pas de markdown, pas d'explication).
@@ -141,12 +156,31 @@ Tu regardes une photo d'hôtel et tu retournes UNIQUEMENT un objet JSON strict (
     "intimacy_indicators": ["liste des éléments qui suggèrent un environnement intime/adulte : éclairage tamisé, bar à cocktails sophistiqué, ambiance lounge feutrée, design minimaliste premium. Vide si aucun."],
     "reason": "is_family_friendly=true UNIQUEMENT si au moins 1 indicateur family clair est visible. Sinon false. Servira à choisir le persona contextuel (families pour photos avec toboggan, couples/solos pour scènes intimistes, etc.). Si la photo est neutre (pas d'enfants visibles, pas de bar adulte), retourne is_family_friendly=false avec listes vides — le pipeline utilisera couples/solos par défaut."
   },
+  "clutter_to_remove": ["liste d'éléments visibles parasites à idéalement retirer pour la version brand. Inclure : câbles électriques, prises, gobelets/bouteilles/serviettes oubliés, jouets de plage (sceau/seau, pelle, ballon, jouets plastique colorés), sacs/sandales/affaires personnelles éparpillées, panneaux/posters, détritus, barrières, hose, extincteurs muraux, eyesores techniques : caméras de surveillance / CCTV, escaliers de secours sur bâtiments voisins, antennes / paraboles, climatiseurs extérieurs / unités AC, gaines de ventilation, grilles techniques, drains visibles, ET AUSSI les LOGOS de marques tierces (sur parasols, coussins, serviettes, panneaux, mobilier — sauf le branding sobre de l'hôtel lui-même). Liste 1 ligne par objet, max 6. Vide si rien. NE PAS lister un cocktail/plat servi sur table dressée (ce n'est pas du clutter, c'est aspirationnel). NE PAS lister du mobilier hôtelier (transats, daybeds, parasols, tables) — seul le LOGO du parasol pose problème, pas le parasol lui-même."],
+  "issues": ["liste problèmes éventuels pour le brand: sombre, nuit, cadrage raté, etc. Vide si rien."]
+}
+
+Retourne STRICTEMENT le JSON. Pas de texte avant/après, pas de ```json fences```.
+"""
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Pass 2 — RICH prompt : 4 sections lourdes différées sur les photos finalistes
+# uniquement (utilisé par enhance/multi_format/slowmo). Les consommateurs
+# tolèrent l'absence de ces champs (tous font .get() avec fallback {}/[]).
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SYSTEM_PROMPT_RICH = """Tu reçois une photo d'hôtel pour Dayuse (plateforme accès à la journée : piscine, cabana, rooftop, spa, F&B). Cette photo a déjà été pré-analysée — tu dois maintenant ne renseigner QUE 4 sections complémentaires utilisées pour la retouche IA, le recadrage multi-format et l'animation slowmo.
+
+Retourne UNIQUEMENT un objet JSON strict (pas de markdown, pas d'explication).
+
+# Schéma JSON à retourner
+
+{
   "safe_zones_for_humans": {
     "safe_areas": ["⚠️ CRITIQUE — c'est le SEUL endroit où un humain pourra être ajouté SANS que l'IA invente du décor. Sois précis et liste UNIQUEMENT les zones VRAIMENT visibles. \n\nFormat de chaque zone : (1) LOCALISATION en référence à des éléments visibles ('sur le 3e transat orange depuis la gauche au premier plan', 'rebord de piscine en bas à droite près de l'échelle visible', 'sur la chaise verte vide à droite de la table en bois'), (2) POSE compatible ('assise jambes dans l'eau', 'allongée en train de lire', 'debout sur la terrasse face caméra', 'nageant breaststroke'), (3) TAILLE relative ('humain de la taille des transats existants'). \n\n🟢 SOIS GÉNÉREUX sur les zones évidentes : si on voit une terrasse / un sol carrelé / des chaises vides / un transat / un sofa / un coin lounge, LISTE-LE comme safe_zone (un humain debout ou assis sur ces éléments existants ne casse rien). Pour TOUTES les photos extérieures avec espace au sol visible, il y a au moins 1-2 safe_zones plausibles. \n\n🔴 NE LISTE PAS : zones cachées partiellement par autre chose, surfaces qui n'existent pas dans le cadre (ex: 'rebord de piscine en haut' alors qu'on voit la vue aérienne), murs verticaux, plafond, surface d'eau (sauf nage). \n\n⛔ Liste VIDE UNIQUEMENT pour les vraies impasses : gros plan d'un objet, vue purement architecturale du toit, photo d'un plat servi, intérieur de salle de bain, photo focus sur un détail décoratif. PAS pour des photos d'extérieur ou intérieur avec espace habitable visible. \n\nMax 3 zones, classées par priorité (la plus aspirationnelle en 1ère)."],
     "unsafe_areas": ["zones À ÉVITER spécifiques à cette photo — ex: 'la surface de l'eau de la piscine (sauf si nageant)', 'derrière la barrière de sécurité', 'sur le toit du daybed', 'devant la fenêtre au fond (humain serait minuscule)', 'rebord de piscine non visible'"],
     "max_recommended": "nombre maximum recommandé d'humains pour cette scène (1-3 selon l'espace dispo). 0 UNIQUEMENT pour les impasses (gros plan objet, vue architecturale toit, etc.). Pour les espaces extérieurs/intérieurs avec sol/sièges visibles, au moins 1."
   },
-  "clutter_to_remove": ["liste d'éléments visibles parasites à idéalement retirer pour la version brand. Inclure : câbles électriques, prises, gobelets/bouteilles/serviettes oubliés, jouets de plage (sceau/seau, pelle, ballon, jouets plastique colorés), sacs/sandales/affaires personnelles éparpillées, panneaux/posters, détritus, barrières, hose, extincteurs muraux, eyesores techniques : caméras de surveillance / CCTV, escaliers de secours sur bâtiments voisins, antennes / paraboles, climatiseurs extérieurs / unités AC, gaines de ventilation, grilles techniques, drains visibles, ET AUSSI les LOGOS de marques tierces (sur parasols, coussins, serviettes, panneaux, mobilier — sauf le branding sobre de l'hôtel lui-même). Liste 1 ligne par objet, max 6. Vide si rien. NE PAS lister un cocktail/plat servi sur table dressée (ce n'est pas du clutter, c'est aspirationnel). NE PAS lister du mobilier hôtelier (transats, daybeds, parasols, tables) — seul le LOGO du parasol pose problème, pas le parasol lui-même."],
   "recommended_crop": {
     "should_crop": false,
     "x_min_pct": 0,
@@ -168,9 +202,8 @@ Tu regardes une photo d'hôtel et tu retournes UNIQUEMENT un objet JSON strict (
     "has_motion_subject": false,
     "motion_subject": "none",
     "motion_strength": 0,
-    "reason": "Évalue si la photo se prête à une animation slow-motion en boucle seamless (cinemagraph). On cherche UN sujet visible qui produit naturellement un mouvement AMBIANT, NON-DIRECTIONNEL et BOUCLABLE — pour qu'un loop ping-pong (forward+reverse) reste invisible.\n\nVALEURS de motion_subject (choisir UNE seule, la plus dominante) :\n- 'water' : surface d'eau visible (piscine, bassin, jacuzzi, mer, lac) — ripples idéaux à animer\n- 'curtains' : voilages, rideaux, tissus légers exposés à un courant d'air\n- 'foliage' : végétation visible (palmiers, plantes, feuillage en extérieur) susceptible de bouger au vent\n- 'fire' : flammes visibles (cheminée, bougies, brasero, feu de camp)\n- 'steam' : vapeur visible (jacuzzi fumant, hammam, plat fumant, douche extérieure chaude)\n- 'fountain' : fontaine ou jet d'eau actif visible\n- 'none' : aucun sujet de mouvement ambiant convenable (intérieur sec, vue architecturale figée, plat servi, gros plan d'objet immobile)\n\nmotion_strength (0-100) : intensité du potentiel de slowmo réussi. Critères :\n- 0-30 : sujet de mouvement présent mais minoritaire dans le cadre, ou compromis (humain qui bouge déjà, sujet directionnel comme un vélo/voiture)\n- 30-60 : sujet bien visible mais partage le cadre avec d'autres éléments\n- 60-85 : sujet de mouvement OCCUPE une portion significative du cadre, idéal pour cinemagraph\n- 85-100 : photo dédiée au sujet (gros plan piscine plein cadre, voilages dominants, cheminée centrée) → slowmo wow\n\nhas_motion_subject = true UNIQUEMENT si motion_subject != 'none' ET motion_strength ≥ 30.\n\n⚠️ INTERDICTIONS — has_motion_subject DOIT être false dans CES cas :\n- photo avec humains très visibles au premier plan (le slowmo va animer leurs cheveux/vêtements bizarrement)\n- photo de nourriture/cocktail close-up (sauf si vapeur dominante)\n- vue aérienne pure (drone) sans surface d'eau\n- photo de nuit sombre (le mouvement passera inaperçu)\n- intérieur banal sans élément animable\n- photo où le sujet motion est minuscule en arrière-plan"
-  },
-  "issues": ["liste problèmes éventuels pour le brand: sombre, nuit, cadrage raté, etc. Vide si rien."]
+    "reason": "Évalue si la photo se prête à une animation slow-motion en boucle seamless (cinemagraph). On cherche UN sujet visible qui produit naturellement un mouvement AMBIANT, NON-DIRECTIONNEL et BOUCLABLE — pour qu'un loop ping-pong (forward+reverse) reste invisible.\n\nVALEURS de motion_subject (choisir UNE seule, la plus dominante) :\n- 'water' : surface d'eau visible (piscine, bassin, jacuzzi, mer, lac) — ripples idéaux à animer\n- 'curtains' : voilages, rideaux, tissus légers exposés à un courant d'air\n- 'foliage' : végétation visible (palmiers, plantes, feuillage en extérieur) susceptible de bouger au vent\n- 'fire' : flammes visibles (cheminée, bougies, brasero, feu de camp)\n- 'steam' : vapeur visible (jacuzzi fumant, hammam, plat fumant, douche extérieure chaude)\n- 'fountain' : fontaine ou jet d'eau actif visible\n- 'none' : aucun sujet de mouvement ambiant convenable (intérieur sec, vue architecturale figée, plat servi, gros plan d'objet immobile)\n\nmotion_strength (0-100) : intensité du potentiel de slowmo réussi.\n\nhas_motion_subject = true UNIQUEMENT si motion_subject != 'none' ET motion_strength ≥ 30.\n\n⚠️ INTERDICTIONS — has_motion_subject DOIT être false dans CES cas : photo avec humains très visibles au premier plan ; photo de nourriture/cocktail close-up (sauf si vapeur dominante) ; vue aérienne pure (drone) sans surface d'eau ; photo de nuit sombre ; intérieur banal sans élément animable ; photo où le sujet motion est minuscule en arrière-plan."
+  }
 }
 
 Retourne STRICTEMENT le JSON. Pas de texte avant/après, pas de ```json fences```.
@@ -197,18 +230,26 @@ def load_image(path: Path) -> tuple[Image.Image | None, str | None]:
         return None, f"PIL load failed: {type(e).__name__}: {str(e)[:200]}"
 
 
-def _call_gemini(img: Image.Image, model) -> tuple[dict, int, dict]:
+def _call_gemini(img: Image.Image, model, prompt: str = None) -> tuple[dict, int, dict]:
     """Appel Gemini avec retry auto sur 429.
+
+    Args:
+        img : image PIL à analyser
+        model : modèle Gemini configuré
+        prompt : prompt système (défaut SYSTEM_PROMPT = pass1 light). Pass SYSTEM_PROMPT_RICH
+                 pour la 2e passe sur les photos finalistes.
 
     Returns:
         (analysis, duration_ms, usage) où usage = {input_tokens, output_tokens, cost_usd}
     """
+    if prompt is None:
+        prompt = SYSTEM_PROMPT
     last_error = None
     for attempt in range(MAX_RETRIES + 1):
         t0 = time.time()
         try:
             response = model.generate_content(
-                [SYSTEM_PROMPT, img],
+                [prompt, img],
                 generation_config={
                     "response_mime_type": "application/json",
                     # temperature=0 → résultats déterministes run-to-run sur la même photo.
@@ -235,17 +276,35 @@ def _call_gemini(img: Image.Image, model) -> tuple[dict, int, dict]:
             return json.loads(response.text), duration_ms, usage
         except Exception as e:
             err = str(e)
+            err_lower = err.lower()
             last_error = e
+
+            # ━━ Erreurs NON-retryables (budgétaire ou de configuration) ━━
+            # Sur spend cap dépassé, retry inutile (l'erreur reste vraie tant que
+            # le cap n'est pas levé manuellement par l'utilisateur). Avant : on
+            # consommait 304s par photo en backoff avant d'abandonner.
+            non_retryable = (
+                "spending cap" in err_lower
+                or "spend cap" in err_lower
+                or "billing" in err_lower
+                or "permission" in err_lower
+                or "invalid api key" in err_lower
+                or "api_key_invalid" in err_lower
+            )
+            if non_retryable:
+                raise RuntimeError(f"Gemini analyze fail (non-retryable): {type(e).__name__}: {err[:300]}")
+
             # 429 / 500 / 502 / 503 / 504 / ResourceExhausted / deadline → retry avec backoff
             is_retryable = (
                 "429" in err or "500" in err or "502" in err or "503" in err or "504" in err
-                or "deadline" in err.lower() or "resource" in err.lower() or "exhausted" in err.lower()
-                or "unavailable" in err.lower() or "timeout" in err.lower()
+                or "deadline" in err_lower or "resource" in err_lower or "exhausted" in err_lower
+                or "unavailable" in err_lower or "timeout" in err_lower
             )
             if is_retryable and attempt < MAX_RETRIES:
                 m = _re.search(r"retry in (\d+(?:\.\d+)?)\s*s", err)
-                # Si Gemini nous donne un retry_delay, on l'utilise. Sinon exponential backoff.
-                wait = (float(m.group(1)) + 2) if m else min(2 ** attempt * 4, 90)
+                # Si Gemini nous donne un retry_delay, on l'utilise (capé à 30s).
+                # Sinon exponential backoff : 4s, 8s, 16s — capé à 30s.
+                wait = min(float(m.group(1)) + 2, 30) if m else min(2 ** attempt * 4, 30)
                 time.sleep(wait)
                 continue
             # Erreur non-retryable OU retries épuisées : on raise avec un type identifiable
@@ -414,6 +473,100 @@ def analyze_batch(
                 print(f"  ✗ retry crash : {paths[i].name} — {e}")
 
     return [r for r in results if r is not None]
+
+
+def analyze_rich_batch(
+    paths: list[Path],
+    model,
+    parallel: int = 8,
+    output_dir: Path | None = None,
+    progress_callback=None,
+) -> dict[str, dict]:
+    """Pass 2 — complète les analyses des photos finalistes avec les 4 sections
+    lourdes (safe_zones_for_humans, recommended_crop, crop_safe_zones, slowmo_potential).
+
+    Cette passe est lancée APRÈS dedup/coverage/ordering, UNIQUEMENT sur les ~10-15
+    photos qui vont passer dans enhance / multi_format_cropper / slowmo. Économise
+    ~60% des tokens output de l'analyse (les champs lourds ne sont plus générés
+    inutilement sur les photos rejetées).
+
+    Le résultat est MERGÉ dans le JSON existant à output_dir/{stem}.json
+    (les champs LIGHT pré-existants sont conservés).
+
+    Args:
+        paths : photos finalistes
+        model : modèle Gemini
+        parallel : workers concurrents (Gemini paid tier supporte ~2000 RPM)
+        output_dir : dossier des analyses (data/analyses/{slug}). Les JSON y sont
+                     ré-écrits avec les champs rich mergés.
+        progress_callback : callable(done, total, last_filename)
+
+    Returns:
+        Dict {stem: rich_analysis} pour chaque photo, où rich_analysis est le sous-
+        objet contenant les 4 nouveaux champs. Permet à l'appelant de logger
+        coûts/tokens cumulés sans relire les JSON.
+    """
+    if not paths:
+        return {}
+
+    rich_by_stem: dict[str, dict] = {}
+    rich_lock = __import__("threading").Lock()
+
+    def _task(idx_path):
+        idx, path = idx_path
+        t0 = time.time()
+        try:
+            img = Image.open(path).convert("RGB")
+        except Exception as e:
+            return idx, path, None, 0, None, f"PIL load failed: {type(e).__name__}: {e}"
+
+        try:
+            analysis_rich, duration_ms, usage = _call_gemini(img, model, prompt=SYSTEM_PROMPT_RICH)
+        except Exception as e:
+            return idx, path, None, int((time.time() - t0) * 1000), None, str(e)[:300]
+
+        # Merge dans le JSON existant si output_dir fourni
+        if output_dir:
+            json_path = output_dir / f"{path.stem}.json"
+            if json_path.exists():
+                try:
+                    with open(json_path) as f:
+                        full_payload = json.load(f)
+                    existing_analysis = full_payload.get("analysis") or {}
+                    # On merge les 4 champs rich dans l'analyse existante
+                    for k in ("safe_zones_for_humans", "recommended_crop", "crop_safe_zones", "slowmo_potential"):
+                        if k in analysis_rich:
+                            existing_analysis[k] = analysis_rich[k]
+                    full_payload["analysis"] = existing_analysis
+                    # Ajoute une trace dédiée
+                    trace = full_payload.get("trace") or []
+                    trace.append({
+                        "node": "N2b_analyze_rich",
+                        "result": "pass",
+                        "duration_ms": duration_ms,
+                        "usage": usage,
+                    })
+                    full_payload["trace"] = trace
+                    with open(json_path, "w") as f:
+                        json.dump(full_payload, f, indent=2, ensure_ascii=False)
+                except Exception as e:
+                    # Le merge échoue (JSON corrompu ?) — on log mais on ne bloque pas
+                    print(f"[analyze_rich_batch] merge échoué pour {path.name}: {e}")
+
+        with rich_lock:
+            rich_by_stem[path.stem] = analysis_rich
+        return idx, path, analysis_rich, duration_ms, usage, None
+
+    with ThreadPoolExecutor(max_workers=parallel) as ex:
+        futures = [ex.submit(_task, (i, p)) for i, p in enumerate(paths)]
+        done = 0
+        for fut in as_completed(futures):
+            idx, path, analysis_rich, duration_ms, usage, err = fut.result()
+            done += 1
+            if progress_callback:
+                progress_callback(done, len(paths), path.name, usage=usage, error=err)
+
+    return rich_by_stem
 
 
 # ============= CLI =============
