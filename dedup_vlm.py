@@ -33,7 +33,8 @@ GREY_ZONE_MAX = 28
 MAX_PAIRS_TO_CHECK = 30
 
 # Parallélisme des appels Gemini Vision pour la dédup VLM
-VLM_PARALLEL_WORKERS = 3
+# Bump 3→8 (11/05/2026) : quota Gemini Vision Flash tier paid 1 ≈ 2000 RPM
+VLM_PARALLEL_WORKERS = 8
 
 VALIDATION_MODEL = "gemini-2.5-flash"
 

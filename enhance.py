@@ -63,6 +63,53 @@ PROMPT_WARM_BOOST = (
     "Minimal, natural enhancement only."
 )
 
+# === Ajout pool float (standalone — sans humain, pour photos déjà peuplées ou non) ===
+def build_pool_float_only_prompt(float_desc: str) -> str:
+    """Prompt pour ajouter UNIQUEMENT une bouée dans une photo piscine, sans toucher au reste.
+
+    Utilisé quand la photo n'a pas besoin d'add_character mais qu'on veut quand même
+    booster son côté playful (Martin 11/05/2026 : "ça peut être ajouté en plus des humains,
+    pas un critère unique").
+    """
+    return f"""🛑 ABSOLUTE RULE — ADD ONE SINGLE POOL FLOAT, NOTHING ELSE:
+
+You are ONLY allowed to add ONE pool float in the existing pool water of this image — specifically: {float_desc}.
+
+You MUST NEVER add ANY of the following:
+- Any human, person, character, body part, hand, leg, shadow of a person
+- Any furniture, lounger, daybed, towel, plant, decoration, drink, sign, logo
+- Any new architecture, wall, column, ceiling, balustrade, railing
+- Any modification to the existing water shape, decking, plants, walls, ceiling, lighting
+- Any second float — exactly ONE float, no more
+- Any change to the framing, composition, perspective, lighting, color grading
+
+🎯 PLACEMENT RULES for the float:
+- Place it IN the existing pool water, in a zone that is currently EMPTY (no swimmers, no decoration in that spot already).
+- Pick a natural-looking position : near the center of the water surface, or gently drifting near the edge.
+- Realistic SCALE : the float must be proportional to the pool (typically 0.8–1.8m long for a flamingo/swan, ~1m diameter for a donut). It must NEVER cover more than ~25% of the visible water surface.
+- Realistic INTEGRATION with the water:
+  - Subtle wake / ripple around it
+  - Slight reflection of the float's underside on the water
+  - Float partially sitting on water, NOT floating dry above it
+- Realistic LIGHTING : the float must receive the same sunlight direction as the rest of the scene; cast a soft natural shadow on the water consistent with the existing shadow direction.
+- Color/style remain PHOTOREALISTIC — no over-saturated CGI candy palette. Slight wear/dust is fine.
+
+🚫 IF YOU CANNOT add the float naturally according to ALL the rules above → DO NOT add it. Return the image UNCHANGED. A photo without a float is always acceptable. A bad fake float ruins the photo.
+
+🚫 FRAMING LOCK : DO NOT zoom in/out, DO NOT crop, DO NOT change the camera angle, focal length, or any pixel of the image OTHER than the small region where the float sits.
+
+🚫 STRUCTURAL PRESERVATION : every other pixel of the image MUST remain pixel-identical to the input. Same architecture, same walls, same plants, same furniture, same humans (if any present in original), same lighting, same color grading, same shadows except the new one cast by the float.
+
+NEGATIVE PROMPT:
+- new humans, new people, hands, legs, body parts
+- new furniture, new objects beyond the single float
+- duplicated floats, multiple floats, more than one float
+- changes to framing, composition, perspective, water shape, decking
+- cartoon / CGI look, oversaturated colors, plastic shine, glowing edges
+- floating dry above water without surface contact
+"""
+
+
 # === Suppression clutter (parasites : objets, mais aussi équipements techniques visibles) ===
 PROMPT_REMOVE_CLUTTER = """🛑 ADDITION-FREE RULE (#1, MOST IMPORTANT) :
 This task is REMOVAL ONLY. You are NEVER allowed to ADD anything to the image — no people, no furniture, no plants, no birds, no clouds, no construction equipment (cranes, scaffolding, trucks, vehicles), no signs, no text, no shadows, no decoration. NOTHING NEW.
@@ -902,9 +949,37 @@ def pick_strategy(
     if not steps:
         steps.append(main_step)
 
+    # ━━ Pool float standalone (Martin 11/05/2026) ━━
+    # Si la photo est piscine ET qu'aucune action ai_add_character n'est dans les steps
+    # (sinon le float est DÉJÀ injecté dans le prompt persona via pool_float_hint),
+    # on tire le hint séparément. Si déclenché → on ajoute un step ai_add_pool_float
+    # AVANT le warm_boost final (pour qu'il soit retraité par le LUT brand).
+    # Le seed est déterministe par filename → comportement reproductible en replay.
+    factual_ = (analysis or {}).get("factual") or {}
+    primary_cat = (factual_.get("category") or "").lower()
+    already_has_character = any(s.get("action") == "ai_add_character" for s in steps)
+    if not already_has_character:
+        float_hint = pick_pool_float_hint(primary_cat, vibe, photo_filename)
+        if float_hint:
+            # Insertion juste avant un éventuel local_warm_boost final (pour que le warm_boost
+            # apparaisse comme une dernière étape de finition). Si pas de warm_boost, on
+            # ajoute en fin.
+            float_step = {
+                "action": "ai_add_pool_float",
+                "prompt": build_pool_float_only_prompt(float_hint),
+                "reason": f"ajout bouée 🍩 ({float_hint[:40]}…) — playful touch sur piscine",
+                "pool_float_used": float_hint,
+            }
+            # Si dernière étape est local_warm_boost → insère avant ; sinon ajoute en fin
+            if steps and steps[-1]["action"] == "local_warm_boost":
+                steps.insert(-1, float_step)
+            else:
+                steps.append(float_step)
+
     # L'action "principale" pour le badge front = la plus marquante (priorité IA > smart_crop > warm)
     priority = {"ai_add_character": 7, "ai_remove_people": 6, "ai_remove_clutter": 5,
-                "ai_lighting": 4, "ai_recompose": 3, "local_smart_crop": 2, "local_warm_boost": 1}
+                "ai_add_pool_float": 4.5, "ai_lighting": 4, "ai_recompose": 3,
+                "local_smart_crop": 2, "local_warm_boost": 1}
     primary_step = max(steps, key=lambda s: priority.get(s["action"], 0))
     combined_reason = " + ".join(s["reason"] for s in steps)
 
@@ -920,6 +995,10 @@ def pick_strategy(
     persona_step = next((s for s in steps if s.get("persona_used")), None)
     if persona_step:
         out["persona_used"] = persona_step["persona_used"]
+    # Expose pool_float si un step l'a utilisé (soit dans add_character, soit standalone)
+    float_step = next((s for s in steps if s.get("pool_float_used")), None)
+    if float_step:
+        out["pool_float_used"] = float_step["pool_float_used"]
     return out
 
 

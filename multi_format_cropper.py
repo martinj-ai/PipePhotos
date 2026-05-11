@@ -36,15 +36,29 @@ NANO_BANANA_PRO = "gemini-3-pro-image-preview"        # ~$0.134/image (fallback 
 COST_FLASH_USD = 0.039
 COST_PRO_USD = 0.134
 
-OUTPAINT_PROMPT_TEMPLATE = """Extend this image to fill the empty alpha-zero areas of the canvas, completing it as a single coherent {target_aspect_ratio} photo.
+OUTPAINT_PROMPT_TEMPLATE = """You are doing PHOTOGRAPHIC OUTPAINTING (uncrop). The input is a transparent canvas of {canvas_w}×{canvas_h} pixels with a single photograph placed {placement_desc}, occupying {source_pct}% of the canvas. The remaining transparent (alpha=0) areas — specifically {extend_directions} — must be filled with a CONTINUOUS EXTENSION of the SAME scene.
 
-🚨 STRICT RULES:
-- Pixels of the original image MUST remain identical (no recoloring, no shift)
-- The generated extensions MUST match seamlessly: same lighting, same color palette, same depth, same textures, same time of day
-- DO NOT add new objects, furniture, people, signs, decorations, or text
-- DO NOT change weather, mood, or composition
+🚨 ABSOLUTE NON-NEGOTIABLE RULES :
+1. ONE SINGLE COHERENT PHOTOGRAPH. The output must read as ONE photo taken from the SAME camera at the SAME moment with a slightly WIDER field of view. NEVER tile, mirror, repeat, or stack multiple views. NEVER show the same element (the same chair, same pool, same column, same skyline) twice in different positions.
+2. The original photograph pixels MUST stay 100% identical at their original position (no shift, no recoloring, no zoom).
+3. Continuity rules for the extension:
+   - The HORIZON, sky line, ceiling line, floor line, walls, columns, balustrades, pool edges, and architectural elements must continue from the original at the SAME height, SAME angle, SAME perspective.
+   - Lighting direction, sun position, shadow angles must match the original EXACTLY.
+   - Color palette, white balance, contrast, grain, exposure must match.
+   - Depth perspective : objects further from the camera in the extension must be smaller, in correct vanishing point alignment.
+4. CONTENT of the extension : it should look like what would naturally be visible if the original photo had been taken with a wider lens — more of the same room/terrace/pool/sky. Plausible continuation of the existing scene. NOT a different scene.
+5. FORBIDDEN in the extension :
+   - NEW people, NEW characters, NEW faces (zero humans in the extension if original has zero)
+   - NEW furniture not implied by the existing scene
+   - NEW signs, logos, text, watermarks
+   - REPETITION of any element already visible in the original (no second pool, no copy of the same chair stack)
+   - SEAM lines, color breaks, lighting discontinuities, ghost outlines
+   - Multiple stacked views of "the same scene from different angles" (this is the #1 failure mode — DO NOT DO IT)
+   - CGI / 3D-render aesthetic / oversharpened plasticky look
 
-Negative: new furniture, new people, signs, logos, watermarks, color shifts, lighting break, ghost outlines, CGI artifacts."""
+Target aspect ratio : {target_aspect_ratio}. Final image dimensions : {canvas_w}×{canvas_h}.
+
+Negative prompt : new people, duplicated elements, repeated chairs, repeated pool, mirrored scene, tiled output, multiple views, seam, color break, ghost outlines, CGI, watermark, logo, text."""
 
 # ============================================================
 # Helpers
@@ -306,9 +320,45 @@ def outpaint_via_nano_banana(
     canvas.save(buf, format="PNG")
     image_bytes = buf.getvalue()
 
-    # 3. Appel Gemini avec retry
+    # 3. Construit le prompt en injectant la direction d'extension (anti-tile)
+    tw, th = target_size
+    extend_dirs = []
+    if py > 0:
+        extend_dirs.append("the top")
+    if (th - py - ph) > 0:
+        extend_dirs.append("the bottom")
+    if px > 0:
+        extend_dirs.append("the left")
+    if (tw - px - pw) > 0:
+        extend_dirs.append("the right")
+    extend_directions = " and ".join(extend_dirs) if extend_dirs else "the surrounding area"
+
+    # Placement description : où la source est dans le canvas
+    if py > 0 and (th - py - ph) > 0:
+        v_pos = "vertically centered"
+    elif py == 0:
+        v_pos = "at the top"
+    else:
+        v_pos = "at the bottom"
+    if px > 0 and (tw - px - pw) > 0:
+        h_pos = "horizontally centered"
+    elif px == 0:
+        h_pos = "on the left"
+    else:
+        h_pos = "on the right"
+    placement_desc = f"{v_pos}, {h_pos}"
+    source_pct = int(100 * (pw * ph) / max(1, tw * th))
+
     aspect_label = _aspect_ratio_label(target_size)
-    prompt = OUTPAINT_PROMPT_TEMPLATE.format(target_aspect_ratio=aspect_label)
+    prompt = OUTPAINT_PROMPT_TEMPLATE.format(
+        target_aspect_ratio=aspect_label,
+        canvas_w=tw,
+        canvas_h=th,
+        placement_desc=placement_desc,
+        source_pct=source_pct,
+        extend_directions=extend_directions,
+    )
+
     last_error = None
     cumulated_input_tokens = 0
     cumulated_output_tokens = 0
@@ -502,10 +552,12 @@ def run_multi_format(
           (f" (outpaint {outpaint_quality})" if outpaint_enabled else ""))
     if progress_callback:
         progress_callback(0, total_variants, "Initialisation multi-format…")
-    n_done = 0
-
+    # ━━━ Pré-charge les images + safe_zones une seule fois par photo ━━━
+    # On scope la charge AVANT le pool de workers : ouvrir une image avec Pillow est
+    # rapide mais sequencer ça permet de profiter du parallélisme uniquement où il
+    # compte (les appels API Gemini Image).
+    photo_payloads = []  # liste de (photo_path, img_pillow, safe_zones)
     for photo_path in photos:
-        # Charger l'analyse pour récupérer crop_safe_zones
         safe_zones = None
         if analyses_dir:
             afile = analyses_dir / f"{photo_path.stem}.json"
@@ -515,76 +567,117 @@ def run_multi_format(
                     safe_zones = a.get("analysis", {}).get("crop_safe_zones")
                 except Exception:
                     pass
-
         try:
             img = Image.open(photo_path).convert("RGB")
         except Exception as e:
             print(f"  ❌ {photo_path.name}: load failed ({e})")
             manifest["summary"]["errors"] += 1
             continue
+        photo_payloads.append((photo_path, img, safe_zones))
 
-        for fmt in formats_to_run:
-            fmt_dir = output_dir / fmt["id"]
-            fmt_dir.mkdir(exist_ok=True)
-            variant_path = fmt_dir / photo_path.name
+    # ━━━ Génération parallèle des variantes ━━━
+    # ThreadPoolExecutor → idéal pour I/O-bound (les outpaints sont des appels HTTP
+    # Gemini qui libèrent le GIL pendant l'attente réseau). 3 workers = sweet spot
+    # côté rate-limit Gemini Image (~60 RPM tier paid). resize/crop locales tournent
+    # quasi instantanément donc pas de gain sur elles, mais ça mange pas de thread non plus.
+    import threading
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    MULTIFORMAT_WORKERS = int(os.environ.get("MULTIFORMAT_WORKERS", "3"))
+    progress_lock = threading.Lock()
+    manifest_lock = threading.Lock()
+    n_done_counter = {"n": 0}
 
-            try:
-                t0 = time.time()
-                variant, strategy, meta = generate_variant(
-                    img, fmt, safe_zones,
-                    outpaint_enabled=outpaint_enabled,
-                    outpaint_quality=outpaint_quality,
-                )
-                duration_ms = int((time.time() - t0) * 1000)
+    def _process_one(photo_path: Path, img: Image.Image, safe_zones, fmt: dict) -> dict | None:
+        """Worker : génère une variante. Retourne l'entry à ajouter au manifest."""
+        fmt_dir = output_dir / fmt["id"]
+        fmt_dir.mkdir(exist_ok=True)
+        variant_path = fmt_dir / photo_path.name
+        try:
+            t0 = time.time()
+            variant, strategy, meta = generate_variant(
+                img, fmt, safe_zones,
+                outpaint_enabled=outpaint_enabled,
+                outpaint_quality=outpaint_quality,
+            )
+            duration_ms = int((time.time() - t0) * 1000)
 
-                if variant is None:
-                    manifest["summary"]["skip"] += 1
-                    manifest["variants"].append({
+            if variant is None:
+                label = meta.get("warning") or meta.get("error") or "skip"
+                print(f"  ⚠️  {photo_path.name} → {fmt['id']:<24} | skip ({label[:80]})")
+                return {
+                    "_summary_bucket": "skip",
+                    "entry": {
                         "source": photo_path.name, "format_id": fmt["id"],
                         "strategy": strategy, "duration_ms": duration_ms,
                         "warning": meta.get("warning"),
                         "error": meta.get("error"),
-                    })
-                    label = meta.get("warning") or meta.get("error") or "skip"
-                    print(f"  ⚠️  {photo_path.name} → {fmt['id']:<24} | skip ({label[:80]})")
-                else:
-                    variant.save(variant_path, "JPEG", quality=92, optimize=True)
-                    manifest["summary"][strategy] += 1
-                    cost = meta.get("cost_usd", 0)
-                    manifest["total_cost_usd"] += cost
-                    manifest["total_input_tokens"] += meta.get("input_tokens", 0) or 0
-                    manifest["total_output_tokens"] += meta.get("output_tokens", 0) or 0
-                    entry = {
-                        "source": photo_path.name, "format_id": fmt["id"],
-                        "output": str(variant_path.relative_to(output_dir)),
-                        "strategy": strategy, "duration_ms": duration_ms,
-                        "source_size": list(meta["source_size"]),
-                        "target_size": list(meta["target_size"]),
-                    }
-                    if cost:
-                        entry["cost_usd"] = cost
-                        entry["model"] = meta.get("model")
-                        entry["input_tokens"] = meta.get("input_tokens", 0)
-                        entry["output_tokens"] = meta.get("output_tokens", 0)
-                    if meta.get("fallback_pro"):
-                        entry["fallback_pro"] = True
-                    manifest["variants"].append(entry)
-                    suffix = f" 💰${cost:.3f}" if cost else ""
-                    suffix += " 🔄fallback Pro" if meta.get("fallback_pro") else ""
-                    print(f"  ✅ {photo_path.name} → {fmt['id']:<24} | {strategy} ({duration_ms}ms){suffix}")
-            except Exception as e:
-                manifest["summary"]["errors"] += 1
-                print(f"  ❌ {photo_path.name} → {fmt['id']:<24} | {type(e).__name__}: {e}")
-                manifest["variants"].append({
+                    },
+                }
+            variant.save(variant_path, "JPEG", quality=92, optimize=True)
+            cost = meta.get("cost_usd", 0)
+            entry = {
+                "source": photo_path.name, "format_id": fmt["id"],
+                "output": str(variant_path.relative_to(output_dir)),
+                "strategy": strategy, "duration_ms": duration_ms,
+                "source_size": list(meta["source_size"]),
+                "target_size": list(meta["target_size"]),
+            }
+            if cost:
+                entry["cost_usd"] = cost
+                entry["model"] = meta.get("model")
+                entry["input_tokens"] = meta.get("input_tokens", 0)
+                entry["output_tokens"] = meta.get("output_tokens", 0)
+            if meta.get("fallback_pro"):
+                entry["fallback_pro"] = True
+            suffix = f" 💰${cost:.3f}" if cost else ""
+            suffix += " 🔄fallback Pro" if meta.get("fallback_pro") else ""
+            print(f"  ✅ {photo_path.name} → {fmt['id']:<24} | {strategy} ({duration_ms}ms){suffix}")
+            return {
+                "_summary_bucket": strategy,
+                "entry": entry,
+                "cost": cost,
+                "input_tokens": meta.get("input_tokens", 0) or 0,
+                "output_tokens": meta.get("output_tokens", 0) or 0,
+            }
+        except Exception as e:
+            print(f"  ❌ {photo_path.name} → {fmt['id']:<24} | {type(e).__name__}: {e}")
+            return {
+                "_summary_bucket": "errors",
+                "entry": {
                     "source": photo_path.name, "format_id": fmt["id"],
                     "error": f"{type(e).__name__}: {e}",
-                })
+                },
+            }
 
-            n_done += 1
+    # Soumet TOUTES les variantes (photo × format) au pool
+    tasks = [(pp, im, sz, f) for (pp, im, sz) in photo_payloads for f in formats_to_run]
+    print(f"📐 Parallélisation : {MULTIFORMAT_WORKERS} workers sur {len(tasks)} variantes")
+
+    with ThreadPoolExecutor(max_workers=MULTIFORMAT_WORKERS) as ex:
+        futures = [ex.submit(_process_one, pp, im, sz, f) for (pp, im, sz, f) in tasks]
+        for fut in as_completed(futures):
+            result = fut.result()
+            if result is None:
+                continue
+            with manifest_lock:
+                bucket = result["_summary_bucket"]
+                if bucket in manifest["summary"]:
+                    manifest["summary"][bucket] += 1
+                else:
+                    manifest["summary"][bucket] = 1
+                manifest["variants"].append(result["entry"])
+                if "cost" in result:
+                    manifest["total_cost_usd"] += result["cost"]
+                    manifest["total_input_tokens"] += result["input_tokens"]
+                    manifest["total_output_tokens"] += result["output_tokens"]
+            # Progress callback (sous lock pour ne pas griller l'UI)
+            with progress_lock:
+                n_done_counter["n"] += 1
+                n_done = n_done_counter["n"]
             if progress_callback:
                 progress_callback(
                     n_done, total_variants,
-                    f"Variante {n_done}/{total_variants} : {photo_path.name} → {fmt['id']}",
+                    f"Variante {n_done}/{total_variants} : {result['entry']['source']} → {result['entry']['format_id']}",
                 )
 
     manifest["completed_at"] = time.time()

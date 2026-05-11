@@ -16,6 +16,7 @@ Usage :
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import time
 from pathlib import Path
@@ -537,9 +538,12 @@ def api_run():
         progress.increment(f"{slug}_analyze", current=done, message=msg)
 
     analyses_dir = ROOT / "data" / "analyses" / slug
-    # parallel=3 (vs 5 avant) pour ne pas saturer le paid tier 1 sur les gros volumes
+    # parallel=8 : Gemini Vision Flash a un quota tier paid 1 généreux (~2000 RPM).
+    # Avec ~100 photos, on passe d'~3min séquentiel (3 workers) à <1min.
+    # Override possible via env ANALYZE_WORKERS pour debug rate-limit.
+    analyze_workers = int(os.environ.get("ANALYZE_WORKERS", "8"))
     analyses = analyze.analyze_batch(
-        photo_paths, model, parallel=3,
+        photo_paths, model, parallel=analyze_workers,
         output_dir=analyses_dir,
         progress_callback=_progress_cb,
         use_cache=use_analysis_cache,
@@ -686,8 +690,9 @@ def api_run():
             # n_per_bucket=None : on vérifie TOUTES les photos d'un bucket amenity, pas juste top-3
             # (Gemini hallucine régulièrement → on doit tout vérifier pour ne pas laisser passer
             # un closeup bikini scoré 240/300 par Gemini).
+            verifier_workers = int(os.environ.get("AMENITY_VERIFIER_WORKERS", "8"))
             verifier_results = amenity_verifier.verify_top_candidates(
-                kept_analyses, cov_initial, n_per_bucket=None, parallel=4,
+                kept_analyses, cov_initial, n_per_bucket=None, parallel=verifier_workers,
             )
             verifier_cost_usd = round(sum(r.get("cost_usd", 0) for r in verifier_results), 6)
             print(f"[amenity_verifier] {len(verifier_results)} photos vérifiées, "
@@ -906,11 +911,24 @@ def api_run():
         prev_will_have_human = has_human_native or will_add
 
     # === Boucle de retouche : on itère dans l'ORDRE FINAL du pack (slot 1, 2, ...) ===
+    # ━━ Parallélisation : 3 workers ThreadPool (I/O-bound — chaque enhance fait des
+    #    appels Gemini Image qui dorment pendant l'attente réseau). On préserve
+    #    l'ordre final via slot index dans le résultat ; le worker pool peut
+    #    retourner dans n'importe quel ordre. Un lock protège le progress + les
+    #    cumuls de cost/tokens.
+    import threading
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    ENHANCE_WORKERS = int(os.environ.get("ENHANCE_WORKERS", "3"))
+    enhance_lock = threading.Lock()
+    enhance_progress = {"done": 0}
+    enhanced_by_slot: dict[int, dict] = {}
+
     ordered_filenames = [e["input"]["filename"] for e in ordered_pack]
-    for i, filename in enumerate(ordered_filenames, 1):
+
+    def _enhance_one_job(slot: int, filename: str) -> tuple[int, str, dict] | None:
         a = by_filename.get(filename)
         if not a or not a.get("analysis"):
-            continue
+            return None
         strategy = enhance.pick_strategy(
             a["analysis"],
             personas_allowed=personas_allowed,
@@ -920,20 +938,16 @@ def api_run():
             photo_filename=filename,
         )
         input_path = Path(a["input"]["path_absolute"])
-        # === Mode postprocess : skip enhance si fichier existe déjà ===
-        # On reconstruit un result dict COMPLET avec les bonnes clés pour que
-        # l'UI affiche le slider avant/après (cf. construction enhanced_summary
-        # plus bas qui exige output_path pour ne pas tomber en "Erreur: pas de sortie").
         existing_enhanced = enhanced_dir / filename
         if use_enhance_cache and existing_enhanced.exists():
             result = {
                 "input_path": str(input_path),
-                "output_path": str(existing_enhanced),  # ← CRITIQUE pour l'UI
+                "output_path": str(existing_enhanced),
                 "action": strategy.get("action", "cached"),
                 "reason": "📂 enhanced existant chargé du cache (resume_from=postprocess)",
                 "method": "cached",
                 "steps": [{"action": strategy.get("action", "cached"), "reason": "cache"}],
-                "brand_lut_applied": True,  # supposé déjà appliqué au run précédent
+                "brand_lut_applied": True,
                 "cost_usd": 0,
                 "duration_ms": 0,
                 "input_tokens": 0,
@@ -948,16 +962,34 @@ def api_run():
             }
         else:
             result = enhance.enhance_one(input_path, strategy, enhanced_dir)
-        enhanced_results.append({"filename": filename, "final_order_pos": i, **result})
-        enhancement_cost_usd += result.get("cost_usd", 0)
-        enhancement_input_tokens += result.get("input_tokens", 0) or 0
-        enhancement_output_tokens += result.get("output_tokens", 0) or 0
-        progress.update(
-            f"{slug}_analyze",
-            current=i,
-            total=len(ordered_filenames),
-            message=f"Retouche {i}/{len(ordered_filenames)} : {filename} ({strategy['action']})",
-        )
+        return slot, filename, {"strategy": strategy, "result": result}
+
+    print(f"🎨 Enhance parallèle : {ENHANCE_WORKERS} workers sur {len(ordered_filenames)} photos")
+    with ThreadPoolExecutor(max_workers=ENHANCE_WORKERS) as ex:
+        futures = {ex.submit(_enhance_one_job, i, fn): (i, fn) for i, fn in enumerate(ordered_filenames, 1)}
+        for fut in as_completed(futures):
+            ret = fut.result()
+            if ret is None:
+                continue
+            slot, filename, payload = ret
+            result = payload["result"]
+            strategy = payload["strategy"]
+            with enhance_lock:
+                enhanced_by_slot[slot] = {"filename": filename, "final_order_pos": slot, **result}
+                enhancement_cost_usd += result.get("cost_usd", 0)
+                enhancement_input_tokens += result.get("input_tokens", 0) or 0
+                enhancement_output_tokens += result.get("output_tokens", 0) or 0
+                enhance_progress["done"] += 1
+                done = enhance_progress["done"]
+            progress.update(
+                f"{slug}_analyze",
+                current=done,
+                total=len(ordered_filenames),
+                message=f"Retouche {done}/{len(ordered_filenames)} : {filename} ({strategy['action']})",
+            )
+
+    # Reconstruit l'ordre stable du pack final (slot 1, 2, 3, ...)
+    enhanced_results = [enhanced_by_slot[s] for s in sorted(enhanced_by_slot.keys())]
 
     # === Étape 4.5 (optionnelle) : Slow-motion loop ===
     # Une seule photo finale → cinemagraph mp4 (Higgsfield Kling 2.1 Pro + ping-pong ffmpeg).

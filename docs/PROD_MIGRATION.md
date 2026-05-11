@@ -268,6 +268,10 @@ Le pipeline `/api/run` tourne **synchrone** dans la requête HTTP : un `POST /ap
 | Photo transformable (nuit/sombre) : pas de pénalité dominance | — | — | — | sync OK | Score +45 typique sur une photo piscine nuit, lui permet d'être rescue propre par ai_lighting |
 | Outpainting checked par défaut (UI) | — | — | — | sync OK | Préférence Martin — il oubliait systématiquement |
 | Wipe `enhanced/` au début d'un run complet (sauf en replay) | écrasement | — | — | sync OK | **Important prod** : en CDN, lors d'un run complet, il faudra invalider/supprimer les anciennes versions enhanced d'un slug (sinon URLs cachées 1 an pointent vers anciennes) |
+| Parallélisation enhance loop (3 workers) + multi-format outpaint (3 workers) | — | — | `GEMINI_API_KEY` | async via ThreadPool | **Quota** : Gemini Image preview ~60 RPM. Sur 3 workers ça reste sous le plafond. En prod, sémaphore global si multi-tenant. |
+| Parallélisation `analyze_batch` 3→8 + `amenity_verifier` 4→8 + `dedup_vlm` 3→8 | — | — | `GEMINI_API_KEY` | async via ThreadPool | Gemini Vision Flash tier paid 1 = ~2000 RPM, large marge |
+| Outpaint prompt enrichi (direction explicite + anti-tile/anti-repeat) | — | — | — | sync OK | Réduit drastiquement les bugs "vues empilées" sur insta_story |
+| Pool float standalone (action `ai_add_pool_float` séparée d'add_character) | — | — | `GEMINI_API_KEY` | async | Photo piscine sans humain à ajouter peut quand même recevoir une bouée — proba ~55% (Family-Friendly) déterministe par filename |
 
 ### ⏳ Features à venir (à compléter)
 
