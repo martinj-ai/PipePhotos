@@ -1938,6 +1938,16 @@ photo finale enhanced (jpeg)
       const serverStep = status.step;
       const currentStepId = _stepIdFromServerStep(serverStep);
 
+      // ━━ Détection d'un nouveau run via started_at du serveur ━━
+      // Si started_at change (= progress.init a écrasé le fichier) → on RESET
+      // l'état. Sans ça, _runProgressState garde des résidus du run précédent
+      // (notamment des messages "VLM dedup 12/23..." qui persistent visuellement
+      // alors que le step actuel est passé à enhancing). Bug observé par Martin.
+      if (status.started_at && _lastSeenStartedAt !== status.started_at) {
+        _runProgressState = {};
+        _lastSeenStartedAt = status.started_at;
+      }
+
       // Marque les étapes optionnelles désactivées comme "skipped" dès le départ
       for (const s of PIPELINE_STEPS_DEF) {
         if (!_runProgressState[s.id]) {
@@ -1959,15 +1969,28 @@ photo finale enhanced (jpeg)
         st.total = Math.max(st.total, status.total || 0);
         st.message = status.message || "";
 
-        // Marque toutes les étapes AVANT comme "done"
+        // ━━ Marque TOUTES les étapes AVANT le step courant comme "done" ━━
+        // ET force toute autre étape encore en "active" à passer en "done".
+        // Le 2e cas (`s.state === "active"`) protège contre les bugs où deux
+        // étapes seraient simultanément "active" — observé sur "Dédup" qui
+        // restait orange alors que "Retouche" tournait. La raison root c'est
+        // probablement un poll qui a marqué dedup active au démarrage, puis
+        // les polls suivants n'ont marqué que les étapes pré-currentStepId
+        // sans nettoyer celles entre dedup et la nouvelle currentStepId si
+        // l'ordre PIPELINE_STEPS_DEF avait dérivé. Belt + suspenders.
         let reached = false;
         for (const s of PIPELINE_STEPS_DEF) {
           if (s.id === currentStepId) { reached = true; continue; }
-          if (!reached && _runProgressState[s.id].state !== "skipped") {
+          if (_runProgressState[s.id].state === "skipped") continue;
+          // Avant currentStepId → forcément done
+          // OU encore "active" alors qu'on est ailleurs → done aussi
+          if (!reached || _runProgressState[s.id].state === "active") {
             _runProgressState[s.id].state = "done";
             if (_runProgressState[s.id].total > 0) {
               _runProgressState[s.id].current = _runProgressState[s.id].total;
             }
+            // Clear le message stale d'une étape qu'on quitte
+            if (!reached) _runProgressState[s.id].message = "";
           }
         }
       }
@@ -1984,6 +2007,10 @@ photo finale enhanced (jpeg)
         }
       }
     }
+    // Tracker du started_at du run en cours, pour invalider _runProgressState au
+    // démarrage d'un nouveau run sans dépendre de target.dataset (fragile sur
+    // re-render).
+    let _lastSeenStartedAt = null;
 
     // Messages "vibing" qui tournent par étape — donne un côté chaleureux/sexy au polling
     const STEP_VIBING_PHRASES = {
