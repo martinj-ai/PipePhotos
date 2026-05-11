@@ -207,6 +207,32 @@
     <!-- ━━━━━━━━━━━━━━━━━━━━ Tab Pipeline (contenu original) ━━━━━━━━━━━━━━━━━━━━ -->
     <div id="tab-pipeline" class="tab-panel active">
 
+    <!-- ⚡ Raccourci replay : reprendre un hôtel déjà processé (skip Steps 1+2) -->
+    <section id="hotel-shortcut" class="hidden mb-6 rounded-2xl border border-cyan-200 bg-gradient-to-br from-cyan-50 to-sky-50 p-5">
+      <div class="flex items-center gap-2 mb-1">
+        <span class="text-lg">⚡</span>
+        <h2 class="text-base font-bold text-cyan-900">Reprendre un hôtel déjà processé</h2>
+        <span class="text-[11px] text-cyan-700 italic ml-auto">skip Steps 1+2 (scraping)</span>
+      </div>
+      <p class="text-xs text-cyan-800 mb-3">
+        Sélectionne un hôtel sur lequel le pipeline a déjà tourné pour <strong>éviter le re-scraping</strong>.
+        Tu seras emmené directement à <strong>Step 3</strong> avec le bandeau "Run précédent détecté" pour choisir le mode de reprise.
+      </p>
+      <div class="flex gap-2 items-stretch flex-wrap">
+        <select id="hotel-shortcut-select" class="flex-1 min-w-[280px] px-4 py-2.5 border border-cyan-300 rounded-full text-sm bg-white font-medium text-cyan-900">
+          <option value="">— Choisir un hôtel —</option>
+        </select>
+        <button id="hotel-shortcut-go" disabled
+                class="btn-dayuse-primary disabled:opacity-40 disabled:cursor-not-allowed text-sm"
+                style="padding: 10px 22px;">
+          ➡ Aller à Step 3
+        </button>
+      </div>
+      <div id="hotel-shortcut-empty" class="hidden text-[11px] text-cyan-700 mt-2 italic">
+        Aucun hôtel processé pour l'instant. Lance un premier run via Steps 1+2 ci-dessous, et il apparaîtra ici pour les prochains tests.
+      </div>
+    </section>
+
     <!-- Étape 1 — Source méta hôtel (RP ou Booking) -->
     <section class="card-dayuse p-6 mb-6">
       <h2 class="text-base font-semibold mb-1">1. Fiche hôtel (source des amenities)</h2>
@@ -3435,6 +3461,80 @@ photo finale enhanced (jpeg)
     }
     // Expose globally pour rappel après scrape/upload
     window.loadRunStatus = loadRunStatus;
+
+    // ━━━ Raccourci hôtels déjà processés (skip scrap) ━━━
+    async function loadHotelShortcut() {
+      const wrap = document.getElementById('hotel-shortcut');
+      const select = document.getElementById('hotel-shortcut-select');
+      const btn = document.getElementById('hotel-shortcut-go');
+      const empty = document.getElementById('hotel-shortcut-empty');
+      if (!wrap || !select || !btn) return;
+      try {
+        const r = await fetch('/api/hotels-processed');
+        if (!r.ok) return;
+        const data = await r.json();
+        const hotels = data.hotels || [];
+        wrap.classList.remove('hidden');
+        if (hotels.length === 0) {
+          empty.classList.remove('hidden');
+          return;
+        }
+        empty.classList.add('hidden');
+        // Peuple le select avec les hôtels triés par dernière exécution
+        const fmtDate = (ts) => ts ? new Date(ts * 1000).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+        select.innerHTML = '<option value="">— Choisir un hôtel —</option>' +
+          hotels.map(h => {
+            const badges = [
+              h.n_sources ? `${h.n_sources} photos` : null,
+              h.n_analyses ? `${h.n_analyses} analyses` : null,
+              h.n_enhanced ? `${h.n_enhanced} retouchées` : null,
+            ].filter(Boolean).join(' · ');
+            const dateStr = h.last_run_at ? ` — ${fmtDate(h.last_run_at)}` : '';
+            const cityStr = h.city ? ` (${h.city})` : '';
+            return `<option value="${h.slug}">${h.name}${cityStr} — ${badges}${dateStr}</option>`;
+          }).join('');
+        // Active le bouton uniquement si un hôtel est choisi
+        select.addEventListener('change', () => {
+          btn.disabled = !select.value;
+        });
+        btn.addEventListener('click', () => {
+          const slug = select.value;
+          if (!slug) return;
+          activateHotelShortcut(slug);
+        });
+      } catch (e) {
+        console.error('[hotel-shortcut] load failed', e);
+      }
+    }
+
+    async function activateHotelShortcut(slug) {
+      // 1. Set state.slug
+      state.slug = slug;
+      // 2. Récupère le RP existant pour pouvoir afficher infos hôtel + remplir state.rp
+      try {
+        const r = await fetch(`/api/rp/${slug}`);
+        if (r.ok) {
+          const data = await r.json();
+          state.rp = data.data || data;
+        }
+      } catch (e) { /* RP optionnel — Booking-only ok */ }
+      // 3. Débloque toutes les étapes
+      $("step-upload").classList.remove("opacity-50", "pointer-events-none");
+      $("step-run").classList.remove("opacity-50", "pointer-events-none");
+      // 4. Charge le bandeau replay
+      if (window.loadRunStatus) await window.loadRunStatus(slug);
+      // 5. Scroll vers Step 3
+      $("step-run").scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // 6. Petite animation flash sur le bandeau replay pour attirer l'œil
+      const banner = document.getElementById('resume-banner');
+      if (banner) {
+        banner.style.transition = 'box-shadow 0.5s ease';
+        banner.style.boxShadow = '0 0 0 4px rgba(34, 211, 238, 0.4)';
+        setTimeout(() => { banner.style.boxShadow = ''; }, 1500);
+      }
+    }
+
+    loadHotelShortcut();
 
     // ━━━ Taxonomie MCSCLA ━━━
     let _mcsclaData = null;

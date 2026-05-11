@@ -1329,6 +1329,81 @@ def serve_upload(slug, filename):
     return send_from_directory(UPLOADS_DIR / slug, filename)
 
 
+@app.route("/api/rp/<slug>")
+def api_rp(slug):
+    """Retourne le RP scrapé pour un slug donné (utilisé par le raccourci hôtel
+    pour rebooter state.rp sans relancer le scrap)."""
+    rp_path = ROOT / "data" / "rp" / f"{slug}.json"
+    if not rp_path.exists():
+        return jsonify({"error": "RP non scrapé"}), 404
+    return jsonify({"slug": slug, "data": json.loads(rp_path.read_text())})
+
+
+@app.route("/api/hotels-processed")
+def api_hotels_processed():
+    """Liste tous les hôtels qui ont déjà eu au moins un scrap (sources sur disque)
+    OU une analyse OU un run complet. Utilisé par le sélecteur 'Reprendre un hôtel'
+    en haut de Step 1 pour permettre de skip le scrap si on bosse sur un hôtel
+    qu'on a déjà processé.
+    """
+    hotels = []
+    rp_dir = ROOT / "data" / "rp"
+    seen_slugs = set()
+
+    # Source 1 : RP scrapés (le plus complet : on a name, city, vibe)
+    if rp_dir.exists():
+        for rp_file in sorted(rp_dir.glob("*.json")):
+            slug = rp_file.stem
+            seen_slugs.add(slug)
+            try:
+                rp = json.loads(rp_file.read_text())
+                hotels.append({
+                    "slug": slug,
+                    "name": rp.get("name") or slug,
+                    "city": rp.get("city"),
+                    "vibe": rp.get("vibe_primary"),
+                    "stars": rp.get("star_classification"),
+                    "rp_scraped": True,
+                })
+            except Exception:
+                hotels.append({"slug": slug, "name": slug, "rp_scraped": True})
+
+    # Source 2 : slugs avec uploads/ mais sans RP (cas où Booking-only)
+    if UPLOADS_DIR.exists():
+        for sub in sorted(UPLOADS_DIR.iterdir()):
+            if sub.is_dir() and sub.name not in seen_slugs:
+                seen_slugs.add(sub.name)
+                hotels.append({
+                    "slug": sub.name,
+                    "name": sub.name.replace("-", " ").title(),
+                    "rp_scraped": False,
+                })
+
+    # Enrichi avec compteurs (sources, analyses, enhanced) pour le badge
+    for h in hotels:
+        slug = h["slug"]
+        sources_dir = UPLOADS_DIR / slug
+        analyses_dir = ROOT / "data" / "analyses" / slug
+        enhanced_dir = ROOT / "data" / "output" / slug / "enhanced"
+        h["n_sources"] = len(list(sources_dir.glob("*.jpg")) + list(sources_dir.glob("*.jpeg")) + list(sources_dir.glob("*.png")) + list(sources_dir.glob("*.webp"))) if sources_dir.exists() else 0
+        h["n_analyses"] = len(list(analyses_dir.glob("*.json"))) if analyses_dir.exists() else 0
+        h["n_enhanced"] = len([p for p in enhanced_dir.glob("*.jpg")] + [p for p in enhanced_dir.glob("*.png")]) if enhanced_dir.exists() else 0
+        # Last run timestamp
+        progress_path = ROOT / "data" / "progress" / f"{slug}_analyze.json"
+        if progress_path.exists():
+            try:
+                p = json.loads(progress_path.read_text())
+                h["last_run_at"] = p.get("updated_at")
+            except Exception:
+                h["last_run_at"] = None
+        else:
+            h["last_run_at"] = None
+
+    # Tri : derniers runs en premier
+    hotels.sort(key=lambda h: -(h.get("last_run_at") or 0))
+    return jsonify({"hotels": hotels})
+
+
 @app.route("/api/run-status/<slug>")
 def api_run_status(slug):
     """Détecte ce qui existe déjà sur disque pour un slug → permet de proposer
