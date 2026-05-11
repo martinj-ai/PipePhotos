@@ -213,6 +213,17 @@
     .subtab-btn.active { background: linear-gradient(62deg, #FFAF36 0%, #FFC536 100%); color: #292935; border-color: transparent; box-shadow: 0 2px 8px rgba(255, 175, 54, 0.25); }
     .subtab-panel { display: none; }
     .subtab-panel.active { display: block; }
+    /* ━━ Final pack layout : photos finales empilées (gauche) + rail ResortPass sticky (droite) ━━ */
+    .final-pack-layout { display: grid; grid-template-columns: 1fr; gap: 1rem; align-items: start; }
+    @media (min-width: 1024px) {
+      .final-pack-layout { grid-template-columns: minmax(0, 1fr) 280px; }
+    }
+    .final-pack-main { min-width: 0; }
+    .rp-rail { border: 1px solid #EAEAEB; border-radius: 12px; background: white; overflow: hidden; }
+    @media (min-width: 1024px) {
+      .rp-rail { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow-y: auto; }
+    }
+    .rp-rail-header { padding: 0.5rem 0.75rem; border-bottom: 1px solid #EAEAEB; background: linear-gradient(135deg, #FFF7ED 0%, #FFEDD5 100%); position: sticky; top: 0; z-index: 10; }
     /* Mermaid container */
     .mermaid { font-size: 13px; }
     .mermaid svg { max-width: 100%; height: auto; }
@@ -1865,7 +1876,7 @@ photo finale enhanced (jpeg)
             return;
           }
 
-          if (!s.done && (s.current > 0 || s.total > 0 || s.step === "starting" || s.step === "analyzing" || s.step === "downloading" || s.step === "scraping_booking" || s.step === "enhancing" || s.step === "dedup" || s.step === "dedup_vlm" || s.step === "amenity_verify" || s.step === "official_finding" || s.step === "official_extracting" || s.step === "booking" || s.step === "rp" || s.step === "multi_format" || s.step === "multi_format_done")) {
+          if (!s.done && (s.current > 0 || s.total > 0 || s.step === "starting" || s.step === "analyzing" || s.step === "analyzing_rich" || s.step === "downloading" || s.step === "scraping_booking" || s.step === "enhancing" || s.step === "dedup" || s.step === "dedup_vlm" || s.step === "amenity_verify" || s.step === "official_finding" || s.step === "official_extracting" || s.step === "booking" || s.step === "rp" || s.step === "multi_format" || s.step === "multi_format_done")) {
             sawInProgress = true;
           }
           onUpdate(s);
@@ -1905,6 +1916,7 @@ photo finale enhanced (jpeg)
       { id: "analyse",   icon: "🔍", label: "Analyse Gemini Vision",     serverSteps: ["analyzing"] },
       { id: "dedup",     icon: "🧬", label: "Dédup intelligente",         serverSteps: ["dedup", "dedup_vlm"] },
       { id: "amenities", icon: "✨", label: "Vérification amenities",     serverSteps: ["amenity_verify"] },
+      { id: "analyse_rich", icon: "🎯", label: "Détails IA finalistes",   serverSteps: ["analyzing_rich"] },
       { id: "retouche",  icon: "🎨", label: "Retouches IA Nano Banana",   serverSteps: ["enhancing"] },
       { id: "slowmo",    icon: "🎬", label: "Slow-motion loop",           serverSteps: ["slowmo", "slowmo_done"], optional: true },
       { id: "multiformat", icon: "📐", label: "Multi-format crop",         serverSteps: ["multi_format", "multi_format_done"], optional: true },
@@ -3161,36 +3173,66 @@ photo finale enhanced (jpeg)
               ⚠ Multi-format : ${d.multiformat.error}
             </div>
           ` : '')}
-          ${d.slowmo ? `
-            <div class="mb-4 mt-2 rounded-xl border-2 ${d.slowmo.success ? 'border-orange-300 bg-gradient-to-br from-amber-50 to-orange-50' : 'border-red-300 bg-red-50'} overflow-hidden">
-              <div class="px-4 py-3 flex items-center justify-between flex-wrap gap-3">
-                <div>
-                  <div class="font-semibold text-sm flex items-center gap-2">🎬 Slow-motion loop
-                    ${d.slowmo.success ? '<span class="text-[10px] uppercase tracking-wider text-green-700 bg-green-100 px-2 py-0.5 rounded">OK</span>'
-                                       : '<span class="text-[10px] uppercase tracking-wider text-red-700 bg-red-100 px-2 py-0.5 rounded">ERREUR</span>'}
+          ${(() => {
+            // ━━ Layout : pack final (gauche, photos empilées verticalement) + rail ResortPass (droite, sticky) ━━
+            const rpUrls = (d.hotel && d.hotel.rp_image_urls) || [];
+            const rpRailHTML = rpUrls.length ? `
+              <aside class="rp-rail">
+                <div class="rp-rail-header">
+                  <div class="text-xs font-semibold text-dayuse-ink">📋 Ordre ResortPass</div>
+                  <div class="text-[10px] text-gray-500">${rpUrls.length} photos · ordre original RP</div>
+                </div>
+                <ol class="p-2 space-y-2 m-0">
+                  ${rpUrls.map((u, idx) => `
+                    <li class="flex gap-2 items-start">
+                      <span class="shrink-0 text-[10px] font-mono font-bold text-gray-500 w-5 text-right pt-1">${idx + 1}</span>
+                      <a href="${u}" target="_blank" rel="noopener" class="block flex-1 rounded-md overflow-hidden border border-gray-200 hover:border-amber-400 transition">
+                        <img src="${u}" loading="lazy" alt="RP ${idx + 1}" class="w-full aspect-video object-cover bg-gray-100">
+                      </a>
+                    </li>
+                  `).join('')}
+                </ol>
+              </aside>
+            ` : '';
+            const slowmoHTML = d.slowmo ? `
+              <div class="mb-4 rounded-xl border-2 ${d.slowmo.success ? 'border-orange-300 bg-gradient-to-br from-amber-50 to-orange-50' : 'border-red-300 bg-red-50'} overflow-hidden">
+                <div class="px-4 py-3 flex items-center justify-between flex-wrap gap-3">
+                  <div>
+                    <div class="font-semibold text-sm flex items-center gap-2">🎬 Slow-motion loop
+                      ${d.slowmo.success ? '<span class="text-[10px] uppercase tracking-wider text-green-700 bg-green-100 px-2 py-0.5 rounded">OK</span>'
+                                         : '<span class="text-[10px] uppercase tracking-wider text-red-700 bg-red-100 px-2 py-0.5 rounded">ERREUR</span>'}
+                    </div>
+                    <div class="text-xs text-gray-600 mt-1">
+                      ${d.slowmo.target_filename ? `Photo cible : <strong>${d.slowmo.target_filename}</strong> (slot ${d.slowmo.target_slot || '?'})` : ''}
+                      · sujet : <code class="bg-white px-1.5 py-0.5 rounded">${d.slowmo.motion_subject || 'n/a'}</code>
+                      ${d.slowmo.motion_strength ? ` · strength <strong>${d.slowmo.motion_strength}</strong>` : ''}
+                      ${d.slowmo.fallback_used ? ' · <span class="text-amber-700">fallback slot 1</span>' : ''}
+                    </div>
+                    <div class="text-[10px] text-gray-500 mt-0.5">
+                      ${d.slowmo.model || ''} · ${d.slowmo.duration_s || 5}s × ping-pong = ${(d.slowmo.duration_s || 5) * 2}s loop · ${d.slowmo.duration_ms}ms · $${(d.slowmo.cost_usd || 0).toFixed(4)}
+                    </div>
                   </div>
-                  <div class="text-xs text-gray-600 mt-1">
-                    ${d.slowmo.target_filename ? `Photo cible : <strong>${d.slowmo.target_filename}</strong> (slot ${d.slowmo.target_slot || '?'})` : ''}
-                    · sujet : <code class="bg-white px-1.5 py-0.5 rounded">${d.slowmo.motion_subject || 'n/a'}</code>
-                    ${d.slowmo.motion_strength ? ` · strength <strong>${d.slowmo.motion_strength}</strong>` : ''}
-                    ${d.slowmo.fallback_used ? ' · <span class="text-amber-700">fallback slot 1</span>' : ''}
-                  </div>
-                  <div class="text-[10px] text-gray-500 mt-0.5">
-                    ${d.slowmo.model || ''} · ${d.slowmo.duration_s || 5}s × ping-pong = ${(d.slowmo.duration_s || 5) * 2}s loop · ${d.slowmo.duration_ms}ms · $${(d.slowmo.cost_usd || 0).toFixed(4)}
-                  </div>
+                  ${d.slowmo.success && d.slowmo.video_url ? `
+                    <a href="${d.slowmo.video_url}" download class="btn-dayuse-ghost inline-flex items-center gap-1.5" style="padding: 6px 14px; font-size: 11px;">⬇ mp4</a>
+                  ` : ''}
                 </div>
                 ${d.slowmo.success && d.slowmo.video_url ? `
-                  <a href="${d.slowmo.video_url}" download class="btn-dayuse-ghost inline-flex items-center gap-1.5" style="padding: 6px 14px; font-size: 11px;">⬇ mp4</a>
-                ` : ''}
+                  <video src="${d.slowmo.video_url}" autoplay loop muted playsinline class="w-full max-h-96 object-contain bg-black"></video>
+                ` : `
+                  <div class="px-4 pb-3 text-xs text-red-700">${d.slowmo.error || 'Génération échouée'}</div>
+                `}
               </div>
-              ${d.slowmo.success && d.slowmo.video_url ? `
-                <video src="${d.slowmo.video_url}" autoplay loop muted playsinline class="w-full max-h-96 object-contain bg-black"></video>
-              ` : `
-                <div class="px-4 pb-3 text-xs text-red-700">${d.slowmo.error || 'Génération échouée'}</div>
-              `}
-            </div>
-          ` : ''}
-          <div class="grid grid-cols-2 gap-3 mb-6">${enhancedHTML}</div>
+            ` : '';
+            return `
+              <div class="final-pack-layout">
+                <div class="final-pack-main">
+                  ${slowmoHTML}
+                  <div class="flex flex-col gap-3 mb-6">${enhancedHTML}</div>
+                </div>
+                ${rpRailHTML}
+              </div>
+            `;
+          })()}
         `
         : '';
 
