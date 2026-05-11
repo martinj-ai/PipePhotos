@@ -434,6 +434,11 @@
             <span class="text-[11px] text-gray-500 italic">Pour les formats où le crop seul ne suffit pas (Δratio trop fort).</span>
             <span id="outpaint-cost" class="text-xs ml-auto font-mono font-semibold text-amber-700">$0.00</span>
           </div>
+          <!-- Nudge : formats verticaux cochés sans outpaint = beaucoup de skips -->
+          <div id="outpaint-nudge" class="hidden mb-3 rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-[11px] text-amber-800 flex items-start gap-2">
+            <span class="text-base leading-none">⚠️</span>
+            <span><strong>Outpainting recommandé.</strong> Tu as coché <span id="outpaint-nudge-formats" class="font-semibold"></span> qui requièrent souvent une extension (les photos source horizontales seront <strong>skip</strong> sans outpainting activé). Active la case ci-dessus pour générer ces variantes.</span>
+          </div>
 
           <!-- Liste formats (chargée dynamiquement) -->
           <div id="formats-list-dayuse" class="mb-3">
@@ -2549,12 +2554,17 @@ photo finale enhanced (jpeg)
         // ━━ Variantes multi-format pour CETTE photo (Phase 1+2 multi-format crop) ━━
         const multiformatStrip = (() => {
           if (!d.multiformat || d.multiformat.error || !Array.isArray(d.multiformat.variants)) return '';
-          const variants = d.multiformat.variants.filter(v => v.source === e.filename && v.output);
-          if (variants.length === 0) return '';
+          // On garde TOUTES les variantes (y compris les skip) pour cette photo, pour
+          // afficher les "manquants" comme placeholder grisé → UX honnête, on voit où
+          // outpainting aurait dû être activé.
+          const allVariants = d.multiformat.variants.filter(v => v.source === e.filename);
+          const okVariants = allVariants.filter(v => v.output);
+          if (allVariants.length === 0) return '';
           const stratStyle = {
             resize:   { bg: '#EFF6FF', border: '#BFDBFE', text: '#1D4ED8', icon: '↔', label: 'resize' },
             crop:     { bg: '#ECFDF5', border: '#A7F3D0', text: '#047857', icon: '✂', label: 'crop' },
             outpaint: { bg: '#FEF3C7', border: '#FCD34D', text: '#B45309', icon: '🎨', label: 'outpaint' },
+            skip:     { bg: '#F3F4F6', border: '#E5E7EB', text: '#6B7280', icon: '⊘', label: 'skip' },
           };
           const FMT_ABBR = {
             home_card_mobile: 'Home mob.', home_card_desktop: 'Home desk.',
@@ -2565,32 +2575,55 @@ photo finale enhanced (jpeg)
             insta_story: 'Insta story', linkedin_banner: 'LinkedIn',
             facebook_og: 'Facebook OG', twitter_card: 'Twitter',
           };
+          const skipCount = allVariants.filter(v => !v.output).length;
           return `
             <div class="px-3 pt-2.5 pb-1 border-t border-gray-100 bg-amber-50/30">
-              <div class="flex items-center justify-between mb-1.5">
-                <span class="text-[10px] font-bold uppercase tracking-wider text-amber-800">📐 ${variants.length} variantes multi-format</span>
-                <a href="/api/download-multiformat-zip/${d.slug}" class="text-[10px] text-amber-700 hover:text-amber-900 font-semibold">⬇ ZIP all</a>
+              <div class="flex items-center justify-between mb-1.5 gap-2 flex-wrap">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-amber-800">📐 ${okVariants.length} variantes${skipCount > 0 ? ` <span class="text-gray-500 font-normal normal-case">(${skipCount} skip — active outpainting pour les générer)</span>` : ''}</span>
+                <div class="flex items-center gap-2">
+                  ${okVariants.length >= 2 ? `<button type="button" onclick="openMultiformatLightbox('${e.filename}', 0, 'compare')" class="text-[10px] font-semibold px-2 py-1 rounded-full text-amber-900 hover:bg-amber-100 transition-colors" style="background:#FEF3C7;border:1px solid #FCD34D;">⊞ comparer côte-à-côte</button>` : ''}
+                  <a href="/api/download-multiformat-zip/${d.slug}" class="text-[10px] text-amber-700 hover:text-amber-900 font-semibold">⬇ ZIP all</a>
+                </div>
               </div>
               <div class="flex gap-1.5 overflow-x-auto pb-1" style="scrollbar-width:thin;">
-                ${variants.map(v => {
-                  const s = stratStyle[v.strategy] || { bg:'#F9FAFB', border:'#E5E7EB', text:'#6B7280', icon:'•', label:v.strategy };
-                  const url = `/output/${d.slug}/multiformat/${v.output}`;
+                ${allVariants.map((v, vIdx) => {
+                  const isSkip = !v.output;
+                  const s = stratStyle[isSkip ? 'skip' : v.strategy] || { bg:'#F9FAFB', border:'#E5E7EB', text:'#6B7280', icon:'•', label:v.strategy };
                   const [w, h] = v.target_size || [0, 0];
                   const ratio = h > 0 ? (w / h).toFixed(2) : '?';
                   const abbr = FMT_ABBR[v.format_id] || v.format_id;
-                  // Largeur miniature : 90px max, hauteur calculée
+                  // Largeur miniature : 86px, hauteur calculée
                   const thumbW = 86;
                   const thumbH = Math.max(28, Math.min(60, Math.round(thumbW / Math.max(0.3, w / Math.max(h, 1)))));
                   const fallback = v.fallback_pro ? '<span class="text-[8px] text-amber-700">🔄Pro</span>' : '';
-                  // Index dans la liste filtrée (sans skip) pour la navigation lightbox
-                  const variantIdx = variants.indexOf(v);
+                  if (isSkip) {
+                    const warning = v.warning || v.error || 'skip';
+                    return `
+                      <div class="flex-shrink-0 group relative rounded-md overflow-hidden border opacity-60"
+                           style="background:${s.bg};border-color:${s.border};border-style:dashed;width:${thumbW}px;cursor:not-allowed;"
+                           title="${v.format_id} · ${w}×${h} (${ratio}:1) · SKIP — ${warning}">
+                        <div style="width:${thumbW}px;height:${thumbH}px;background:repeating-linear-gradient(45deg,#F3F4F6,#F3F4F6 4px,#E5E7EB 4px,#E5E7EB 8px);display:flex;align-items:center;justify-content:center;">
+                          <span style="font-size:18px;color:#9CA3AF;">⊘</span>
+                        </div>
+                        <div class="px-1 py-0.5" style="background:${s.bg};">
+                          <div class="text-[9px] font-semibold truncate" style="color:${s.text};">${abbr}</div>
+                          <div class="text-[8px] flex items-center justify-between" style="color:${s.text};opacity:0.75;">
+                            <span>${w}×${h}</span><span>skip</span>
+                          </div>
+                        </div>
+                      </div>
+                    `;
+                  }
+                  const url = `/output/${d.slug}/multiformat/${v.output}`;
+                  // Index parmi les variantes ok (pour la lightbox)
+                  const okIdx = okVariants.indexOf(v);
                   return `
                     <button type="button"
                        class="flex-shrink-0 group relative rounded-md overflow-hidden border hover:shadow-md transition-all"
                        style="background:${s.bg};border-color:${s.border};width:${thumbW}px;cursor:zoom-in;"
                        data-mfvariant-photo="${e.filename}"
-                       data-mfvariant-idx="${variantIdx}"
-                       onclick="openMultiformatLightbox('${e.filename}', ${variantIdx})"
+                       data-mfvariant-idx="${okIdx}"
+                       onclick="openMultiformatLightbox('${e.filename}', ${okIdx})"
                        title="${v.format_id} · ${w}×${h} (${ratio}:1) · ${v.strategy}${v.cost_usd ? ' · $' + v.cost_usd.toFixed(3) : ''}">
                       <div style="width:${thumbW}px;height:${thumbH}px;background:#F3F4F6;display:flex;align-items:center;justify-content:center;overflow:hidden;">
                         <img src="${url}" loading="lazy" alt="${v.format_id}" style="width:100%;height:100%;object-fit:cover;">
@@ -3333,6 +3366,7 @@ photo finale enhanced (jpeg)
         summary.className = "text-xs text-amber-700 ml-2";
       }
       updateOutpaintCost();
+      updateOutpaintNudge();
     }
 
     // ━━━ Estimateur coût outpainting (live) ━━━
@@ -3367,12 +3401,44 @@ photo finale enhanced (jpeg)
       costEl.className = "text-xs ml-auto font-mono font-semibold text-amber-700";
     }
 
+    // ━━━ Nudge : si l'user a coché des formats portrait/carré qui exigent outpaint et que
+    //     le toggle est off → on lui dit explicitement, sinon il se demande pourquoi son
+    //     insta_story est manquant sur 60% des photos.
+    const OUTPAINT_HEAVY_FORMATS = ["insta_story", "insta_feed", "youtube_thumbnail", "hotel_main_mobile"];
+    const FORMAT_LABELS_FR = {
+      insta_story: "Insta story (vertical 9:16)",
+      insta_feed: "Insta feed (carré)",
+      youtube_thumbnail: "YouTube thumb (16:9 strict)",
+      hotel_main_mobile: "Hôtel mobile (~3:2)",
+    };
+    function updateOutpaintNudge() {
+      const nudge = document.getElementById("outpaint-nudge");
+      const formatsEl = document.getElementById("outpaint-nudge-formats");
+      const toggle = document.getElementById("outpaint-toggle");
+      if (!nudge || !formatsEl || !toggle) return;
+      const checkedIds = Array.from(document.querySelectorAll(".format-checkbox:checked")).map(cb => cb.value);
+      const heavyChecked = checkedIds.filter(id => OUTPAINT_HEAVY_FORMATS.includes(id));
+      if (!toggle.checked && heavyChecked.length > 0) {
+        formatsEl.textContent = heavyChecked.map(id => FORMAT_LABELS_FR[id] || id).join(", ");
+        nudge.classList.remove("hidden");
+      } else {
+        nudge.classList.add("hidden");
+      }
+    }
+
     // Listeners outpaint
     document.addEventListener("DOMContentLoaded", () => {
       const toggle = document.getElementById("outpaint-toggle");
       const quality = document.getElementById("outpaint-quality");
-      if (toggle) toggle.addEventListener("change", updateOutpaintCost);
+      if (toggle) toggle.addEventListener("change", () => { updateOutpaintCost(); updateOutpaintNudge(); });
       if (quality) quality.addEventListener("change", updateOutpaintCost);
+      // Réagit aux changements de cases formats (event delegation pour gérer
+      // les checkboxes ajoutées dynamiquement par loadOutputFormats)
+      document.addEventListener("change", (ev) => {
+        if (ev.target && ev.target.classList && ev.target.classList.contains("format-checkbox")) {
+          updateOutpaintNudge();
+        }
+      });
 
       // Slowmo toggle summary
       const slowmoToggle = document.getElementById("slowmo-toggle");
@@ -3735,10 +3801,16 @@ photo finale enhanced (jpeg)
 <!-- ━━━ Lightbox multi-format variantes ━━━ -->
 <div id="mf-lightbox" class="fixed inset-0 z-[1000] hidden flex-col items-center justify-center" style="background:rgba(0,0,0,0.92);backdrop-filter:blur(4px);" onclick="if(event.target===this)closeMultiformatLightbox()">
   <button onclick="closeMultiformatLightbox()" class="absolute top-5 right-5 w-11 h-11 rounded-full flex items-center justify-center text-white text-xl transition-all" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.2);" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">✕</button>
+  <!-- Toggle mode single ↔ compare -->
+  <div class="absolute top-5 left-1/2 -translate-x-1/2 flex items-center gap-1 px-1 py-1 rounded-full" style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);backdrop-filter:blur(8px);">
+    <button id="mf-mode-single" onclick="setMultiformatLightboxMode('single')" class="text-[11px] font-semibold px-3 py-1.5 rounded-full transition-all">◐ Vue unique</button>
+    <button id="mf-mode-compare" onclick="setMultiformatLightboxMode('compare')" class="text-[11px] font-semibold px-3 py-1.5 rounded-full transition-all">⊞ Comparer tout</button>
+  </div>
   <button id="mf-prev" onclick="navMultiformatLightbox(-1)" class="absolute left-5 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full flex items-center justify-center text-white text-2xl transition-all" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.2);" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">←</button>
   <button id="mf-next" onclick="navMultiformatLightbox(1)" class="absolute right-5 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full flex items-center justify-center text-white text-2xl transition-all" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.2);" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">→</button>
 
-  <div class="flex flex-col items-center gap-3 max-w-[95vw] max-h-[90vh]">
+  <!-- Vue UNIQUE -->
+  <div id="mf-single-view" class="flex flex-col items-center gap-3 max-w-[95vw] max-h-[90vh]">
     <div id="mf-frame" class="rounded-xl overflow-hidden shadow-2xl bg-gray-100 flex items-center justify-center" style="max-height:75vh;">
       <img id="mf-image" src="" alt="" style="max-width:95vw;max-height:75vh;object-fit:contain;display:block;">
     </div>
@@ -3755,18 +3827,53 @@ photo finale enhanced (jpeg)
     <!-- Strip de miniatures pour switcher rapidement -->
     <div id="mf-thumbs" class="flex gap-1.5 overflow-x-auto px-3 pb-1 max-w-[95vw]" style="scrollbar-width:thin;"></div>
   </div>
+
+  <!-- Vue COMPARE (grille) -->
+  <div id="mf-compare-view" class="hidden flex-col items-center gap-3 mt-16" style="max-width:95vw;max-height:90vh;">
+    <div id="mf-compare-header" class="px-5 py-2.5 rounded-full text-xs text-gray-800 font-semibold" style="background:rgba(255,255,255,0.95);backdrop-filter:blur(12px);"></div>
+    <div id="mf-compare-grid" class="grid gap-3 overflow-auto p-2" style="scrollbar-width:thin;max-height:80vh;"></div>
+  </div>
 </div>
 
 <script>
   // ━━━ Multi-format variants lightbox ━━━
-  let _mfLightboxState = null;  // { photoFilename, variants[], idx }
+  // state shape : { photoFilename, variants[] (ok), allVariants[] (incl. skip), idx, mode: 'single'|'compare' }
+  let _mfLightboxState = null;
 
-  function openMultiformatLightbox(photoFilename, idx) {
+  const MF_FMT_LABELS = {
+    home_card_mobile: 'Home — card mobile', home_card_desktop: 'Home — card desktop',
+    hotel_main_desktop: 'Fiche hôtel — image principale desktop',
+    hotel_secondary_desktop: 'Fiche hôtel — image secondaire desktop',
+    hotel_main_mobile: 'Fiche hôtel — image principale mobile',
+    rate_plan_desktop: 'Rate plan — card desktop',
+    rate_plan_mobile: 'Rate plan — card mobile',
+    youtube_thumbnail: 'YouTube — thumbnail',
+    insta_feed: 'Instagram — feed',
+    insta_story: 'Instagram — story / reels',
+    linkedin_banner: 'LinkedIn — banner',
+    facebook_og: 'Facebook — Open Graph',
+    twitter_card: 'Twitter — large card',
+  };
+  const MF_STRAT_STYLE = {
+    resize:   { bg: '#DBEAFE', text: '#1E40AF', label: '↔ resize' },
+    crop:     { bg: '#D1FAE5', text: '#065F46', label: '✂ crop' },
+    outpaint: { bg: '#FEF3C7', text: '#92400E', label: '🎨 outpaint' },
+    skip:     { bg: '#F3F4F6', text: '#6B7280', label: '⊘ skip' },
+  };
+
+  function openMultiformatLightbox(photoFilename, idx, mode) {
     if (!state || !state.lastRun || !state.lastRun.multiformat) return;
-    const variants = (state.lastRun.multiformat.variants || [])
-      .filter(v => v.source === photoFilename && v.output);
+    const allForPhoto = (state.lastRun.multiformat.variants || [])
+      .filter(v => v.source === photoFilename);
+    const variants = allForPhoto.filter(v => v.output);
     if (variants.length === 0) return;
-    _mfLightboxState = { photoFilename, variants, idx: Math.max(0, Math.min(idx, variants.length - 1)) };
+    _mfLightboxState = {
+      photoFilename,
+      variants,
+      allVariants: allForPhoto,
+      idx: Math.max(0, Math.min(idx || 0, variants.length - 1)),
+      mode: mode === 'compare' ? 'compare' : 'single',
+    };
     renderMultiformatLightbox();
     document.getElementById('mf-lightbox').classList.remove('hidden');
     document.getElementById('mf-lightbox').classList.add('flex');
@@ -3779,7 +3886,7 @@ photo finale enhanced (jpeg)
   }
 
   function navMultiformatLightbox(delta) {
-    if (!_mfLightboxState) return;
+    if (!_mfLightboxState || _mfLightboxState.mode !== 'single') return;
     const n = _mfLightboxState.variants.length;
     _mfLightboxState.idx = (_mfLightboxState.idx + delta + n) % n;
     renderMultiformatLightbox();
@@ -3788,62 +3895,140 @@ photo finale enhanced (jpeg)
   function setMultiformatLightboxIdx(i) {
     if (!_mfLightboxState) return;
     _mfLightboxState.idx = i;
+    if (_mfLightboxState.mode !== 'single') _mfLightboxState.mode = 'single';
     renderMultiformatLightbox();
   }
 
-  function renderMultiformatLightbox() {
+  function setMultiformatLightboxMode(mode) {
     if (!_mfLightboxState) return;
-    const { photoFilename, variants, idx } = _mfLightboxState;
+    _mfLightboxState.mode = (mode === 'compare') ? 'compare' : 'single';
+    renderMultiformatLightbox();
+  }
+
+  function _renderMfSingle() {
+    const { variants, idx } = _mfLightboxState;
     const v = variants[idx];
     const slug = state.slug;
     const url = `/output/${slug}/multiformat/${v.output}`;
     const [w, h] = v.target_size || [0, 0];
 
-    const FMT_ABBR = {
-      home_card_mobile: 'Home — card mobile', home_card_desktop: 'Home — card desktop',
-      hotel_main_desktop: 'Fiche hôtel — image principale desktop',
-      hotel_secondary_desktop: 'Fiche hôtel — image secondaire desktop',
-      hotel_main_mobile: 'Fiche hôtel — image principale mobile',
-      rate_plan_desktop: 'Rate plan — card desktop',
-      rate_plan_mobile: 'Rate plan — card mobile',
-      youtube_thumbnail: 'YouTube — thumbnail',
-      insta_feed: 'Instagram — feed',
-      insta_story: 'Instagram — story / reels',
-      linkedin_banner: 'LinkedIn — banner',
-      facebook_og: 'Facebook — Open Graph',
-      twitter_card: 'Twitter — large card',
-    };
-    const stratStyle = {
-      resize:   { bg: '#DBEAFE', text: '#1E40AF', label: '↔ resize' },
-      crop:     { bg: '#D1FAE5', text: '#065F46', label: '✂ crop' },
-      outpaint: { bg: '#FEF3C7', text: '#92400E', label: '🎨 outpaint' },
-    };
-
     document.getElementById('mf-image').src = url;
     document.getElementById('mf-image').alt = v.format_id;
     document.getElementById('mf-counter').textContent = `${idx + 1} / ${variants.length}`;
-    document.getElementById('mf-format').textContent = FMT_ABBR[v.format_id] || v.format_id;
+    document.getElementById('mf-format').textContent = MF_FMT_LABELS[v.format_id] || v.format_id;
     document.getElementById('mf-dimensions').textContent = `${w}×${h}`;
-    const s = stratStyle[v.strategy] || { bg:'#F3F4F6', text:'#6B7280', label: v.strategy };
+    const s = MF_STRAT_STYLE[v.strategy] || { bg:'#F3F4F6', text:'#6B7280', label: v.strategy };
     const stratEl = document.getElementById('mf-strategy');
     stratEl.textContent = s.label + (v.fallback_pro ? ' 🔄Pro' : '');
     stratEl.style.background = s.bg;
     stratEl.style.color = s.text;
     document.getElementById('mf-cost').textContent = v.cost_usd ? `$${v.cost_usd.toFixed(3)}` : '';
 
-    // Render thumbs strip pour switch rapide
+    // Strip de miniatures (vue single)
     const thumbsEl = document.getElementById('mf-thumbs');
     thumbsEl.innerHTML = variants.map((vv, i) => {
       const u = `/output/${slug}/multiformat/${vv.output}`;
       const isActive = i === idx;
-      return `<button type="button" onclick="setMultiformatLightboxIdx(${i})" class="flex-shrink-0 rounded-md overflow-hidden border-2 transition-all" style="border-color:${isActive ? '#FFAF36' : 'rgba(255,255,255,0.2)'};opacity:${isActive ? '1' : '0.65'};">
+      return `<button type="button" onclick="setMultiformatLightboxIdx(${i})" class="flex-shrink-0 rounded-md overflow-hidden border-2 transition-all" style="border-color:${isActive ? '#FFAF36' : 'rgba(255,255,255,0.2)'};opacity:${isActive ? '1' : '0.65'};" title="${MF_FMT_LABELS[vv.format_id] || vv.format_id}">
         <img src="${u}" loading="lazy" style="width:62px;height:42px;object-fit:cover;display:block;">
       </button>`;
     }).join('');
 
-    // Disable nav buttons si une seule variante
     document.getElementById('mf-prev').style.display = variants.length > 1 ? 'flex' : 'none';
     document.getElementById('mf-next').style.display = variants.length > 1 ? 'flex' : 'none';
+  }
+
+  function _renderMfCompare() {
+    const { photoFilename, allVariants } = _mfLightboxState;
+    const slug = state.slug;
+    const okCount = allVariants.filter(v => v.output).length;
+    const skipCount = allVariants.length - okCount;
+    const headerEl = document.getElementById('mf-compare-header');
+    headerEl.textContent = `${photoFilename} · ${okCount} variantes générées${skipCount > 0 ? ` · ${skipCount} skip (outpaint requis)` : ''}`;
+
+    const gridEl = document.getElementById('mf-compare-grid');
+    // Grille adaptative : nb colonnes selon le nombre de variantes
+    const n = allVariants.length;
+    const cols = n <= 2 ? 2 : (n <= 4 ? 2 : (n <= 6 ? 3 : (n <= 9 ? 3 : 4)));
+    gridEl.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+    // Hauteur cible par cellule (laisse l'image respirer)
+    const cellMaxH = Math.max(180, Math.min(360, Math.round((window.innerHeight * 0.75) / Math.ceil(n / cols))));
+
+    gridEl.innerHTML = allVariants.map(v => {
+      const isSkip = !v.output;
+      const s = MF_STRAT_STYLE[isSkip ? 'skip' : v.strategy] || { bg:'#F3F4F6', text:'#6B7280', label: v.strategy };
+      const [w, h] = v.target_size || [0, 0];
+      const ratio = h > 0 ? (w / h).toFixed(2) : '?';
+      const label = MF_FMT_LABELS[v.format_id] || v.format_id;
+      if (isSkip) {
+        const warning = v.warning || v.error || 'skip';
+        return `
+          <div class="rounded-xl overflow-hidden flex flex-col border-2 border-dashed" style="background:rgba(255,255,255,0.06);border-color:rgba(255,255,255,0.15);">
+            <div class="flex items-center justify-center" style="height:${cellMaxH}px;background:repeating-linear-gradient(45deg,rgba(255,255,255,0.05),rgba(255,255,255,0.05) 8px,rgba(255,255,255,0.1) 8px,rgba(255,255,255,0.1) 16px);">
+              <div class="text-center px-3">
+                <div class="text-5xl mb-2 opacity-50">⊘</div>
+                <div class="text-[11px] text-gray-300 font-semibold mb-1">${label}</div>
+                <div class="text-[10px] text-gray-400 leading-snug">${warning}</div>
+              </div>
+            </div>
+            <div class="px-3 py-2 flex items-center justify-between bg-black/30">
+              <span class="text-[11px] font-semibold text-gray-200">${label}</span>
+              <span class="text-[10px] font-mono text-gray-400">${w}×${h} (${ratio}:1)</span>
+            </div>
+          </div>
+        `;
+      }
+      const url = `/output/${slug}/multiformat/${v.output}`;
+      return `
+        <div class="rounded-xl overflow-hidden flex flex-col bg-white shadow-lg cursor-zoom-in"
+             onclick="setMultiformatLightboxIdx(${_mfLightboxState.variants.indexOf(v)})"
+             title="Clic pour vue plein écran">
+          <div class="flex items-center justify-center bg-gray-100" style="height:${cellMaxH}px;">
+            <img src="${url}" loading="lazy" alt="${v.format_id}" style="max-width:100%;max-height:100%;object-fit:contain;display:block;">
+          </div>
+          <div class="px-3 py-2 flex items-center justify-between gap-2 flex-wrap" style="background:${s.bg};">
+            <span class="text-[11px] font-bold" style="color:${s.text};">${label}</span>
+            <div class="flex items-center gap-2">
+              <span class="text-[10px] font-mono text-gray-700">${w}×${h} (${ratio}:1)</span>
+              <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style="background:rgba(255,255,255,0.7);color:${s.text};">${s.label}${v.fallback_pro ? ' 🔄Pro' : ''}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderMultiformatLightbox() {
+    if (!_mfLightboxState) return;
+    const mode = _mfLightboxState.mode;
+    const singleEl = document.getElementById('mf-single-view');
+    const compareEl = document.getElementById('mf-compare-view');
+    const modeSingleBtn = document.getElementById('mf-mode-single');
+    const modeCompareBtn = document.getElementById('mf-mode-compare');
+
+    // Toggle visibility + active state
+    if (mode === 'compare') {
+      singleEl.classList.add('hidden');
+      compareEl.classList.remove('hidden');
+      compareEl.classList.add('flex');
+      modeSingleBtn.style.background = 'transparent';
+      modeSingleBtn.style.color = 'rgba(255,255,255,0.7)';
+      modeCompareBtn.style.background = 'rgba(255,255,255,0.95)';
+      modeCompareBtn.style.color = '#292935';
+      document.getElementById('mf-prev').style.display = 'none';
+      document.getElementById('mf-next').style.display = 'none';
+      _renderMfCompare();
+    } else {
+      compareEl.classList.add('hidden');
+      compareEl.classList.remove('flex');
+      singleEl.classList.remove('hidden');
+      singleEl.classList.add('flex');
+      modeCompareBtn.style.background = 'transparent';
+      modeCompareBtn.style.color = 'rgba(255,255,255,0.7)';
+      modeSingleBtn.style.background = 'rgba(255,255,255,0.95)';
+      modeSingleBtn.style.color = '#292935';
+      _renderMfSingle();
+    }
   }
 
   // Keyboard nav (sans interférer avec les autres lightboxes)
@@ -3852,6 +4037,7 @@ photo finale enhanced (jpeg)
     if (e.key === 'Escape') closeMultiformatLightbox();
     else if (e.key === 'ArrowLeft') navMultiformatLightbox(-1);
     else if (e.key === 'ArrowRight') navMultiformatLightbox(1);
+    else if (e.key === 'g' || e.key === 'G') setMultiformatLightboxMode(_mfLightboxState.mode === 'compare' ? 'single' : 'compare');
   });
 </script>
 

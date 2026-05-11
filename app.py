@@ -605,9 +605,11 @@ def api_run():
 
     # 2c) Dédup sémantique VLM sur les paires en zone grise (Gemini Vision)
     # On a maintenant les analyses Gemini → on peut pré-filtrer puis appeler VLM
+    # ━━ Mode postprocess : on skip car le pack final est déjà figé (enhanced/*.jpg)
+    #    et on ne ré-affecte pas la sélection. C'est juste un appel Gemini onéreux pour rien.
     analyses_by_filename = {a["input"]["filename"]: a.get("analysis") for a in analyses}
     vlm_dedup_results = []
-    if phash_distances:
+    if phash_distances and not use_enhance_cache:
         # Indique au front qu'on entre dans la phase dedup_vlm (sinon il reste figé sur "100% analyze")
         progress.update(
             f"{slug}_analyze",
@@ -673,25 +675,32 @@ def api_run():
     # On re-vérifie les top-3 candidats de chaque bucket amenity. Si Gemini constate qu'une
     # photo est en réalité un close-up lifestyle (pas l'amenity comme sujet), on plombe
     # sa dominance → la photo est rétrogradée dans le tri suivant.
-    progress.update(f"{slug}_analyze", step="amenity_verify",
-                    message="Vérification amenity (2e passe Gemini sur toutes les photos amenity)…")
-    try:
-        # n_per_bucket=None : on vérifie TOUTES les photos d'un bucket amenity, pas juste top-3
-        # (Gemini hallucine régulièrement → on doit tout vérifier pour ne pas laisser passer
-        # un closeup bikini scoré 240/300 par Gemini).
-        verifier_results = amenity_verifier.verify_top_candidates(
-            kept_analyses, cov_initial, n_per_bucket=None, parallel=4,
-        )
-        verifier_cost_usd = round(sum(r.get("cost_usd", 0) for r in verifier_results), 6)
-        print(f"[amenity_verifier] {len(verifier_results)} photos vérifiées, "
-              f"{sum(1 for r in verifier_results if not r.get('is_focused'))} rétrogradées, "
-              f"coût ${verifier_cost_usd}")
-    except Exception as e:
-        verifier_results = []
-        verifier_cost_usd = 0.0
-        import traceback
-        print(f"[amenity_verifier] ERROR (non-blocking): {e}")
-        traceback.print_exc()
+    # ━━ Mode postprocess : on skip (le pack est déjà figé sur disque, c'est juste un appel
+    #    Gemini onéreux qui ne change rien à la sortie multi-format/slowmo).
+    verifier_results = []
+    verifier_cost_usd = 0.0
+    if not use_enhance_cache:
+        progress.update(f"{slug}_analyze", step="amenity_verify",
+                        message="Vérification amenity (2e passe Gemini sur toutes les photos amenity)…")
+        try:
+            # n_per_bucket=None : on vérifie TOUTES les photos d'un bucket amenity, pas juste top-3
+            # (Gemini hallucine régulièrement → on doit tout vérifier pour ne pas laisser passer
+            # un closeup bikini scoré 240/300 par Gemini).
+            verifier_results = amenity_verifier.verify_top_candidates(
+                kept_analyses, cov_initial, n_per_bucket=None, parallel=4,
+            )
+            verifier_cost_usd = round(sum(r.get("cost_usd", 0) for r in verifier_results), 6)
+            print(f"[amenity_verifier] {len(verifier_results)} photos vérifiées, "
+                  f"{sum(1 for r in verifier_results if not r.get('is_focused'))} rétrogradées, "
+                  f"coût ${verifier_cost_usd}")
+        except Exception as e:
+            verifier_results = []
+            verifier_cost_usd = 0.0
+            import traceback
+            print(f"[amenity_verifier] ERROR (non-blocking): {e}")
+            traceback.print_exc()
+    else:
+        print("[postprocess] skip amenity_verifier + VLM dedup (use_enhance_cache=True)")
 
     # Re-compute coverage avec les dominances corrigées
     cov = coverage_mod.compute_coverage(rp_data, kept_analyses)
@@ -738,8 +747,11 @@ def api_run():
         photo_targets.setdefault(fname, []).append(f"bonus_{b['amenity']}")
 
     # 4.a-bis : Génération full IA pour amenities manquantes (spa, bar — règle métier stricte)
+    # En mode postprocess : on skip (le pack est déjà figé, pas de raison de générer une nouvelle photo full-IA)
     generated_photos = []  # liste des photos générées full IA, à injecter dans le pack
     for cat, info in cov["by_category"].items():
+        if use_enhance_cache:
+            break
         if info["status"] != "missing":
             continue
         if not photo_generator.can_generate(cat):

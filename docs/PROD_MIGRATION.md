@@ -1,7 +1,7 @@
 # Migration prod — Railway
 
 **Statut** : 🚧 outil POC en local, à industrialiser pour Railway
-**Dernière revue** : 2026-05-06
+**Dernière revue** : 2026-05-11
 
 > 🎯 **Méthodologie** : à **chaque ajout de feature**, on revient sur ce document
 > et on ajoute la ligne correspondante dans la section concernée. C'est un
@@ -257,6 +257,9 @@ Le pipeline `/api/run` tourne **synchrone** dans la requête HTTP : un `POST /ap
 | Test AB modèles | `data/output/.../comparison/` | non persisté (audit one-shot) | `GEMINI_API_KEY`, `OPENAI_API_KEY` | sync OK | Garder en local pour audit |
 | Audit matriciel lois | `data/output/laws_audit/` | non persisté (statique global) | — | sync OK | Garder en static |
 | Replay / resume | lecture cache | reads `photo_analyses` | — | sync OK | **Cache lookup → DB** |
+| Replay postprocess strict (skip dedup_vlm + amenity_verifier + photo_generator) | lecture cache `enhanced/` | reads `photo_analyses` | — | sync OK | **Important** : en prod aussi, le mode postprocess doit court-circuiter tous les appels Gemini de sélection (économie 1-2 min + ~$0.05 par run) |
+| Multi-format lightbox grille comparative | lecture `multiformat/` | reads `multiformat_variants` | — | sync (UI only) | Render N variantes côte-à-côte (CSS grid) — pas d'impact backend ; côté CDN il faut juste assurer que toutes les URLs des variantes soient servies |
+| Skip placeholders (variantes outpaint-required avec outpaint off) | — | flag `strategy='skip'` dans `multiformat_variants` | — | sync OK | OK |
 
 ### ⏳ Features à venir (à compléter)
 
