@@ -538,20 +538,28 @@ If the photo features a swimming pool and there is NO clearly visible empty loun
   - OR sitting at the pool edge with legs/calves submerged in water
 This is FAR BETTER than inventing a lounger/raft/daybed. Body must be partially submerged, hair wet if in water, water displacement visible, splashes acceptable.
 
-🌊 WATER DEPTH PHYSICS (ABSOLUTE RULE — most common failure on pool photos) :
+🌊🚨 WATER DEPTH PHYSICS — THE #1 FAILURE MODE ON POOL PHOTOS — READ THIS TWICE :
 
-When a subject is STANDING UPRIGHT in the pool, the water level on their body must follow real physics :
-  - Pool with NO visible steps/ladder/shelf → standing subjects MUST be **CHEST-DEEP** (water at sternum / upper-chest level — only upper-torso, shoulders, neck, head visible above water). This is the DEFAULT and CORRECT level for adult swimming pools.
-  - 🚫 NEVER show belly button, hips, swimsuit waistband, shorts waistband, or thighs above water for standing subjects. This makes the pool look like a kiddie pool.
-  - WAIST-DEEP (water at hip) is acceptable ONLY for : (a) child-sized subject, (b) subject clearly walking INTO the water (mid-step transition), (c) pool clearly very shallow as visible in original.
-  - To show subjects lower in the water (knees / thighs visible), they MUST be either :
-       (a) Sitting on the EDGE of the pool with feet/calves submerged (NOT standing in the water).
-       (b) On a clearly visible existing pool STEP / Baja shelf / raised platform — and the step itself must be in the input image.
-  - Sitting in water on a step : water level matches the actual sitting depth (typically waist or chest level on the seated subject).
-  - Multiple subjects in same pool → ALL the same water level (not one chest-deep + another knee-deep without geometric reason).
-  - If subject's swimsuit color shows above water at hip level on a 1.4m+ deep pool → it is WRONG. The water should hide everything below chest.
+For ANY subject standing in pool water, the water level MUST hide AT LEAST the belly button — preferably reaching the chest/sternum (CHEST-DEEP is the DEFAULT and CORRECT level). A pool with shallow water visible at knee or thigh level on standing adults looks LIKE THE POOL HAS NO BOTTOM — it ruins the photo immediately and makes the hotel look fake.
 
-If you cannot place subjects respecting these depth rules → put them at the edge (sitting on the dry deck with calves in water), OR have them swimming horizontally (head + upper back above water), OR DO NOT add them. Wrong water levels are immediately recognizable as fake and ruin the photo.
+VISUAL TEST you MUST apply before finalizing : look at the subject's body in the water :
+  ✅ ACCEPTABLE : water at chest / sternum / shoulders / armpits (only upper torso + head visible)
+  ✅ ACCEPTABLE : water at upper waist (just above belly button) — if subject is clearly mid-stride walking into deeper water
+  ✅ ACCEPTABLE : subject SITTING on the pool edge with only feet/calves in water (NOT standing)
+  ✅ ACCEPTABLE : subject swimming horizontal, head + upper-back above water
+  ❌ FORBIDDEN : water below the belly button on a standing subject (hips visible, swimsuit waistband visible, shorts waistband visible)
+  ❌ FORBIDDEN : water at the thighs / mid-thigh on a standing subject — this makes the pool look depthless
+  ❌ FORBIDDEN : water at the knees on a standing subject — IMMEDIATE photo failure
+  ❌ FORBIDDEN : subject standing on what looks like the pool floor when there's no visible Baja shelf / step in the input
+
+RULES :
+  1. Default position : CHEST-DEEP for standing adults. If unsure, go DEEPER not shallower.
+  2. If you cannot achieve chest-deep (e.g. you put the subject too close to the camera) → put them at the pool EDGE sitting on the dry deck, calves dangling in water.
+  3. Multiple subjects in the same pool → ALL the same water level. Geometric impossibility otherwise.
+  4. NEVER show a step/shelf that is not in the original input. If the input pool has no visible Baja shelf, the floor is at swimming depth (1.2m+) everywhere.
+  5. If you fail rules 1-4, the photo will be REJECTED and we'll fall back to the original. So if you can't honor them, DON'T add the subject.
+
+⚠️ FINAL CHECK BEFORE OUTPUT : for each standing subject in water, does the water hide the belly button? If NO → re-pose them deeper or put them at the edge. If you're still not sure → don't add them.
 
 - Subjects MUST be placed on plausible, safe supports: seated on chairs / loungers / sofas / daybeds **THAT ALREADY EXIST IN THE PHOTO**, OR standing on solid floor/ground/decking, OR realistically immersed IN water (swimming, floating, wading waist-deep, sitting at pool edge).
 - **DO NOT INVENT OR ADD any furniture, daybed, lounger, raft, platform, float, or any object that is not visibly present in the original input image.** If there is no plausible existing seat for a subject AND the scene has water → place them IN the water (priority rule above). Otherwise, place them standing on solid ground, OR DO NOT add the subject at all.
@@ -1279,6 +1287,15 @@ VIOLATION_REINFORCEMENT = {
         "(or on a fabricated floating object). FORBIDDEN. "
         "Place subjects either fully IN the water (swimming, body partially submerged, water displacement around them) "
         "OR on the solid pool deck / sand / floor — never floating dry, never standing on the water surface."
+    ),
+    "shallow_water_illusion": (
+        "WATER DEPTH VIOLATION : in your previous output, a standing subject in the pool has water only at the knees / thighs / "
+        "hips, which makes the pool look bottomless or like a kiddie pool. THIS IS UNACCEPTABLE. "
+        "For ANY standing subject in pool water, the water MUST hide AT LEAST the belly button — preferably the chest/sternum. "
+        "Re-position the subject(s) so they are CHEST-DEEP (water at sternum / upper-chest, only upper torso + head visible). "
+        "If that's geometrically impossible because of placement → put them sitting on the pool EDGE with feet dangling, "
+        "OR swimming horizontally with head + upper back above water, OR don't add them at all. "
+        "Verify before output : water hides at minimum the belly button on every standing subject."
     ),
     "subject_on_furniture_top": (
         "ABSOLUTE PROHIBITION: do NOT place subjects standing or sitting on top of daybeds, sun loungers, or sofas — these are for lying. "

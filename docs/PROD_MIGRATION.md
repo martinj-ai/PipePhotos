@@ -275,6 +275,9 @@ Le pipeline `/api/run` tourne **synchrone** dans la requête HTTP : un `POST /ap
 | Validator : nouvelle violation `invented_pool_float` distincte d'`invented_furniture` | — | — | `GEMINI_API_KEY` | sync OK | Whitelist conditionnelle (allowed pour `ai_add_pool_float`) ; nuit→jour aussi clarifié comme légitime via `scene_regenerated` whitelist sur `ai_lighting` |
 | UI Progress multi-étapes (6 étapes pipelines, mini-barres) | — | — | — | sync (UI only) | Plus de "barre qui reset à 0" : vue globale + détail par étape avec statuts pending/active/done/skipped |
 | ThreadPool enhance/multi-format robustes aux exceptions | — | error rows | — | sync OK | Avant : 1 photo crash → tout le pipeline coupé → multi-format jamais lancé. Maintenant : crash isolé, ligne d'erreur dans l'UI, pipeline continue |
+| Transformable bonus bumped à +80 sur les amenities (vs +40 sur hero_ext/detail) | — | — | — | sync OK | Force les photos piscine/rooftop/spa/etc. nuit/sombre à battre des photos jour banales — sinon Gemini sous-estime trop le pillar |
+| Validator violation `shallow_water_illusion` (piscine sans fond) | — | — | `GEMINI_API_KEY` | sync OK | Détecte les humains debout en eau aux genoux/cuisses sans marche visible — déclenche retry avec prompt durci |
+| Progress UI v2 : steps barres pointillées (pending) + shimmer animé (active) + vibing dots + temps mm:ss | — | — | — | sync (UI only) | Vraiment plus lisible : pending ≠ done visuellement, message qui tourne sur l'étape active |
 
 ### ⏳ Features à venir (à compléter)
 

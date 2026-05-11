@@ -158,6 +158,49 @@
     /* ━━ Progress bar ━━ */
     .progress-bar { height: 6px; background: #F5F5F7; border-radius: 100px; overflow: hidden; }
     .progress-fill { height: 100%; background: linear-gradient(90deg, #FFAF36 0%, #FFC536 100%); transition: width .3s; }
+    /* ━━ Pipeline multi-step progress (cards individuelles par étape) ━━ */
+    .step-card { padding: 10px 12px; border-radius: 10px; border: 1px solid; transition: all .25s ease; }
+    .step-card-pending  { background: #FAFAFB; border-color: #E5E7EB; }
+    .step-card-active   { background: linear-gradient(135deg, #FFF8ED 0%, #FFFBF5 100%); border-color: #FFAF36; box-shadow: 0 0 0 3px rgba(255,175,54,0.15), 0 2px 12px rgba(255,175,54,0.18); }
+    .step-card-done     { background: #F0FDF4; border-color: #86EFAC; }
+    .step-card-skipped  { background: #FAFAFB; border-color: #E5E7EB; opacity: .55; }
+    .step-bar-track { height: 5px; background: rgba(0,0,0,0.06); border-radius: 100px; overflow: hidden; position: relative; }
+    .step-bar-fill-active { height: 100%; background: linear-gradient(90deg, #FFAF36 0%, #FFC536 100%); border-radius: 100px; transition: width .3s; position: relative; overflow: hidden; }
+    .step-bar-fill-active::after {
+      content: ''; position: absolute; inset: 0; border-radius: inherit;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.55), transparent);
+      animation: stepShimmer 1.6s linear infinite;
+    }
+    .step-bar-fill-done { height: 100%; background: #22C55E; border-radius: 100px; }
+    .step-bar-fill-pending { height: 100%; background: transparent; border-radius: 100px; }
+    .step-bar-track-pending { background: repeating-linear-gradient(90deg, transparent 0 6px, rgba(0,0,0,0.08) 6px 8px); }
+    @keyframes stepShimmer {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(100%); }
+    }
+    /* Vibing dots (style Claude qui réfléchit) — pour l'étape active */
+    @keyframes vibingDots {
+      0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+      40%           { opacity: 1;    transform: translateY(-2px); }
+    }
+    .vibing-dot {
+      display: inline-block; width: 4px; height: 4px; border-radius: 50%;
+      background: currentColor; margin: 0 1px;
+      animation: vibingDots 1.4s ease-in-out infinite;
+    }
+    .vibing-dot:nth-child(2) { animation-delay: 0.15s; }
+    .vibing-dot:nth-child(3) { animation-delay: 0.3s; }
+    /* Icône animée sur l'étape active (rotation lente, pulse) */
+    @keyframes stepActiveIcon {
+      0%, 100% { transform: scale(1); }
+      50%      { transform: scale(1.08); }
+    }
+    .step-icon-active { animation: stepActiveIcon 2s ease-in-out infinite; }
+    @keyframes stepBadgePulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(255,175,54,0.45); }
+      50%      { box-shadow: 0 0 0 6px rgba(255,175,54,0); }
+    }
+    .step-badge-active { animation: stepBadgePulse 1.6s ease-in-out infinite; }
     /* ━━ Tabs nav (Dayuse) ━━ */
     .tab-btn { padding: .65rem 1rem; border-bottom: 2px solid transparent; color: #54545D; font-size: .875rem; font-weight: 600; cursor: pointer; transition: all .2s ease; letter-spacing: 0.01em; }
     .tab-btn:hover { color: #FFAF36; }
@@ -1930,73 +1973,164 @@ photo finale enhanced (jpeg)
       }
     }
 
-    function _renderStepRow(stepDef) {
+    // Messages "vibing" qui tournent par étape — donne un côté chaleureux/sexy au polling
+    const STEP_VIBING_PHRASES = {
+      analyse:   ["Gemini regarde tes photos", "Décode l'ambiance brand", "Score les piliers Dayuse", "Détecte les amenities visibles"],
+      dedup:     ["Compare les angles", "Chasse les doublons", "Filet sémantique VLM", "Garde la meilleure version"],
+      amenities: ["Re-vérifie la dominance", "Valide les amenities top-N", "Filtre les closeups déguisés"],
+      retouche:  ["Sublime la lumière", "Ajoute des silhouettes", "Nettoie les détails parasites", "Applique la LUT brand"],
+      slowmo:    ["Capture le mouvement parfait", "Génère le cinemagraph", "Loop ping-pong ffmpeg"],
+      multiformat: ["Crop intelligent", "Étend les bords (outpaint)", "Optimise pour chaque support"],
+    };
+
+    function _vibingPhraseFor(stepId, tick) {
+      const phrases = STEP_VIBING_PHRASES[stepId] || ["En cours"];
+      return phrases[tick % phrases.length];
+    }
+
+    function _formatElapsed(seconds) {
+      if (!seconds || seconds < 60) return `${Math.round(seconds || 0)}s`;
+      const m = Math.floor(seconds / 60);
+      const s = seconds % 60;
+      return s < 10 ? `${m}min${s.toString().padStart(2, '0')}` : `${m}min${s}`;
+    }
+
+    function _renderStepRow(stepDef, tick) {
       const st = _runProgressState[stepDef.id];
       const pct = st.total > 0 ? Math.round(100 * st.current / st.total) : (st.state === "done" ? 100 : 0);
-      const colors = {
-        pending:  { dot: "#E5E7EB", bg: "#F9FAFB",      text: "#9CA3AF", fill: "#D1D5DB", icon: "⏳" },
-        active:   { dot: "#FFAF36", bg: "#FFF8ED",      text: "#92400E", fill: "linear-gradient(62deg, #FFAF36 0%, #FFC536 100%)", icon: stepDef.icon },
-        done:     { dot: "#22C55E", bg: "#F0FDF4",      text: "#166534", fill: "#22C55E", icon: "✓" },
-        skipped:  { dot: "#E5E7EB", bg: "#F9FAFB",      text: "#9CA3AF", fill: "#E5E7EB", icon: "⏭" },
-      };
-      const c = colors[st.state] || colors.pending;
       const isActive = st.state === "active";
-      const showCounter = st.total > 0 && st.state !== "skipped";
-      const msg = isActive && st.message ? st.message : "";
+      const isDone = st.state === "done";
+      const isSkipped = st.state === "skipped";
+
+      // Couleurs adaptées au statut
+      const textColor = isActive ? "#92400E" : (isDone ? "#166534" : "#9CA3AF");
+      const badgeBg = isActive ? "#FFAF36" : (isDone ? "#22C55E" : "transparent");
+      const badgeBorder = isActive ? "#FFAF36" : (isDone ? "#22C55E" : "#D1D5DB");
+      const badgeContent = isActive ? `<span class="step-icon-active">${stepDef.icon}</span>` : (isDone ? "✓" : (isSkipped ? "⏭" : stepDef.icon));
+      const badgeTextColor = (isActive || isDone) ? "#fff" : "#9CA3AF";
+
+      // Right-side label : compteur si total connu, sinon état narratif
+      let rightLabel;
+      if (isSkipped) {
+        rightLabel = `<span class="text-[10px] text-gray-400 italic">non activé</span>`;
+      } else if (isDone) {
+        rightLabel = st.total > 0
+          ? `<span class="text-[10px] text-green-700 font-mono">${st.total}/${st.total}</span>`
+          : `<span class="text-[10px] text-green-700">terminé</span>`;
+      } else if (isActive) {
+        rightLabel = st.total > 0
+          ? `<span class="text-[10px] font-mono" style="color:${textColor};">${st.current}/${st.total} · ${pct}%</span>`
+          : `<span class="text-[10px] italic" style="color:${textColor};">en cours…</span>`;
+      } else {
+        rightLabel = `<span class="text-[10px] text-gray-400 italic">en attente</span>`;
+      }
+
+      // Barre : différencie pending (pointillé) / active (gradient anim) / done (vert)
+      let barHtml;
+      if (isActive) {
+        barHtml = `<div class="step-bar-track"><div class="step-bar-fill-active" style="width:${pct}%"></div></div>`;
+      } else if (isDone) {
+        barHtml = `<div class="step-bar-track"><div class="step-bar-fill-done" style="width:100%"></div></div>`;
+      } else {
+        // pending ou skipped : barre vide pointillée pour bien la distinguer
+        barHtml = `<div class="step-bar-track step-bar-track-pending"></div>`;
+      }
+
+      // Message live : si actif, on alterne phrase "vibing" + dots animés + message serveur
+      let msgHtml = "";
+      if (isActive) {
+        const phrase = st.message || _vibingPhraseFor(stepDef.id, tick);
+        msgHtml = `<div class="text-[10px] mt-1.5 italic truncate" style="color:${textColor};opacity:0.9;" title="${phrase}">${phrase}<span class="vibing-dot"></span><span class="vibing-dot"></span><span class="vibing-dot"></span></div>`;
+      }
+
+      const cardClass = isActive ? "step-card-active" : (isDone ? "step-card-done" : (isSkipped ? "step-card-skipped" : "step-card-pending"));
+      const badgeClass = isActive ? "step-badge-active" : "";
 
       return `
-        <div class="rounded-lg px-3 py-2 transition-all" style="background:${c.bg};border:1px solid ${c.dot};${isActive ? 'box-shadow:0 0 0 2px rgba(255,175,54,0.18);' : ''}">
+        <div class="step-card ${cardClass}">
           <div class="flex items-center gap-2.5">
-            <div class="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0" style="background:${c.dot};color:#fff;">${c.icon}</div>
+            <div class="w-7 h-7 rounded-full flex items-center justify-center text-[12px] font-bold flex-shrink-0 ${badgeClass}" style="background:${badgeBg};color:${badgeTextColor};border:1.5px solid ${badgeBorder};">${badgeContent}</div>
             <div class="flex-1 min-w-0">
               <div class="flex items-center justify-between gap-2 flex-wrap">
-                <span class="text-[11px] font-semibold" style="color:${c.text};">${stepDef.label}</span>
-                ${showCounter ? `<span class="text-[10px] font-mono" style="color:${c.text};opacity:0.75;">${st.current}/${st.total} · ${pct}%</span>` : (st.state === "skipped" ? '<span class="text-[10px] text-gray-400 italic">non activé</span>' : (st.state === "done" ? '<span class="text-[10px] text-green-700">terminé</span>' : ''))}
+                <span class="text-[12px] font-semibold" style="color:${textColor};">${stepDef.label}</span>
+                ${rightLabel}
               </div>
-              <div class="mt-1 progress-bar" style="height:4px;background:#fff;">
-                <div class="progress-fill" style="width:${pct}%;background:${c.fill};"></div>
-              </div>
-              ${msg ? `<div class="text-[10px] mt-1 italic truncate" style="color:${c.text};opacity:0.85;" title="${msg}">${msg}</div>` : ''}
+              <div class="mt-1.5">${barHtml}</div>
+              ${msgHtml}
             </div>
           </div>
         </div>
       `;
     }
 
-    function renderRunProgress(target, status, opts, costUsd, durationS) {
-      // Init / update state
-      if (!status._init && target.dataset.runProgress !== "1") {
-        _runProgressState = {};  // reset à chaque nouveau run
-        target.dataset.runProgress = "1";
+    // Tick pour faire rouler les phrases vibing (changement toutes les ~2.5s)
+    let _runProgressTick = 0;
+    let _runProgressTickerId = null;
+    function _ensureProgressTicker(target, status, opts, costUsd, durationS) {
+      if (_runProgressTickerId) return;  // déjà actif
+      _runProgressTickerId = setInterval(() => {
+        _runProgressTick++;
+        // Re-render avec le nouveau tick — sans toucher au state
+        _renderRunProgressInner(target, opts, costUsd, durationS);
+      }, 2500);
+    }
+    function _stopProgressTicker() {
+      if (_runProgressTickerId) {
+        clearInterval(_runProgressTickerId);
+        _runProgressTickerId = null;
       }
-      _updateStepState(status, opts || {});
+    }
 
-      // Compteur global (étapes non-skipped done / total non-skipped)
-      const all = PIPELINE_STEPS_DEF.filter(s => _runProgressState[s.id].state !== "skipped");
+    function _renderRunProgressInner(target, opts, costUsd, durationS) {
+      const all = PIPELINE_STEPS_DEF.filter(s => _runProgressState[s.id] && _runProgressState[s.id].state !== "skipped");
       const doneCount = all.filter(s => _runProgressState[s.id].state === "done").length;
-      const activeStep = PIPELINE_STEPS_DEF.find(s => _runProgressState[s.id].state === "active");
+      const activeStep = PIPELINE_STEPS_DEF.find(s => _runProgressState[s.id] && _runProgressState[s.id].state === "active");
       const globalPct = all.length > 0 ? Math.round(100 * doneCount / all.length) : 0;
 
-      const costStr = costUsd ? ` · $${costUsd.toFixed(4)} cumulés` : '';
-      const durationStr = durationS ? ` · ${durationS}s écoulés` : '';
-      const headerLabel = activeStep
-        ? `${doneCount}/${all.length} étapes terminées · ${activeStep.icon} ${activeStep.label} en cours`
-        : (doneCount === all.length && all.length > 0 ? `✅ Pipeline terminé (${all.length} étapes)` : `Initialisation…`);
+      const costStr = costUsd ? ` · $${costUsd.toFixed(3)}` : '';
+      const durationStr = durationS ? ` · ⏱ ${_formatElapsed(durationS)}` : '';
+
+      let headerLabel;
+      if (activeStep) {
+        headerLabel = `<span class="text-amber-900">${activeStep.icon} ${activeStep.label}</span><span class="text-amber-700"><span class="vibing-dot"></span><span class="vibing-dot"></span><span class="vibing-dot"></span></span>`;
+      } else if (doneCount === all.length && all.length > 0) {
+        headerLabel = `<span class="text-green-700">✅ Pipeline terminé · ${all.length} étapes</span>`;
+      } else {
+        headerLabel = `<span class="text-amber-900">Initialisation<span class="vibing-dot"></span><span class="vibing-dot"></span><span class="vibing-dot"></span></span>`;
+      }
 
       target.innerHTML = `
         <div class="mb-3">
-          <div class="flex items-center justify-between mb-1.5">
-            <span class="text-xs font-bold text-amber-900">${headerLabel}</span>
-            <span class="text-[11px] text-amber-700 font-mono">${globalPct}%${costStr}${durationStr}</span>
+          <div class="flex items-center justify-between mb-1.5 gap-2 flex-wrap">
+            <span class="text-xs font-bold">${headerLabel}</span>
+            <span class="text-[11px] font-mono text-amber-800">${doneCount}/${all.length} étapes · ${globalPct}%${costStr}${durationStr}</span>
           </div>
-          <div class="progress-bar" style="height:8px;background:#fff;border:1px solid #FCD34D;">
-            <div class="progress-fill" style="width:${globalPct}%;background:linear-gradient(62deg, #FFAF36 0%, #FFC536 100%);"></div>
+          <div class="step-bar-track" style="height:8px;background:rgba(0,0,0,0.05);border:1px solid #FCD34D;">
+            <div class="step-bar-fill-active" style="width:${globalPct}%"></div>
           </div>
         </div>
         <div class="space-y-1.5">
-          ${PIPELINE_STEPS_DEF.map(_renderStepRow).join("")}
+          ${PIPELINE_STEPS_DEF.map(s => _renderStepRow(s, _runProgressTick)).join("")}
         </div>
       `;
+    }
+
+    function renderRunProgress(target, status, opts, costUsd, durationS) {
+      if (target.dataset.runProgress !== "1") {
+        _runProgressState = {};
+        _runProgressTick = 0;
+        target.dataset.runProgress = "1";
+      }
+      _updateStepState(status, opts || {});
+      _renderRunProgressInner(target, opts || {}, costUsd, durationS);
+
+      // Lance/arrête le ticker selon qu'il y a une étape active
+      const hasActive = PIPELINE_STEPS_DEF.some(s => _runProgressState[s.id] && _runProgressState[s.id].state === "active");
+      if (hasActive) {
+        _ensureProgressTicker(target, status, opts, costUsd, durationS);
+      } else {
+        _stopProgressTicker();
+      }
     }
 
     // ----- Sélection photos par toggle (cochées par défaut, décocher au clic) -----
@@ -2688,7 +2822,9 @@ photo finale enhanced (jpeg)
         const v = e.ai_validation;
         const VIOLATION_LABELS = {
           invented_furniture: "Mobilier inventé (daybed/raft/etc.)",
+          invented_pool_float: "Bouée inventée (hors règle pipeline)",
           subject_on_water: "Personne sur l'eau",
+          shallow_water_illusion: "Piscine sans fond (eau trop basse sur sujets debout)",
           subject_on_furniture_top: "Personne debout sur meuble",
           subject_wrong_side_barrier: "Personne du mauvais côté barrière",
           scene_regenerated: "Scène quasi-régénérée",

@@ -312,7 +312,16 @@ def compute_score_components(entry: dict) -> dict:
 
     hero_bonus = 0 if python_says_disguised else int(hero * 0.3)
     removable_bonus = 30 if _all_issues_are_removable(a) else 0
-    transformable_bonus = 40 if is_transformable else 0
+    # ━ Transformable bonus : +40 par défaut, +80 sur les amenities (piscine, rooftop, spa,
+    #   cabana, transat, bar, food) car ces photos retravaillées en jour deviennent les
+    #   meilleures du pack. Sans ce boost, Gemini sous-estime trop le pillar (manque
+    #   "freedom/wellness" naturel dans les couleurs nuit) et la photo nuit perd contre
+    #   une photo jour banale qui n'aurait pourtant aucun intérêt narratif.
+    AMENITY_BUMP_CATEGORIES = {"piscine", "rooftop", "spa", "cabana", "transat", "bar", "f_and_b", "beach", "gym"}
+    if is_transformable:
+        transformable_bonus = 80 if primary_cat in AMENITY_BUMP_CATEGORIES else 40
+    else:
+        transformable_bonus = 0
 
     subtotal = pillar + dominance_mod + hero_bonus + removable_bonus + transformable_bonus
 
