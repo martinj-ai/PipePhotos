@@ -46,7 +46,30 @@ PROMPT_ENSOLEILLEMENT = (
     "bright warm daylight, and a clean sunlit atmosphere. "
     "The image should feel fully illuminated by daylight, with crisp highlights, "
     "balanced contrast, and natural warm tones. "
-    "Create a realistic, inviting, premium look with a clear sunny daytime ambiance."
+    "Create a realistic, inviting, premium look with a clear sunny daytime ambiance.\n\n"
+    "🚨 ABSOLUTE ARCHITECTURAL PRESERVATION (CRITICAL — non-negotiable) :\n"
+    "You may ONLY change the QUALITY of light (intensity, color temperature, direction, "
+    "softness). You MUST NOT add, remove, transform, or invent any architectural element :\n"
+    "- DO NOT transform alcoves, niches, walls, displays, columns, ceilings, panels, screens, "
+    "or any opaque/closed surface INTO windows, openings, skylights, glass facades, or "
+    "sources of natural light.\n"
+    "- DO NOT open new windows that don't exist in the input.\n"
+    "- DO NOT add views of city / sky / nature outside that were not visible originally.\n"
+    "- DO NOT remove or replace existing decor (artwork, neon signage, color panels, "
+    "wallpaper, murals) — even if it looks 'less aspirational' than sunlit walls.\n"
+    "- If the input has a colored neon-lit alcove → it remains a colored neon-lit alcove "
+    "in the output, just illuminated by additional warm daylight ambient light.\n"
+    "- The light SOURCES visible in the input (windows, lamps, skylights) stay at their "
+    "original positions, sizes and shapes — only their COLOR / INTENSITY can change.\n"
+    "- Walls, ceilings, floors keep their materials and patterns identical. Tiles, paint, "
+    "wood, carpet remain unchanged.\n\n"
+    "If you cannot brighten the scene without inventing new windows or removing existing "
+    "decor → return the image with ONLY a global warm color/exposure shift on the existing "
+    "pixels (no structural change). A photo that is just 'a bit brighter' is acceptable. "
+    "A photo with fabricated architecture is REJECTED.\n\n"
+    "NEGATIVE PROMPT : new windows, new openings, invented skylights, fabricated city view, "
+    "removed artwork, removed neon, replaced wall panels, walls turned into glass facades, "
+    "alcoves turned into windows, transformed displays, new architectural elements."
 )
 
 PROMPT_ENHANCEMENT = (
@@ -731,9 +754,9 @@ def pick_pool_float_hint(
     # Seuls les scènes piscine sont éligibles (rooftop ok ssi le mot pool est dedans)
     if "piscine" not in cat_lower and "pool" not in cat_lower:
         return None
-    # On exclut formellement la vue aérienne (figure trop petite, float invisible)
-    if "aerienne" in cat_lower or "aerial" in cat_lower:
-        return None
+    # 12/05/2026 (Martin) : les vues aériennes piscine RESTENT éligibles pour les bouées.
+    # Référence : hero homepage Dayuse avec bouée flamingo en vue aérienne. La bouée est
+    # parfaitement visible en aerial (contrairement à un humain qui serait trop petit).
 
     # Probabilité ajustée par vibe
     prob = POOL_FLOAT_BASE_PROBABILITY
@@ -1216,11 +1239,19 @@ def _pick_main_action(
 
 
 def _maybe_crop_step(analysis: dict | None) -> dict | None:
-    """Retourne un step crop si Gemini a recommandé un crop pertinent (60-95% conservé).
+    """DEPRECATED 12/05/2026 — Martin : "tej les anciens crops Gemini, on les corrige
+    dans les formats de sortie multi-format".
 
-    🛡 Garde-fou : si la photo a un humain bien visible (full_visible), on désactive le crop.
-    Trop risqué de couper la tête/corps. La photo originale est gardée telle quelle dans ces cas.
+    Le crop local Pillow basé sur recommended_crop Gemini était une optimisation de cadrage
+    redondante avec la step 5 multi-format qui re-crop tout pour chaque format cible.
+    En plus, ce crop modifiait le cadrage AVANT les steps IA → risque de dérive amplifiée
+    par les retouches. On le désactive : on garde la photo enhanced au cadrage natif et
+    le multi-format crop fait le travail de cadrage final par format de sortie.
+
+    Retourne toujours None. Code laissé en commentaire pour rétro-compat / debug rapide.
     """
+    return None
+    # ━━ Ancien comportement (gardé pour référence) ━━━━━━━━━━━━━━━━━━━━━━━━━
     if not analysis:
         return None
     rec = analysis.get("recommended_crop") or {}
@@ -1736,6 +1767,19 @@ VIOLATION_REINFORCEMENT = {
     ),
     "architecture_changed": (
         "DO NOT ALTER THE ARCHITECTURE: walls, structures, decor, plants, water shape, sky, and overall composition must remain identical to the input. Only requested transformations apply."
+    ),
+    "architecture_invented": (
+        "🚨 CRITICAL VIOLATION — FABRICATED ARCHITECTURE : in your previous output, you "
+        "INVENTED a structural element that does not exist in the input. Typical cases : "
+        "you transformed an opaque alcove / display / wall panel INTO a window opening onto "
+        "a sunlit exterior view ; you added a new skylight ; you replaced a wall with a glass "
+        "facade ; you fabricated a city skyline behind a former opaque surface. "
+        "ABSOLUTE RULE : you may ONLY change LIGHTING QUALITY (intensity, warmth, direction) "
+        "on the existing pixels. NEVER add new windows, new openings, new views, new "
+        "architectural elements. If the original has an opaque alcove with neon lights, the "
+        "output MUST keep that opaque alcove — only the light hitting it may change. "
+        "Re-do the transformation : keep ALL walls, displays, panels, alcoves, ceilings, "
+        "columns EXACTLY as they are in the input. Only adjust the global light tone."
     ),
     "lighting_break": (
         "MATCH EXISTING LIGHTING: shadows on added subjects must follow the same direction and softness as the existing shadows in the photo. No mismatched key light, no different time of day on the subject vs the scene."

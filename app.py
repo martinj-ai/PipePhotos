@@ -1064,6 +1064,15 @@ def api_run():
     outpaint_enabled = bool((payload or {}).get("outpaint_enabled", False))
     outpaint_quality = (payload or {}).get("outpaint_quality") or "flash"
     multiformat_result = None
+    # Log explicite des raisons de skip (Martin 12/05/2026 : "multi-format ne tourne plus")
+    if not output_formats:
+        print(f"[multi-format] SKIP : aucun format coché dans Step 3 (output_formats={output_formats})")
+    elif not enhanced_dir.exists():
+        print(f"[multi-format] SKIP : enhanced_dir absent → {enhanced_dir}")
+    else:
+        n_enhanced_jpg = len([p for p in enhanced_dir.glob("*.jpg") if p.is_file()])
+        if n_enhanced_jpg == 0:
+            print(f"[multi-format] SKIP : enhanced_dir vide ({enhanced_dir}) → 0 jpg trouvés. Causes possibles : enhance loop a crash sur toutes les photos, ou aucune photo n'avait d'analyse valide.")
     if output_formats and enhanced_dir.exists():
         try:
             import multi_format_cropper

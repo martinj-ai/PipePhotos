@@ -282,6 +282,10 @@ Le pipeline `/api/run` tourne **synchrone** dans la requête HTTP : un `POST /ap
 | Scenarios déterministes (catalogue persona×zone_type) | — | tracker scenario_id sur step | — | sync OK | Avant : prompt persona listait 4-6 PLACEMENT OPTIONS et Gemini choisissait → dérives (transat flottant inventé). Maintenant Python sélectionne UN scenario unique via safe_zones, prompt envoyé = description précise unique sans alternative |
 | Targeted clutter prompt (passe la liste `clutter_to_remove` explicite à Gemini Image) | — | — | `GEMINI_API_KEY` | async | Avant : prompt clutter générique → Gemini ne savait pas quoi retirer concrètement (ex bouée de sauvetage rouge identifiée par Vision mais pas retirée par Image). Maintenant : `build_remove_clutter_prompt([list])` met "REMOVE EXACTLY THESE" en tête |
 | Expose prompts IA dans le front (debug/transparence) | — | — | — | sync (UI only) | Bloc `details` "Prompts IA envoyés" déplie le prompt exact envoyé à Gemini pour chaque step IA. Utile pour debug + audit + démo Martin |
+| Multi-format skip diagnostic logs (Martin : "ne tourne plus") | — | — | — | sync OK | Côté serveur on log explicitement pourquoi multi-format est skip (output_formats vide / enhanced_dir absent / 0 jpg) pour debug |
+| Désactivation local_smart_crop (redondant avec multi-format) | — | — | — | sync OK | `_maybe_crop_step` retourne toujours None. Le cadrage final est géré par la step 5 multi-format par format de sortie |
+| Pool floats AUTORISÉS sur vues aériennes piscine | — | — | `GEMINI_API_KEY` | async | Référence Dayuse homepage : flamingo en vue aérienne. La bouée est visible en aerial (contrairement à un humain trop petit) |
+| Validator `architecture_invented` (NON whitelistée pour ai_lighting) | — | rejected_low_score | `GEMINI_API_KEY` | sync OK | Détecte la fabrication de fenêtres/baies/openings inventées (cas tricky alcôves néon → fenêtres ensoleillées). Séparée de `architecture_changed`, déclenche retry + fallback original. PROMPT_ENSOLEILLEMENT durci en parallèle |
 
 ### ⏳ Features à venir (à compléter)
 
