@@ -262,6 +262,10 @@ Le pipeline `/api/run` tourne **synchrone** dans la requête HTTP : un `POST /ap
 | Skip placeholders (variantes outpaint-required avec outpaint off) | — | flag `strategy='skip'` dans `multiformat_variants` | — | sync OK | OK |
 | Source enhanced ancrée dans la grille compare lightbox | — | — | — | sync (UI only) | OK |
 | Pool floats occasionnels dans prompts ai_add_character (déterministe par filename) | — | tracker `pool_float_used` dans table `enhanced_results` | — | sync OK | Le seed déterministe (hashlib sur filename) doit rester stable côté prod — c'est ce qui rend le résultat reproductible sur replay |
+| Déterminisme Gemini Vision : temperature=0.0 sur analyze | — | — | `GEMINI_API_KEY` | async OK | Sélection reproductible run-to-run sur même hôtel |
+| Gate strict Booking : amenities non déclarées Booking → bucket désactivé | — | — | — | sync OK | Plus de risque de classer en cabana une photo lookalike d'un autre hôtel |
+| Veto étendu sur warnings critiques (éclairage hors-brand, pas de focus amenity) | — | rejected_low_score table | — | sync OK | Applique à TOUS les buckets, pas que non-amenity |
+| Photo transformable (nuit/sombre) : pas de pénalité dominance | — | — | — | sync OK | Score +45 typique sur une photo piscine nuit, lui permet d'être rescue propre par ai_lighting |
 
 ### ⏳ Features à venir (à compléter)
 

@@ -119,13 +119,26 @@ MIN_PILLAR_FOR_NON_AMENITY = 130  # vue urbaine banale ~120 pillar → exclue, v
 # Mots-clés dans issues qui indiquent que la photo n'est pas pertinente pour la fiche Day Pass
 # (même si elle est techniquement classée hero_ext / detail). Si présents → exclue.
 DISQUALIFYING_ISSUE_KEYWORDS = (
+    # Manque d'amenity Dayuse
     "absence d'amenity", "absence d'aménité", "absence damenity",
     "amenity non mise en valeur", "aménité non mise en valeur",
     "ne représente pas une aménité",
-    "non pertinent pour dayuse",
-    "non pertinente pour dayuse",
-    "ne correspond pas aux do visuels",
+    "ne met pas en avant une amenity", "ne met pas en avant une aménité",
+    "ne met pas en avant",  # phrasé que Gemini retourne en pratique (Martin a vu "ne met pas en avant une amenity Dayuse")
     "pas une amenity dayuse", "pas d'amenity",
+    "pas de focus sur les aménités", "pas de focus sur les amenities",
+    "pas de focus sur les aménités dayuse", "pas de focus sur les amenities dayuse",
+    "pas de focus sur les amenités",  # variantes typo
+    # Hors-brand explicite
+    "non pertinent pour dayuse", "non pertinente pour dayuse",
+    "hors-brand", "hors brand", "off-brand",
+    "ne correspond pas aux do visuels",
+    "ne correspond pas aux do brand", "ne correspond pas à la charte",
+    # Éclairages artificiels/colorés agressifs (déjà problématique, ne peuvent pas être recolorés
+    # naturellement par ai_lighting — l'IA aurait du mal à savoir quoi mettre à la place)
+    "éclairage violet", "lumière violette", "ambiance violette",
+    "éclairage rgb", "éclairage néon",
+    "lumière artificielle dominante",
 )
 
 
@@ -277,16 +290,29 @@ def compute_score_components(entry: dict) -> dict:
     if python_says_disguised:
         effective_dominance = min(dominance, 20)
 
+    # ━ Cas spécial photo transformable (nuit / sombre / éclairage frio) ━
+    # Quand une photo a un éclairage défaillant, Gemini Vision sous-estime systématiquement
+    # la dominance de l'amenity (la piscine est sombre → il dit "0%" alors qu'elle prend
+    # 70% du cadre). On NE PÉNALISE PAS la dominance pour ces photos parce que l'IA
+    # ai_lighting va re-éclairer la scène et la dominance sera correcte au final.
+    # Sinon une belle photo de piscine en nuit sombre se prend -45 sur la dominance et est
+    # écartée au profit d'une photo plus banale mais bien éclairée.
+    is_transformable = _is_transformable(a)
+
     if effective_dominance >= 60:
         dominance_mod = int((effective_dominance - 30) * 0.8)
     elif effective_dominance < 30:
-        dominance_mod = -int((30 - effective_dominance) * 1.5)
+        if is_transformable:
+            # Pas de pénalité dominance pour les photos transformables (Gemini sous-estime à cause de l'éclairage)
+            dominance_mod = 0
+        else:
+            dominance_mod = -int((30 - effective_dominance) * 1.5)
     else:
         dominance_mod = 0
 
     hero_bonus = 0 if python_says_disguised else int(hero * 0.3)
     removable_bonus = 30 if _all_issues_are_removable(a) else 0
-    transformable_bonus = 40 if _is_transformable(a) else 0
+    transformable_bonus = 40 if is_transformable else 0
 
     subtotal = pillar + dominance_mod + hero_bonus + removable_bonus + transformable_bonus
 
@@ -336,21 +362,24 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
     """
     amenities = rp_data.get("amenities_normalized", {})
 
-    # ━━ Compte les photos qui tagguent chaque amenity (avant filtrage) ━━
-    # Sert à activer un bucket même si Booking/RP n'a pas listé l'amenity (mais qu'on voit
-    # 2+ photos qui suggèrent qu'elle existe — l'hôtel a peut-être un spa que Booking n'a pas
-    # déclaré explicitement). Le rôle de l'utilisateur des photos est de COMPLÉTER, pas restreindre.
+    # ━━ Compte les photos qui tagguent chaque amenity (purement diagnostic) ━━
+    # Note 11/05/2026 (Martin) : "n'affiche les photos que des amenities identifiées sur la page
+    # Booking". Si Booking ne déclare PAS cabana, on n'affiche pas le bucket cabana même si 5
+    # photos lui ressemblent — risque de classer des photos d'une AUTRE installation similaire
+    # (lounges, daybeds tropicaux d'un autre hôtel revendiqué en stock photo, etc.) comme cabana.
+    # On compte quand même pour audit/debug.
     amenity_photo_counts: dict[str, int] = {}
     for entry in analyses:
         targets = gemini_categories_to_targets(entry.get("analysis") or {})
         for t in targets:
             amenity_photo_counts[t] = amenity_photo_counts.get(t, 0) + 1
 
-    PHOTOS_THRESHOLD_FOR_AUTO_ACTIVATION = 2
-
-    # 1) Shopping list active : amenity Booking OU 2+ photos identifient cette amenity
+    # 1) Shopping list active : STRICT Booking — seules les amenities déclarées par Booking
+    #    sont retenues. Les buckets non-amenity (hero_ext, detail) restent toujours actifs.
+    #    Suppression de l'auto-activation par 2+ photos (cf. note ci-dessus).
     active_targets = {}
-    auto_activated: dict[str, bool] = {}  # buckets activés par photos (pas par Booking)
+    auto_activated: dict[str, bool] = {}  # toujours False désormais — gardé pour rétro-compat schema
+    rejected_buckets: dict[str, int] = {}  # cat → nb photos rejetées car amenity non déclarée Booking
     for cat, conf in TARGETS.items():
         req = conf["required_amenity"]
         if req is None:
@@ -359,12 +388,11 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
             # Activé par Booking/RP — on fait confiance, on peut générer si manquant
             active_targets[cat] = dict(conf)
             auto_activated[cat] = False
-        elif amenity_photo_counts.get(cat, 0) >= PHOTOS_THRESHOLD_FOR_AUTO_ACTIVATION:
-            # Activé par les photos uniquement — on garde les photos mais on NE GÉNÈRE PAS d'IA
-            # (génération réservée aux amenities déclarées Booking, pour éviter de fabriquer
-            # un faux spa pour un hôtel qui n'en a pas)
-            active_targets[cat] = dict(conf)
-            auto_activated[cat] = True
+        else:
+            # Amenity non déclarée Booking → bucket OFF, même si 5 photos lui ressemblent
+            n_photos = amenity_photo_counts.get(cat, 0)
+            if n_photos > 0:
+                rejected_buckets[cat] = n_photos
 
     # 2) Bucket les photos par catégories cibles (multi-tagging : 1 photo peut être dans plusieurs buckets)
     buckets: dict[str, list[dict]] = {cat: [] for cat in active_targets}
@@ -422,6 +450,24 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
                 )
             )
 
+            # ━ Veto par mot-clé d'issue (applicable à TOUS les buckets) ━
+            # 11/05/2026 (Martin) : on étend le veto à TOUS les buckets, pas que non-amenity.
+            # Exemples vus : photo interieur_commun avec "éclairage violet dominant hors-brand"
+            # à 212/300 → était sélectionnée alors qu'elle aurait dû être exclue.
+            issues_lower = " ".join((a.get("issues") or [])).lower()
+            disqualifying_match = next(
+                (kw for kw in DISQUALIFYING_ISSUE_KEYWORDS if kw in issues_lower),
+                None,
+            )
+            if disqualifying_match:
+                rejected_low_score.append({
+                    "filename": entry["input"]["filename"],
+                    "category": cat,
+                    "score": score,
+                    "reason": f"issue disqualifiante détectée : '{disqualifying_match}'",
+                })
+                continue
+
             # Garde-fou non-amenity : pour hero_ext/detail, on regarde le PILLAR brut
             # (sans les bonus transformable/removable/hero) et on rejette si trop bas.
             # Évite qu'une photo d'immeuble banal soit gonflée artificiellement par +40 transformable.
@@ -434,22 +480,6 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
                         "category": cat,
                         "score": score,
                         "reason": f"pillar brut {pillar} < {MIN_PILLAR_FOR_NON_AMENITY} (non-amenity, pas de rescue par bonus)",
-                    })
-                    continue
-
-                # Bloquage supplémentaire : si Gemini a explicitement noté que la photo n'est PAS
-                # pertinente Dayuse (absence d'amenity, ne correspond pas DO visuels, etc.) → exclue
-                issues_lower = " ".join((a.get("issues") or [])).lower()
-                disqualifying_match = next(
-                    (kw for kw in DISQUALIFYING_ISSUE_KEYWORDS if kw in issues_lower),
-                    None,
-                )
-                if disqualifying_match:
-                    rejected_low_score.append({
-                        "filename": entry["input"]["filename"],
-                        "category": cat,
-                        "score": score,
-                        "reason": f"issue disqualifiante détectée : '{disqualifying_match}'",
                     })
                     continue
 
@@ -586,6 +616,22 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
         seen_bonus.add(fname)
         bonus_unique.append(b)
 
+    # ━━ Ajout 11/05/2026 : on injecte aussi dans rejected_low_score les photos dont la cat
+    # principale n'est pas dans une amenity Booking-declared. Permet à Martin de voir pourquoi
+    # une photo cabana de Yotel a été ignorée (cabana absente de Booking).
+    for cat, n_photos in rejected_buckets.items():
+        # On retrouve les entrées qui taguent cette cat pour les expliciter
+        for entry in analyses:
+            targets = gemini_categories_to_targets(entry.get("analysis") or {})
+            if cat not in targets:
+                continue
+            rejected_low_score.append({
+                "filename": entry["input"]["filename"],
+                "category": cat,
+                "score": score_of_entry(entry),
+                "reason": f"amenity '{cat}' non déclarée par Booking (gate strict) — bucket désactivé",
+            })
+
     return {
         "hotel_name": rp_data.get("name"),
         "vibe": rp_data.get("vibe_primary"),
@@ -594,6 +640,7 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
         "by_category": by_category,
         "unmapped": unmapped_summary,
         "rejected_low_score": rejected_low_score,
+        "rejected_buckets_not_in_booking": rejected_buckets,  # cat → nb photos taguées mais non déclarées Booking
         "rescued_transformable": rescued_transformable,
         "bonus_lifestyle": [
             {"filename": b["entry"]["input"]["filename"], "amenity": b["amenity"], "score": b["score"]}

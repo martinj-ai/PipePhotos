@@ -211,7 +211,10 @@ def _call_gemini(img: Image.Image, model) -> tuple[dict, int, dict]:
                 [SYSTEM_PROMPT, img],
                 generation_config={
                     "response_mime_type": "application/json",
-                    "temperature": 0.2,
+                    # temperature=0 → résultats déterministes run-to-run sur la même photo.
+                    # Avant on était à 0.2 → ça expliquait les sélections différentes que Martin
+                    # observait à chaque relance sur le même hôtel.
+                    "temperature": 0.0,
                 },
             )
             duration_ms = int((time.time() - t0) * 1000)
