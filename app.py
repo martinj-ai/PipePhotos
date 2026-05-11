@@ -907,6 +907,7 @@ def api_run():
             vibe=vibe,
             add_character=(filename in add_character_filenames),
             persona_override=persona_per_filename.get(filename),
+            photo_filename=filename,
         )
         input_path = Path(a["input"]["path_absolute"])
         # === Mode postprocess : skip enhance si fichier existe déjà ===

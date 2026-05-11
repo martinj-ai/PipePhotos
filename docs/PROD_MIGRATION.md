@@ -260,6 +260,8 @@ Le pipeline `/api/run` tourne **synchrone** dans la requête HTTP : un `POST /ap
 | Replay postprocess strict (skip dedup_vlm + amenity_verifier + photo_generator) | lecture cache `enhanced/` | reads `photo_analyses` | — | sync OK | **Important** : en prod aussi, le mode postprocess doit court-circuiter tous les appels Gemini de sélection (économie 1-2 min + ~$0.05 par run) |
 | Multi-format lightbox grille comparative | lecture `multiformat/` | reads `multiformat_variants` | — | sync (UI only) | Render N variantes côte-à-côte (CSS grid) — pas d'impact backend ; côté CDN il faut juste assurer que toutes les URLs des variantes soient servies |
 | Skip placeholders (variantes outpaint-required avec outpaint off) | — | flag `strategy='skip'` dans `multiformat_variants` | — | sync OK | OK |
+| Source enhanced ancrée dans la grille compare lightbox | — | — | — | sync (UI only) | OK |
+| Pool floats occasionnels dans prompts ai_add_character (déterministe par filename) | — | tracker `pool_float_used` dans table `enhanced_results` | — | sync OK | Le seed déterministe (hashlib sur filename) doit rester stable côté prod — c'est ce qui rend le résultat reproductible sur replay |
 
 ### ⏳ Features à venir (à compléter)
 

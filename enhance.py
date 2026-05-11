@@ -241,11 +241,79 @@ def compute_target_humans(persona: str, capacity: int) -> int:
     return fn(capacity)
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Pool float props (bouées rigolotes)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Martin (11/05/2026) : on aime bien voir des bouées fun (flamant rose, ananas,
+# donut…) dans les photos de piscine — ça donne un côté playful crédible —
+# MAIS PAS systématique sinon ça devient cliché. On le déclenche :
+#   • uniquement sur catégorie 'piscine' / 'rooftop' (avec piscine)
+#   • probabilité ~35% (deterministe par photo via hash filename → reproductible)
+#   • vibes "Family-Friendly" / "Party" / "Trendy" : +20% (= ~55%)
+#   • vibes "Luxe" / "Serene" : -20% (= ~15%, garde le côté minimaliste)
+# Si déclenché : on autorise UN float dans le prompt, avec règles strictes
+# (taille plausible, subject ON or NEAR the float, jamais multiple floats).
+import hashlib
+
+POOL_FLOATS_OPTIONS = [
+    "a classic pink inflatable flamingo float",
+    "a giant inflatable pineapple float (yellow with green leaves)",
+    "a colorful donut pool float (pink with sprinkles)",
+    "a white inflatable swan float",
+    "a watermelon slice inflatable float (pink and green)",
+    "a translucent pastel-colored inflatable ring (clean minimal aesthetic)",
+]
+
+POOL_FLOAT_BASE_PROBABILITY = 0.35
+
+
+def pick_pool_float_hint(
+    category: str | None,
+    vibe: str | None,
+    photo_filename: str | None,
+) -> str | None:
+    """Retourne la description du float à autoriser, ou None pour skip.
+
+    Déterministe par filename → un même run replay donne le même résultat.
+    Pas systématique : la randomisation déterministe est CRITIQUE pour que ça
+    reste "occasionnel et naturel" comme demandé par Martin.
+    """
+    if not category:
+        return None
+    cat_lower = category.lower()
+    # Seuls les scènes piscine sont éligibles (rooftop ok ssi le mot pool est dedans)
+    if "piscine" not in cat_lower and "pool" not in cat_lower:
+        return None
+    # On exclut formellement la vue aérienne (figure trop petite, float invisible)
+    if "aerienne" in cat_lower or "aerial" in cat_lower:
+        return None
+
+    # Probabilité ajustée par vibe
+    prob = POOL_FLOAT_BASE_PROBABILITY
+    if vibe in ("Family-Friendly", "Party", "Trendy"):
+        prob += 0.20
+    elif vibe in ("Luxe", "Serene"):
+        prob -= 0.20
+    prob = max(0.0, min(1.0, prob))
+
+    # Random déterministe par filename → reproductible sur replay
+    seed_str = photo_filename or ""
+    h = int(hashlib.sha256(seed_str.encode("utf-8")).hexdigest()[:8], 16)
+    bucket = (h % 1000) / 1000.0  # ∈ [0, 1)
+    if bucket >= prob:
+        return None
+
+    # Choix du float (déterministe aussi)
+    idx = h % len(POOL_FLOATS_OPTIONS)
+    return POOL_FLOATS_OPTIONS[idx]
+
+
 def build_persona_prompt(persona: str, category: str, vibe: str | None = None,
                          safe_zones: list[str] | None = None,
                          unsafe_zones: list[str] | None = None,
                          max_humans: int | None = None,
-                         capacity: int | None = None) -> str:
+                         capacity: int | None = None,
+                         pool_float_hint: str | None = None) -> str:
     """Construit le prompt ajout personnage à partir des templates validés Martin.
 
     Pattern issu de ses prompts Higgsfield :
@@ -316,9 +384,42 @@ Maximum subjects to add for this scene: {max_h} (less is better).
 ABSOLUTE INSTRUCTION : DO NOT ADD any human subject to this image. Return the image unchanged.
 """
 
-    return f"""🛑 RULE #1 — SUBJECT-ONLY ADDITION (THE MOST IMPORTANT RULE OF ALL):
+    # ━━ Pool float (optionnel, déclenché ~35% sur piscine ; voir pick_pool_float_hint) ━━
+    # Si pool_float_hint est set → on autorise UN float décrit, on l'enlève de la
+    # forbidden list, et on précise les règles d'intégration. Sinon : règle stricte
+    # actuelle (aucun float, pas de pool noodle).
+    if pool_float_hint:
+        subject_only_intro = f"""You are ONLY allowed to add human subject(s), the items they personally hold or wear (swimwear, dress, sunglasses, hat, drink in hand, sarong, towel held by them), AND optionally a single pool float that the subject is using (see "POOL FLOAT" block below).
 
-You are ONLY allowed to add human subject(s) — and only the items they personally hold or wear (swimwear, dress, sunglasses, hat, drink in hand, sarong, towel held by them).
+You MUST NEVER add ANY of the following — NO EXCEPTIONS:
+- A lounger, daybed, sofa, sun lounger, beach chair, bench, table, ottoman, bed
+- A pool ladder, pool steps, pool rail, handrail, ladder of any kind (if there is no ladder visible in the input, DO NOT add one)
+- More than ONE pool float — exactly one or zero
+- A pool noodle, separate floating drink tray, foam mat, raft other than the requested float
+- A pillow, towel placed on the ground/lounger, blanket, rug
+- A plant, vase, decoration, lamp, candle, sign, board
+- Any new equipment, drinkware (a drink in their HAND is OK; a tray, additional glasses on a fictional table are NOT OK)
+- Any modification to existing pool water shape, decking size, walls, doors, windows, pillars, plants, fences, railings"""
+        pool_float_block = f"""
+
+🍩 POOL FLOAT (OPTIONAL, ONLY IF NATURAL) :
+You MAY introduce ONE pool float in the water — specifically : {pool_float_hint}.
+
+Strict rules for the float:
+- Place it IN the water of the existing pool, in a zone that is ALREADY empty water (not over the existing decking, not blocking existing furniture).
+- The float must be ENGAGED with a subject : either the subject is lounging on/in it, holding it, sitting next to it, OR pushing it gently. A solo decorative float floating empty is acceptable ONLY if the pool would otherwise look completely empty and lifeless.
+- Realistic scale : the float must be in proportion with the pool size. NEVER make it bigger than the pool or covering more than ~25% of the visible water surface.
+- Realistic interaction with water : water displacement around the float, subtle wake if motion implied, partial reflection on water surface.
+- Color/style must remain photorealistic — no over-saturated CGI candy palette. Slight wear/use is fine.
+- The float counts AS the subject's support : if the subject is ON the float, the water-depth rules above are relaxed (they can be at the surface, lying on the float). But the float must look stable, not tipping.
+- If the pool is too small (< 3m × 3m visible water surface), DO NOT add a float — return without one.
+- If the scene aesthetic is clearly minimalist / spa / serene (sleek architecture, dark water, no warm colors), DO NOT add a float — return without one.
+- The float CANNOT replace any existing furniture or decor.
+
+If you cannot place this float naturally according to ALL the rules above → DO NOT add it. The photo without a float is always acceptable.
+"""
+    else:
+        subject_only_intro = """You are ONLY allowed to add human subject(s) — and only the items they personally hold or wear (swimwear, dress, sunglasses, hat, drink in hand, sarong, towel held by them).
 
 You MUST NEVER add ANY of the following — NO EXCEPTIONS:
 - A lounger, daybed, sofa, sun lounger, beach chair, raft, float, pool noodle, bench, table, ottoman, bed
@@ -326,7 +427,12 @@ You MUST NEVER add ANY of the following — NO EXCEPTIONS:
 - A pillow, towel placed on the ground/lounger, blanket, rug
 - A plant, vase, decoration, lamp, candle, sign, board
 - Any new equipment, drinkware (a drink in their HAND is OK; a tray, additional glasses on a fictional table are NOT OK)
-- Any modification to existing pool water shape, decking size, walls, doors, windows, pillars, plants, fences, railings
+- Any modification to existing pool water shape, decking size, walls, doors, windows, pillars, plants, fences, railings"""
+        pool_float_block = ""
+
+    return f"""🛑 RULE #1 — SUBJECT-ONLY ADDITION (THE MOST IMPORTANT RULE OF ALL):
+
+{subject_only_intro}
 
 You MUST NEVER reduce / resize / move / shrink ANY existing element of the scene to "make room" for the subject.
 For example: shrinking the pool to add a lounger, or moving real loungers to add a fictional one — STRICTLY FORBIDDEN.
@@ -358,6 +464,7 @@ If you cannot add the subject without modifying the surrounding scene, choose op
 
 Now, naturally add {persona_desc} to this exact scene.
 {safe_zones_block}
+{pool_float_block}
 
 ACTION & CONTEXT:
 {action_hint}. {vibe_mood}.
@@ -440,7 +547,7 @@ NEGATIVE PROMPT (HARD avoid):
 - altering, replacing, or "beautifying" any architecture, window, balcony, fire escape, neighbouring building, or skyline visible in background
 - 🚨 SHRINKING / RESIZING / MOVING any existing element (pool, deck, plants, furniture, walls) to "make space" for the subject — the existing scene must remain pixel-identical in size and position
 - adding any new plant, vase, prop, decor, lamp, food/drink, or accessory not requested for the subject(s)
-- inventing, adding, or hallucinating new furniture — ESPECIALLY a new lounger, daybed, beach chair, sofa, raft, float, towel-on-the-ground, ottoman, table, pool ladder, pool steps, handrail, ladder of any kind — that is not 100% clearly visible in the input
+- inventing, adding, or hallucinating new furniture — ESPECIALLY a new lounger, daybed, beach chair, sofa, raft, towel-on-the-ground, ottoman, table, pool ladder, pool steps, handrail, ladder of any kind — that is not 100% clearly visible in the input{(" (NOTE: ONE pool float is conditionally allowed per the POOL FLOAT block above — but ONLY that one and ONLY following its rules)" if pool_float_hint else " ; floats / pool noodles also forbidden")}
 - subject wearing street clothes / long dress / robe / business attire on a pool scene — the subject MUST be in proper SWIMWEAR (bikini / one-piece swimsuit / monokini) on pool scenes
 - subjects standing on top of water as if walking on it, or floating dry without a flotation device
 - subjects standing in pool with knees / thighs / hips / belly button / swimsuit waistband / shorts waistband visible ABOVE the water (impossible without a step/shelf — water must reach CHEST level for standing adults)
@@ -468,6 +575,7 @@ def _pick_main_action(
     vibe: str | None = None,
     add_character: bool = False,
     persona_override: str | None = None,
+    photo_filename: str | None = None,
 ) -> dict:
     """Choisit l'action principale (hors crop) à appliquer à la photo."""
     if not analysis:
@@ -543,16 +651,20 @@ def _pick_main_action(
                 "prompt": None,
                 "reason": "ajout perso skip (Gemini : aucune safe_zone identifiée — l'IA inventerait du décor)",
             }
+        # ━ Pool float occasionnel (déterministe par filename, voir pick_pool_float_hint) ━
+        pool_float = pick_pool_float_hint(cat, vibe, photo_filename)
         return {
             "action": "ai_add_character",
             "prompt": build_persona_prompt(
                 persona, cat, vibe,
                 safe_zones=safe_zones, unsafe_zones=unsafe_zones,
                 max_humans=max_h, capacity=capacity_total,
+                pool_float_hint=pool_float,
             ),
-            "reason": f"ajout personnage IA ({persona}, target={compute_target_humans(persona, capacity_total or 2)}) sur {cat or 'scène vide'}",
+            "reason": f"ajout personnage IA ({persona}, target={compute_target_humans(persona, capacity_total or 2)}) sur {cat or 'scène vide'}" + (f" + bouée 🍩 {pool_float[:30]}…" if pool_float else ""),
             "persona_used": persona,
             "capacity_used": capacity_total,
+            "pool_float_used": pool_float,
         }
 
     # 4. Trop de monde (> 4 personnes) → suppression
@@ -701,6 +813,7 @@ def pick_strategy(
     vibe: str | None = None,
     add_character: bool = False,
     persona_override: str | None = None,
+    photo_filename: str | None = None,
 ) -> dict:
     """Construit la séquence d'actions à appliquer à une photo (chaînage possible, max 2 IA).
 
@@ -720,7 +833,7 @@ def pick_strategy(
     - Sinon : step principale unique
     """
     crop_step = _maybe_crop_step(analysis)
-    main_step = _pick_main_action(analysis, category, personas_allowed, vibe, add_character, persona_override)
+    main_step = _pick_main_action(analysis, category, personas_allowed, vibe, add_character, persona_override, photo_filename)
 
     # ━ Si on a déjà un step IA (clutter / lighting / add_character), on évite le crop additionnel ━
     # Le crop modifie le cadrage, l'IA ensuite peut amplifier la dérive (régénération sur image cropée).
