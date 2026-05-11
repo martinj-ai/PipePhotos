@@ -278,6 +278,10 @@ Le pipeline `/api/run` tourne **synchrone** dans la requête HTTP : un `POST /ap
 | Transformable bonus bumped à +80 sur les amenities (vs +40 sur hero_ext/detail) | — | — | — | sync OK | Force les photos piscine/rooftop/spa/etc. nuit/sombre à battre des photos jour banales — sinon Gemini sous-estime trop le pillar |
 | Validator violation `shallow_water_illusion` (piscine sans fond) | — | — | `GEMINI_API_KEY` | sync OK | Détecte les humains debout en eau aux genoux/cuisses sans marche visible — déclenche retry avec prompt durci |
 | Progress UI v2 : steps barres pointillées (pending) + shimmer animé (active) + vibing dots + temps mm:ss | — | — | — | sync (UI only) | Vraiment plus lisible : pending ≠ done visuellement, message qui tourne sur l'étape active |
+| Slot 1 : POOL en priorité absolue (Tier 0) si Booking le déclare | — | — | — | sync OK | Avant : cabana/rooftop/beach gagnaient parfois. Maintenant pool prend systématiquement le slot 1 si dispo |
+| Scenarios déterministes (catalogue persona×zone_type) | — | tracker scenario_id sur step | — | sync OK | Avant : prompt persona listait 4-6 PLACEMENT OPTIONS et Gemini choisissait → dérives (transat flottant inventé). Maintenant Python sélectionne UN scenario unique via safe_zones, prompt envoyé = description précise unique sans alternative |
+| Targeted clutter prompt (passe la liste `clutter_to_remove` explicite à Gemini Image) | — | — | `GEMINI_API_KEY` | async | Avant : prompt clutter générique → Gemini ne savait pas quoi retirer concrètement (ex bouée de sauvetage rouge identifiée par Vision mais pas retirée par Image). Maintenant : `build_remove_clutter_prompt([list])` met "REMOVE EXACTLY THESE" en tête |
+| Expose prompts IA dans le front (debug/transparence) | — | — | — | sync (UI only) | Bloc `details` "Prompts IA envoyés" déplie le prompt exact envoyé à Gemini pour chaque step IA. Utile pour debug + audit + démo Martin |
 
 ### ⏳ Features à venir (à compléter)
 

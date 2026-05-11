@@ -111,7 +111,34 @@ NEGATIVE PROMPT:
 
 
 # === Suppression clutter (parasites : objets, mais aussi équipements techniques visibles) ===
-PROMPT_REMOVE_CLUTTER = """🛑 ADDITION-FREE RULE (#1, MOST IMPORTANT) :
+# Note 12/05/2026 : on garde le mega-prompt comme TEMPLATE GÉNÉRIQUE (fallback si pas
+# d'analyse Gemini), MAIS le builder build_remove_clutter_prompt() ci-dessous le préfixe
+# avec la liste EXPLICITE des éléments clutter_to_remove identifiés par Gemini Vision
+# pour CETTE photo précise. Sans ça, Gemini Image ne sait pas quoi retirer concrètement
+# (cf. bouée de sauvetage rouge identifiée mais pas retirée).
+
+def build_remove_clutter_prompt(clutter_list: list[str] | None = None) -> str:
+    """Construit un prompt clutter ciblé sur les éléments précis listés par Gemini Vision.
+
+    Si la liste est vide → fallback sur le prompt générique uniquement.
+    Si la liste a des entrées → on les met EN TÊTE du prompt avec "REMOVE EXACTLY THESE".
+    """
+    targeted_block = ""
+    if clutter_list:
+        items = "\n".join(f"  {i+1}. {desc}" for i, desc in enumerate(clutter_list))
+        targeted_block = f"""🎯 EXPLICIT TARGETED CLEANUP — REMOVE EXACTLY THESE ELEMENTS (identified by a prior vision pass on this exact photo) :
+
+{items}
+
+These are the PRIMARY removal targets for this image. Find them, remove them, and reconstruct the area underneath/behind them (water surface, wall texture, plant continuation, tile pattern, sky, etc.) seamlessly. After removing these, also look for any additional clutter from the generic list below — but the explicit items above MUST be removed first.
+
+If an item in the list above is ambiguous, prefer LEAVING it rather than removing the wrong thing — false positives are worse than missed clutter.
+
+"""
+    return targeted_block + _PROMPT_REMOVE_CLUTTER_TEMPLATE
+
+
+_PROMPT_REMOVE_CLUTTER_TEMPLATE = """🛑 ADDITION-FREE RULE (#1, MOST IMPORTANT) :
 This task is REMOVAL ONLY. You are NEVER allowed to ADD anything to the image — no people, no furniture, no plants, no birds, no clouds, no construction equipment (cranes, scaffolding, trucks, vehicles), no signs, no text, no shadows, no decoration. NOTHING NEW.
 You may ONLY remove existing visible clutter elements and replace the area with what was naturally behind/under them (sky, wall, floor, fabric).
 
@@ -161,6 +188,12 @@ NEGATIVE PROMPT (HARD avoid):
 - color shifts in regions that were not edited"""
 
 
+# Alias rétro-compat : si du code appelle encore PROMPT_REMOVE_CLUTTER en variable simple
+# (sans la liste targetted), il aura le template générique. Mais TOUS les call sites
+# devraient passer par build_remove_clutter_prompt(clutter_to_remove) désormais.
+PROMPT_REMOVE_CLUTTER = _PROMPT_REMOVE_CLUTTER_TEMPLATE
+
+
 # === Suppression humain (cas trop chargé > 4 personnes) ===
 PROMPT_REMOVE_PEOPLE = """Remove all people from this image while keeping the environment EXACTLY identical.
 
@@ -180,7 +213,374 @@ Style: photorealistic editorial lifestyle, no artistic filter, no over-processin
 Negative prompt: aggressive cropping, lost elements, distortion, artistic filter."""
 
 
-# === Templates personnages — basés sur les prompts validés Martin ===
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SCENARIOS DÉTERMINISTES (Martin 12/05/2026)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Avant : le prompt persona donnait 4-6 "PLACEMENT OPTIONS" à Gemini Image
+# qui choisissait — d'où la dérive observée (transat flottant inventé,
+# couple debout dans piscine sans fond, etc.).
+# Après : on choisit UN scenario unique en Python via pick_human_scenario(),
+# en se basant sur les safe_zones Gemini Vision. Le prompt envoyé à Nano
+# Banana décrit UNE situation précise sans alternative. Plus de latitude
+# créative → résultats reproductibles, conformes brand.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _classify_safe_zone(zone_text: str) -> str:
+    """Mappe une description textuelle de safe_zone Gemini vers un type de scenario.
+
+    Returns: l'un de {"in_water", "pool_edge", "lounger", "cabana_daybed",
+                       "dining_table", "rooftop_deck", "outdoor_deck",
+                       "indoor_seating", "gym_mat", "unknown"}
+    """
+    z = (zone_text or "").lower()
+    # Eau / piscine — priorité sur edge si "in the water" est explicite
+    if any(k in z for k in ["in the pool water", "in the water", "in the pool", "pool water",
+                              "swimming", "submerged", "wading in"]):
+        return "in_water"
+    if any(k in z for k in ["pool edge", "pool rim", "rim of the pool", "edge of the pool",
+                              "sitting at the edge", "edge of pool"]):
+        return "pool_edge"
+    if any(k in z for k in ["lounger", "sun lounger", "sunbed", "sun bed", "deck chair", "transat"]):
+        return "lounger"
+    if any(k in z for k in ["cabana", "daybed", "day bed", "pool bed"]):
+        return "cabana_daybed"
+    if any(k in z for k in ["dining table", "restaurant table", "around the table",
+                              "at the table", "bar counter"]):
+        return "dining_table"
+    if any(k in z for k in ["rooftop", "roof terrace", "skydeck"]):
+        return "rooftop_deck"
+    if any(k in z for k in ["yoga mat", "yoga", "gym floor", "stretching mat"]):
+        return "gym_mat"
+    if any(k in z for k in ["sofa", "armchair", "lounge chair", "bench", "indoor seat"]):
+        return "indoor_seating"
+    if any(k in z for k in ["deck", "patio", "terrace", "ground", "floor"]):
+        return "outdoor_deck"
+    return "unknown"
+
+
+# Catalogue des scenarios. Chaque entrée = (persona, zone_type) → bloc texte précis.
+# Le bloc DOIT décrire UNE seule pose, position, attribut. Pas de "ou", pas de "(1)/(2)/(3)".
+# Termes anglais car Gemini Image y répond mieux en pratique.
+_SCENARIO_CATALOG: dict[tuple[str, str], str] = {
+
+    # ━━ COUPLES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ("couples", "in_water"): (
+        "Place exactly TWO subjects in the existing pool water — a mixed-race adult couple "
+        "(one woman late 20s, one man late 20s). Both are STANDING in chest-deep water "
+        "near the visible center of the pool. Water level on both : sternum / upper-chest "
+        "(only upper torso, shoulders, neck and head are above water — belly button, hips, "
+        "thighs MUST be fully submerged). She wears a sleek navy one-piece swimsuit. He wears "
+        "classic dark swim shorts. They face each other in profile to the camera, sharing a "
+        "soft natural smile mid-conversation. Their hands are clasped between them at chest "
+        "height in the water. Hair slightly wet at the temples. Soft water ripples around both "
+        "bodies. They do NOT look at the camera."
+    ),
+    ("couples", "pool_edge"): (
+        "Place exactly TWO subjects sitting on the dry pool deck right at the pool edge — "
+        "a mixed-race adult couple (one woman late 20s, one man late 20s). They sit side by "
+        "side with feet and calves submerged in the pool water (water at mid-calf). Both lean "
+        "slightly toward each other, sharing a candid laughing moment. She wears a chic bikini "
+        "with a thin gold chain ; he wears swim shorts, no shirt. He holds a tall glass of cold "
+        "drink in his outer hand. Neither looks at the camera ; they look at each other. Soft "
+        "water reflections on their lower legs."
+    ),
+    ("couples", "lounger"): (
+        "Place exactly TWO subjects on two adjacent existing sun loungers visible in the photo "
+        "— a mixed-race adult couple (one woman late 20s, one man late 20s). The woman reclines "
+        "on the lounger closest to the camera, sunglasses on, reading a slim paperback book. "
+        "The man reclines on the adjacent lounger, propped on one elbow, looking out at the "
+        "scene with a relaxed half-smile. Both wear stylish swimwear (her: olive one-piece ; "
+        "him: navy swim shorts). They do NOT touch ; they share calm relaxed energy. Neither "
+        "looks at the camera."
+    ),
+    ("couples", "cabana_daybed"): (
+        "Place exactly TWO subjects together on the existing cabana daybed / pool sofa visible "
+        "in the photo — a mixed-race adult couple (one woman late 20s, one man late 20s). They "
+        "sit close, the woman leaning her shoulder against his, both gazing out at the pool. "
+        "She wears a chic bikini with a light sarong tied at her hips ; he wears swim shorts, "
+        "no shirt. He holds a tall iced drink in one hand resting on his knee. Soft mid-day "
+        "shadow under the cabana canopy. Neither looks at the camera ; they share a quiet "
+        "candid moment."
+    ),
+    ("couples", "dining_table"): (
+        "Place exactly TWO subjects around the existing dining table visible in the photo — "
+        "a mixed-race adult couple (one woman late 20s, one man late 20s) sitting across from "
+        "each other. The woman is pouring a glass of sparkling water for him while smiling. "
+        "Both wear casual smart attire (her: light linen dress, him: linen shirt). One existing "
+        "wine glass and one water glass on the table. They are mid-conversation, NOT looking at "
+        "the camera."
+    ),
+    ("couples", "rooftop_deck"): (
+        "Place exactly TWO subjects standing on the rooftop deck near the railing (on the safe "
+        "interior side of the existing balustrade) — a mixed-race adult couple (one woman late "
+        "20s, one man late 20s). They stand close, the woman's shoulder leaning against him, "
+        "both looking out at the city skyline (NOT at the camera). She wears a chic light "
+        "summer dress, he wears a linen shirt and tailored shorts. He holds a cocktail glass "
+        "in his outer hand. Natural late-afternoon warm light on their profiles."
+    ),
+    ("couples", "outdoor_deck"): (
+        "Place exactly TWO subjects standing casually on the existing outdoor deck — a "
+        "mixed-race adult couple (one woman late 20s, one man late 20s). They face each other "
+        "in profile to the camera, mid-conversation, the woman holding a takeaway coffee cup. "
+        "Both wear stylish casual resort attire (her: light dress, him: linen shirt and shorts). "
+        "Neither looks at the camera."
+    ),
+    ("couples", "indoor_seating"): (
+        "Place exactly TWO subjects on the existing sofa or lounge chair visible in the photo — "
+        "a mixed-race adult couple (one woman late 20s, one man late 20s). The woman sits "
+        "cross-legged on one end of the sofa, scrolling on her phone with a half-smile. The man "
+        "sits at the other end, an open laptop on his lap, glancing toward her. Both wear casual "
+        "smart attire. Neither looks at the camera."
+    ),
+
+    # ━━ SOLOS (1 femme adulte) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ("solos", "in_water"): (
+        "Place exactly ONE subject in the existing pool water — a mixed-race adult woman late "
+        "20s. She is swimming gentle breaststroke in the center of the visible water surface, "
+        "her head above water (chin level), arms making soft swim motion with slight wake "
+        "behind her. Wet hair slicked back. She wears a sleek black one-piece swimsuit. Soft "
+        "mid-day sun on her shoulders. She does NOT look at the camera ; her gaze is directed "
+        "slightly ahead of her along the water surface."
+    ),
+    ("solos", "pool_edge"): (
+        "Place exactly ONE subject sitting at the existing pool edge — a mixed-race adult "
+        "woman late 20s. She sits on the dry pool deck with her legs dangling into the water "
+        "(water at her mid-calf). She wears a stylish white one-piece swimsuit with a thin gold "
+        "chain. Sunglasses pushed up in her hair. She is reading a slim paperback book held in "
+        "both hands, looking down at the page with a relaxed half-smile. Soft water reflection "
+        "on her lower legs. She does NOT look at the camera."
+    ),
+    ("solos", "lounger"): (
+        "Place exactly ONE subject on the existing sun lounger visible in the photo — a "
+        "mixed-race adult woman late 20s. She reclines comfortably on the lounger, propped "
+        "slightly up on a flat cushion, sunglasses on, slim paperback book held open in one "
+        "hand. She wears a chic olive bikini with a thin gold chain. A wide-brimmed straw hat "
+        "rests on the lounger next to her. She is reading, gaze on the book — NOT at the camera. "
+        "Natural mid-afternoon sun on her body."
+    ),
+    ("solos", "cabana_daybed"): (
+        "Place exactly ONE subject on the existing cabana daybed visible in the photo — a "
+        "mixed-race adult woman late 20s. She sits cross-legged with her back against the "
+        "cushions, holding a tall iced drink in one hand and her phone in the other. She wears "
+        "a chic bikini with a light open sarong tied at her hips. Sunglasses on. She looks "
+        "down at her phone with a half-smile — NOT at the camera."
+    ),
+    ("solos", "rooftop_deck"): (
+        "Place exactly ONE subject standing on the rooftop deck near (but on the safe interior "
+        "side of) the existing railing — a mixed-race adult woman late 20s. She holds a "
+        "cocktail glass in one hand, the other hand resting lightly on the railing. She looks "
+        "out at the city skyline, profile to the camera, with a soft serene expression. She "
+        "wears a chic light summer dress. Natural late-afternoon warm light on her side."
+    ),
+    ("solos", "outdoor_deck"): (
+        "Place exactly ONE subject standing casually on the existing outdoor deck — a "
+        "mixed-race adult woman late 20s. She holds a takeaway coffee cup in one hand, looking "
+        "out at the scene with a relaxed half-smile, profile to the camera. She wears a stylish "
+        "summer dress. She does NOT look at the camera."
+    ),
+    ("solos", "indoor_seating"): (
+        "Place exactly ONE subject on the existing sofa or lounge chair visible in the photo — "
+        "a mixed-race adult woman late 20s. She sits cross-legged at one end, an open laptop "
+        "on her lap, glancing at the screen with a focused half-smile. She wears casual smart "
+        "attire (light shirt, slim trousers). A coffee cup sits on the nearby existing table "
+        "(only if one is clearly visible in the input). She does NOT look at the camera."
+    ),
+    ("solos", "gym_mat"): (
+        "Place exactly ONE subject on the existing yoga mat / gym floor visible in the photo — "
+        "a mixed-race adult woman late 20s in a downward-dog yoga pose, focused expression "
+        "looking down. She wears matching athleisure (high-waist black leggings and a fitted "
+        "sports bra). Natural light on her toned body. She does NOT look at the camera."
+    ),
+
+    # ━━ FAMILIES (couple + 1-2 enfants) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ("families", "in_water"): (
+        "Place exactly THREE subjects in the existing pool water — a young mixed-race family "
+        "(mother late 20s, father late 20s, one child age 6). Both parents stand chest-deep "
+        "(water at sternum on adults). The mother holds the child in front of her at the water "
+        "surface, helping the child gently splash and laugh. The father stands next to them, "
+        "smiling and lightly splashing the water with one hand. Adult swimwear : navy one-piece "
+        "for mother, dark swim shorts for father. Child wears a colorful kids' swimsuit. None "
+        "look at the camera ; their gaze is on the child / between each other."
+    ),
+    ("families", "pool_edge"): (
+        "Place exactly THREE subjects at the pool edge — a young mixed-race family (mother late "
+        "20s, father late 20s, one child age 7). Mother sits on the dry pool deck with her "
+        "feet in the water, holding the child's hand who sits beside her with a wide laughing "
+        "smile. Father kneels next to them on the deck, smiling at the child. All wear casual "
+        "swimwear. None look at the camera."
+    ),
+    ("families", "lounger"): (
+        "Place exactly THREE subjects on existing sun loungers visible in the photo — a young "
+        "mixed-race family. Mother reclines on one lounger, smiling at the child age 6 who is "
+        "sitting up at her feet showing her a colorful inflatable beach ball. Father reclines "
+        "on the adjacent lounger, propped on one elbow, looking at them with a relaxed smile. "
+        "All wear casual swimwear. None look at the camera."
+    ),
+    ("families", "cabana_daybed"): (
+        "Place exactly THREE subjects together on the existing cabana daybed — a young "
+        "mixed-race family. Father at one end, mother at the other end, the child age 6 sitting "
+        "between them with a wide smile, showing the parents a small toy. All wear casual "
+        "swimwear / beach attire. They are mid-laugh, none looking at the camera."
+    ),
+    ("families", "dining_table"): (
+        "Place exactly THREE subjects around the existing dining table — a young mixed-race "
+        "family. Mother at one side passing a small dish to the child age 7 sitting across "
+        "from her. Father next to the child, mid-conversation. Existing wine/water glasses "
+        "on the table only. They are sharing a candid laughing meal moment. None looks at "
+        "the camera."
+    ),
+    ("families", "outdoor_deck"): (
+        "Place exactly THREE subjects on the existing outdoor deck — a young mixed-race family "
+        "casually standing close, the child age 6 between the parents, all smiling at "
+        "something just out of frame (off-camera). Mother wears a light summer dress, father "
+        "wears linen shirt and shorts, child wears casual summer clothes. None looks at the "
+        "camera."
+    ),
+
+    # ━━ SMALL_GROUPS (2-3 amis trendy) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ("small_groups", "in_water"): (
+        "Place exactly THREE subjects in the existing pool water — three trendy mixed-race "
+        "friends, two women and one man, all late 20s. All three stand chest-deep near the "
+        "center of the pool, forming a loose triangle, laughing together mid-conversation. "
+        "Adult swimwear : two stylish bikinis (one navy, one olive) and dark swim shorts. "
+        "Water level at sternum on all three. None look at the camera ; they look at each "
+        "other / off-frame."
+    ),
+    ("small_groups", "pool_edge"): (
+        "Place exactly THREE subjects sitting in a row at the existing pool edge — three "
+        "trendy mixed-race friends, all late 20s, casual conversation, feet and calves in the "
+        "water. Adult swimwear visible. The one in the center is holding a cold drink, telling "
+        "a story while the others laugh. None look at the camera."
+    ),
+    ("small_groups", "lounger"): (
+        "Place exactly THREE subjects on three adjacent existing sun loungers — three trendy "
+        "mixed-race friends, all late 20s. The center friend sits up reading a magazine ; the "
+        "other two recline relaxed with sunglasses on. Adult swimwear visible. None looks "
+        "at the camera."
+    ),
+    ("small_groups", "cabana_daybed"): (
+        "Place exactly THREE subjects on the existing cabana daybed / large pool sofa — three "
+        "trendy mixed-race friends, all late 20s, sharing a candid laughing moment. Existing "
+        "cocktail glasses visible in their hands only if a tray/glasses are already in the "
+        "input. None looks at the camera."
+    ),
+    ("small_groups", "dining_table"): (
+        "Place exactly THREE subjects around the existing dining table — three trendy "
+        "mixed-race friends late 20s, mid-meal candid moment, one passing a small bread "
+        "basket to another. Casual smart attire. None looks at the camera."
+    ),
+    ("small_groups", "rooftop_deck"): (
+        "Place exactly THREE subjects standing on the rooftop deck (on the safe interior side "
+        "of the existing railing) — three trendy mixed-race friends late 20s. They form a "
+        "loose group facing each other in profile, cocktails in hand, mid-laugh. Casual chic "
+        "evening attire. None looks at the camera."
+    ),
+    ("small_groups", "outdoor_deck"): (
+        "Place exactly THREE subjects standing in a loose group on the existing outdoor deck "
+        "— three trendy mixed-race friends late 20s, sharing a candid laugh. Casual chic resort "
+        "attire. None looks at the camera."
+    ),
+
+    # ━━ GROUPS (4-5 amis énergie festive) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ("groups", "in_water"): (
+        "Place FOUR subjects in the existing pool water — a group of trendy mixed-race friends "
+        "late 20s (two men, two women), all standing chest-deep near the center, laughing "
+        "together. Adult swimwear visible. Water level at sternum on all. None looks at the "
+        "camera ; festive but tasteful daytime vibe."
+    ),
+    ("groups", "pool_edge"): (
+        "Place FOUR subjects sitting in a row at the existing pool edge with feet in the water "
+        "— a group of trendy mixed-race friends late 20s. They are mid-conversation, two of "
+        "them mid-laugh. None looks at the camera."
+    ),
+    ("groups", "lounger"): (
+        "Place FOUR subjects on four adjacent existing sun loungers — a group of trendy "
+        "mixed-race friends late 20s. They share a candid relaxed moment, one of them sitting "
+        "up to talk to the others. None looks at the camera."
+    ),
+    ("groups", "rooftop_deck"): (
+        "Place FOUR subjects standing in a loose semicircle on the rooftop deck (on the safe "
+        "interior side of the existing railing) — a group of trendy mixed-race friends late "
+        "20s, mid-toast with cocktails in hand. Casual chic evening attire. None looks at "
+        "the camera."
+    ),
+    ("groups", "outdoor_deck"): (
+        "Place FOUR subjects standing in a loose semicircle on the existing outdoor deck — a "
+        "group of trendy mixed-race friends late 20s, mid-laugh. Casual chic resort attire. "
+        "None looks at the camera."
+    ),
+    ("groups", "dining_table"): (
+        "Place FOUR subjects around the existing dining table — a group of trendy mixed-race "
+        "friends late 20s, mid-meal candid moment, one of them mid-laugh raising a glass. "
+        "Casual smart attire. None looks at the camera."
+    ),
+}
+
+
+def pick_human_scenario(
+    persona: str,
+    category: str,
+    safe_zones: list[str] | None,
+    capacity: int | None,
+) -> dict | None:
+    """Choisit UN scenario unique pour cette photo. Retourne None si pas de scenario valide.
+
+    Approche : on regarde la safe_zone N°1 (priorité Gemini) et on map vers un zone_type.
+    Si un mapping persona×zone_type existe → on retourne le bloc texte précis.
+    Sinon → None (= ne pas ajouter d'humain pour cette photo).
+    """
+    if not safe_zones:
+        return None
+    # Catégorie spéciale : vue aérienne piscine → jamais d'humain
+    cat_lower = (category or "").lower()
+    if cat_lower in ("piscine_vue_aerienne", "facade", "chambre", "staff"):
+        return None
+
+    # Map la priority safe_zone
+    zone_text = safe_zones[0] if safe_zones else ""
+    zone_type = _classify_safe_zone(zone_text)
+
+    # Fallback heuristique selon la catégorie si zone_type unknown
+    if zone_type == "unknown":
+        if cat_lower in ("piscine", "rooftop"):
+            zone_type = "in_water" if "piscine" in cat_lower else "rooftop_deck"
+        elif cat_lower in ("cabana",):
+            zone_type = "cabana_daybed"
+        elif cat_lower in ("transat",):
+            zone_type = "lounger"
+        elif cat_lower in ("f_and_b",):
+            zone_type = "dining_table"
+        elif cat_lower in ("gym",):
+            zone_type = "gym_mat"
+        elif cat_lower in ("interieur_commun",):
+            zone_type = "indoor_seating"
+        else:
+            zone_type = "outdoor_deck"
+
+    # Cherche le scenario exact (persona, zone_type)
+    block = _SCENARIO_CATALOG.get((persona, zone_type))
+    if block is None:
+        # Fallback : on essaie avec persona=couples si rien d'autre, puis solos
+        for fallback_persona in ("couples", "solos", "small_groups"):
+            block = _SCENARIO_CATALOG.get((fallback_persona, zone_type))
+            if block:
+                break
+    if block is None:
+        return None
+
+    return {
+        "scenario_id": f"{persona}__{zone_type}",
+        "persona": persona,
+        "zone_type": zone_type,
+        "primary_safe_zone": zone_text,
+        "prompt_block": block,
+    }
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Legacy : PERSONA_TEMPLATES (gardé pour rétro-compat des autres callers, mais
+# n'est plus utilisé par build_persona_prompt depuis 12/05/2026).
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 PERSONA_TEMPLATES = {
     "couples": (
@@ -372,6 +772,19 @@ def build_persona_prompt(persona: str, category: str, vibe: str | None = None,
       → Style (camera ref + film stock)
       → Negative prompt
     """
+    # ━━ Scenario déterministe (Martin 12/05/2026) ━━
+    # On choisit UN seul scenario en Python en fonction du persona + de la 1ère safe_zone Gemini.
+    # Le bloc texte renvoyé est ULTRA-précis (1 pose, 1 position, 1 outfit) — pas d'options.
+    scenario = pick_human_scenario(persona, category, safe_zones, capacity)
+    if scenario:
+        scenario_block = scenario["prompt_block"]
+        scenario_id_for_log = scenario["scenario_id"]
+    else:
+        # Aucun scenario valide → on instruira l'IA de ne pas ajouter
+        scenario_block = None
+        scenario_id_for_log = "no_scenario"
+
+    # Legacy : utilisé uniquement pour les valeurs par défaut si le scenario block est absent.
     persona_desc = PERSONA_TEMPLATES.get(persona, PERSONA_TEMPLATES["couples"])
     action_hint = CATEGORY_ACTION_HINT.get(category, "naturally placed in the scene, candid relaxed moment")
 
@@ -507,15 +920,16 @@ You MAY NOT, under any circumstance:
 
 Concretely : if the original has an ugly screen on a wall and an industrial drainage grille on the floor, both MUST appear UNCHANGED in your output. The only difference between input and output should be a human-shaped region where the subject is placed (and the immediate shadow/reflection of that subject).
 
-If you cannot add the subject without modifying the surrounding scene, choose option (3) of the placement priority (place them IN water if water is present, OR standing on existing ground), OR return the image unchanged.
+If you cannot follow the SCENARIO described below without modifying the surrounding scene, return the image UNCHANGED. Do not improvise an alternative pose.
 
-Now, naturally add {persona_desc} to this exact scene.
+🎬 THE ONLY SCENARIO YOU MUST EXECUTE (no alternatives, no creative variations) :
+{scenario_block if scenario_block else "(no human scenario was selected for this photo — DO NOT add anyone; return the image unchanged.)"}
+
 {safe_zones_block}
 {pool_float_block}
 
-ACTION & CONTEXT:
-{action_hint}. {vibe_mood}.
-Mid-action, candid moment, slight asymmetry — feels like a real captured moment, not staged.
+🎨 GLOBAL MOOD & STYLE:
+{vibe_mood}. Mid-action, candid moment, slight asymmetry — feels like a real captured moment, not staged. Premium-accessible editorial travel-magazine feel.
 
 🔢 QUANTITY HARD LOCK — EXACTLY {target_n} HUMANS, NO MORE NO LESS:
 - 🎯 TARGET = **{target_n}** subjects (computed from persona × scene capacity).
@@ -751,10 +1165,16 @@ def _pick_main_action(
     has_clutter_in_issues = any(k in issues_str for k in clutter_keywords_in_issues)
     if clutter_list or has_clutter_in_issues:
         clutter_desc = ", ".join(clutter_list[:3]) if clutter_list else "éléments parasites mentionnés en issues"
+        # ━ 12/05/2026 : on passe la liste EXPLICITE à Gemini Image via le builder.
+        # Avant : prompt générique → Gemini ne savait pas quoi cibler (ex : bouée de
+        # sauvetage rouge identifiée par Vision mais pas retirée par Image).
+        # Maintenant : la liste textuelle est en TÊTE du prompt avec "REMOVE EXACTLY THESE".
+        clutter_targets = clutter_list if clutter_list else [issues_str[:200]] if has_clutter_in_issues else None
         return {
             "action": "ai_remove_clutter",
-            "prompt": PROMPT_REMOVE_CLUTTER,
+            "prompt": build_remove_clutter_prompt(clutter_targets),
             "reason": f"nettoyage clutter : {clutter_desc}",
+            "clutter_targets": clutter_targets,
         }
 
     # 5b. Cadrage off détecté → on NE FAIT PAS de ai_recompose (qui invente du décor pour
@@ -945,8 +1365,10 @@ def pick_strategy(
             clutter_desc = ", ".join(clutter_list[:3]) if clutter_list else "objets parasites détectés"
             steps.append({
                 "action": "ai_remove_clutter",
-                "prompt": PROMPT_REMOVE_CLUTTER,
+                # Idem : on cible explicitement les éléments listés par Vision
+                "prompt": build_remove_clutter_prompt(clutter_list if clutter_list else None),
                 "reason": f"pré-nettoyage clutter avant ajout perso : {clutter_desc}",
+                "clutter_targets": clutter_list if clutter_list else None,
             })
 
         # Si on a déjà cropé ET que l'action principale est juste warm_boost (rien d'urgent), on saute le warm
@@ -1503,7 +1925,14 @@ def enhance_one(input_path: Path, strategy: dict, output_dir: Path) -> dict:
             "reason": strategy.get("reason", "") if not fallback_to_original else (
                 "Validation post-IA échouée 2× → fallback sur l'originale (mieux qu'une photo IA pétée)."
             ),
-            "steps": [{"action": s["action"], "reason": s.get("reason", "")} for s in steps],
+            "steps": [{
+                "action": s["action"],
+                "reason": s.get("reason", ""),
+                # Expose le prompt envoyé à Gemini Image pour transparence + debug front (Martin 12/05/2026)
+                "prompt": s.get("prompt"),
+                "clutter_targets": s.get("clutter_targets"),
+                "pool_float_used": s.get("pool_float_used"),
+            } for s in steps],
             "method": " → ".join(methods),
             "cost_usd": round(total_cost_usd, 6),
             "duration_ms": total_duration_ms,

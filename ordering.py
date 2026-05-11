@@ -21,8 +21,11 @@ INTERIOR_TARGETS = {"detail"}  # interieur_commun → mappé sur detail
 HERO_EXT_TARGETS = {"hero_ext"}
 
 # ━ Tiers pour le SLOT 1 (Martin : photo de couverture = WOW amenity, jamais bar/food/gym) ━
-# Tier 1 = "hero amenities" : ce qu'on attend en couverture d'une fiche Day Pass
-SLOT1_TIER_1 = {"pool", "cabana", "rooftop", "beach"}
+# Mise à jour 12/05/2026 : POOL doit être systématiquement le slot 1 quand l'hôtel a une
+# piscine déclarée par Booking (Martin : "la photo 1 devait forcément être une piscine").
+# Si aucune photo pool éligible n'existe → on tombe sur cabana → rooftop → beach.
+SLOT1_TIER_0 = {"pool"}  # NEW : priorité absolue piscine
+SLOT1_TIER_1 = {"cabana", "rooftop", "beach"}  # fallback Tier 1 (sans pool)
 SLOT1_TIER_2 = {"spa"}
 SLOT1_TIER_3 = {"bar", "food", "gym"}  # exclus du slot 1 sauf fallback ultime
 
@@ -314,7 +317,11 @@ def order_final_pack(
             return relaxed[0][0]
         return None
 
-    slot1 = _pick_slot1_from_tier(SLOT1_TIER_1)
+    # 12/05/2026 : Tier 0 = POOL en priorité absolue.
+    # Si l'hôtel a une piscine et au moins UNE photo pool éligible, elle prend le slot 1.
+    slot1 = _pick_slot1_from_tier(SLOT1_TIER_0)
+    if not slot1:
+        slot1 = _pick_slot1_from_tier(SLOT1_TIER_1)
     if not slot1:
         slot1 = _pick_slot1_from_tier(SLOT1_TIER_2)
     if not slot1:

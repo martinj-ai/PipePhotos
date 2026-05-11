@@ -3037,11 +3037,49 @@ photo finale enhanced (jpeg)
                   }
                   noHumanNote = `<div class="mt-1 text-[10px] text-slate-600 italic px-1">${reason}</div>`;
                 }
+                // ━━ Prompts IA envoyés (debug / transparence Martin 12/05/2026) ━━
+                // Affiche le prompt exact envoyé à Gemini Image pour chaque step IA.
+                // Décliqué par défaut, pour ne pas polluer la vue ; cliquer pour déplier.
+                const aiSteps = (e.steps || []).filter(s => s.action && s.action.startsWith("ai_") && s.prompt);
+                let promptsBlock = "";
+                if (aiSteps.length > 0) {
+                  const stepLabels = {
+                    ai_lighting: "🌅 Lumière (nuit→jour)",
+                    ai_remove_clutter: "🧹 Suppression clutter",
+                    ai_add_character: "👤 Ajout personnage",
+                    ai_add_pool_float: "🍩 Ajout bouée",
+                    ai_remove_people: "🚫 Suppression personnes",
+                    ai_recompose: "✂️ Recadrage IA",
+                  };
+                  promptsBlock = `
+                    <details class="mt-1.5 border border-slate-200 rounded">
+                      <summary class="text-[10px] font-semibold text-slate-700 cursor-pointer px-2 py-1.5 bg-slate-50 hover:bg-slate-100 transition-colors uppercase tracking-wide">
+                        🔎 Prompts IA envoyés (${aiSteps.length} step${aiSteps.length > 1 ? 's' : ''}) — clique pour déplier
+                      </summary>
+                      <div class="px-2 py-2 space-y-2 bg-white">
+                        ${aiSteps.map((s, idx) => {
+                          const label = stepLabels[s.action] || s.action;
+                          const targets = s.clutter_targets && s.clutter_targets.length > 0
+                            ? `<div class="text-[10px] text-amber-700 mb-1"><strong>Cibles :</strong> ${s.clutter_targets.join(", ")}</div>` : "";
+                          const floatInfo = s.pool_float_used ? `<div class="text-[10px] text-amber-700 mb-1"><strong>Float :</strong> ${s.pool_float_used}</div>` : "";
+                          return `
+                            <div class="border-l-2 border-amber-300 pl-2">
+                              <div class="text-[11px] font-bold text-slate-800">Step ${idx + 1} — ${label}</div>
+                              ${targets}${floatInfo}
+                              <pre class="text-[10px] font-mono text-slate-600 whitespace-pre-wrap mt-1 max-h-72 overflow-auto bg-slate-50 rounded p-2" style="line-height:1.35;">${(s.prompt || "(prompt vide)").replace(/</g, "&lt;")}</pre>
+                            </div>
+                          `;
+                        }).join("")}
+                      </div>
+                    </details>
+                  `;
+                }
                 return `
                   <div class="border border-slate-200 rounded p-2 bg-slate-50">
                     <div class="text-[10px] font-semibold text-slate-700 mb-1 uppercase tracking-wide">Transformations appliquées</div>
                     <div class="grid grid-cols-2 gap-1 text-[10px]">${cells}</div>
                     ${noHumanNote}
+                    ${promptsBlock}
                   </div>
                 `;
               })()}
