@@ -546,10 +546,16 @@ def api_run():
     )
 
     # Cumul tokens & coût
+    # Important : on n'incrémente PAS pour les analyses chargées du cache
+    # (sinon on facture des tokens qui n'ont pas été consommés ce run-ci).
     total_input_tokens = 0
     total_output_tokens = 0
     total_cost_usd = 0.0
+    analyses_from_cache = 0
     for a in analyses:
+        if a.get("_from_cache"):
+            analyses_from_cache += 1
+            continue
         for t in a.get("trace", []):
             if t.get("node") == "N2_analyze_gemini" and t.get("result") == "pass":
                 u = t.get("usage", {})
@@ -892,17 +898,30 @@ def api_run():
         )
         input_path = Path(a["input"]["path_absolute"])
         # === Mode postprocess : skip enhance si fichier existe déjà ===
+        # On reconstruit un result dict COMPLET avec les bonnes clés pour que
+        # l'UI affiche le slider avant/après (cf. construction enhanced_summary
+        # plus bas qui exige output_path pour ne pas tomber en "Erreur: pas de sortie").
         existing_enhanced = enhanced_dir / filename
         if use_enhance_cache and existing_enhanced.exists():
             result = {
-                "method": "cached",
+                "input_path": str(input_path),
+                "output_path": str(existing_enhanced),  # ← CRITIQUE pour l'UI
                 "action": strategy.get("action", "cached"),
                 "reason": "📂 enhanced existant chargé du cache (resume_from=postprocess)",
+                "method": "cached",
+                "steps": [{"action": strategy.get("action", "cached"), "reason": "cache"}],
+                "brand_lut_applied": True,  # supposé déjà appliqué au run précédent
                 "cost_usd": 0,
                 "duration_ms": 0,
                 "input_tokens": 0,
                 "output_tokens": 0,
                 "from_cache": True,
+                "framing_changed": False,
+                "framing_warning": None,
+                "ai_validation": {"ok": True, "from_cache": True},
+                "retry_attempted": False,
+                "fallback_to_original": False,
+                "persona_used": persona_per_filename.get(filename),
             }
         else:
             result = enhance.enhance_one(input_path, strategy, enhanced_dir)
