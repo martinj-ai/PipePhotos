@@ -1844,6 +1844,161 @@ photo finale enhanced (jpeg)
       `;
     }
 
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Pipeline progress multi-étapes (remplace la barre simple sur /api/run)
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Donne une vue d'ensemble : 6 étapes (5 si slowmo désactivé, etc.) avec
+    // mini-barre par étape, statuts (pending/active/done/skipped) et message.
+    // Le mapping server-side → UI :
+    //   analyzing               → étape "analyse"
+    //   dedup, dedup_vlm        → étape "dedup"
+    //   amenity_verify          → étape "amenities"
+    //   enhancing               → étape "retouche"
+    //   slowmo, slowmo_done     → étape "slowmo" (skip si non activé)
+    //   multi_format, multi_format_done → étape "multiformat" (skip si pas de format coché)
+    //   finished                → tout done
+
+    const PIPELINE_STEPS_DEF = [
+      { id: "analyse",   icon: "🔍", label: "Analyse Gemini Vision",     serverSteps: ["analyzing"] },
+      { id: "dedup",     icon: "🧬", label: "Dédup intelligente",         serverSteps: ["dedup", "dedup_vlm"] },
+      { id: "amenities", icon: "✨", label: "Vérification amenities",     serverSteps: ["amenity_verify"] },
+      { id: "retouche",  icon: "🎨", label: "Retouches IA Nano Banana",   serverSteps: ["enhancing"] },
+      { id: "slowmo",    icon: "🎬", label: "Slow-motion loop",           serverSteps: ["slowmo", "slowmo_done"], optional: true },
+      { id: "multiformat", icon: "📐", label: "Multi-format crop",         serverSteps: ["multi_format", "multi_format_done"], optional: true },
+    ];
+
+    // _runProgressState : on garde le max(current, total) par étape pour ne JAMAIS
+    // reculer une barre déjà à 100% (cas où le serveur passe sur un nouveau step et
+    // n'envoie plus le total de l'ancien).
+    let _runProgressState = {};
+
+    function _stepIdFromServerStep(serverStep) {
+      for (const s of PIPELINE_STEPS_DEF) {
+        if (s.serverSteps.includes(serverStep)) return s.id;
+      }
+      return null;
+    }
+
+    function _updateStepState(status, opts) {
+      const serverStep = status.step;
+      const currentStepId = _stepIdFromServerStep(serverStep);
+
+      // Marque les étapes optionnelles désactivées comme "skipped" dès le départ
+      for (const s of PIPELINE_STEPS_DEF) {
+        if (!_runProgressState[s.id]) {
+          _runProgressState[s.id] = { state: "pending", current: 0, total: 0, message: "" };
+        }
+        if (s.id === "slowmo" && !opts.slowmoEnabled) {
+          _runProgressState[s.id].state = "skipped";
+        }
+        if (s.id === "multiformat" && !opts.multiformatEnabled) {
+          _runProgressState[s.id].state = "skipped";
+        }
+      }
+
+      // Si on a un step actif, marque comme active + met à jour les compteurs
+      if (currentStepId) {
+        const st = _runProgressState[currentStepId];
+        st.state = "active";
+        st.current = Math.max(st.current, status.current || 0);
+        st.total = Math.max(st.total, status.total || 0);
+        st.message = status.message || "";
+
+        // Marque toutes les étapes AVANT comme "done"
+        let reached = false;
+        for (const s of PIPELINE_STEPS_DEF) {
+          if (s.id === currentStepId) { reached = true; continue; }
+          if (!reached && _runProgressState[s.id].state !== "skipped") {
+            _runProgressState[s.id].state = "done";
+            if (_runProgressState[s.id].total > 0) {
+              _runProgressState[s.id].current = _runProgressState[s.id].total;
+            }
+          }
+        }
+      }
+
+      // Cas spécial : done global → toutes les étapes non-skipped sont done
+      if (status.done) {
+        for (const s of PIPELINE_STEPS_DEF) {
+          if (_runProgressState[s.id].state !== "skipped") {
+            _runProgressState[s.id].state = "done";
+            if (_runProgressState[s.id].total > 0) {
+              _runProgressState[s.id].current = _runProgressState[s.id].total;
+            }
+          }
+        }
+      }
+    }
+
+    function _renderStepRow(stepDef) {
+      const st = _runProgressState[stepDef.id];
+      const pct = st.total > 0 ? Math.round(100 * st.current / st.total) : (st.state === "done" ? 100 : 0);
+      const colors = {
+        pending:  { dot: "#E5E7EB", bg: "#F9FAFB",      text: "#9CA3AF", fill: "#D1D5DB", icon: "⏳" },
+        active:   { dot: "#FFAF36", bg: "#FFF8ED",      text: "#92400E", fill: "linear-gradient(62deg, #FFAF36 0%, #FFC536 100%)", icon: stepDef.icon },
+        done:     { dot: "#22C55E", bg: "#F0FDF4",      text: "#166534", fill: "#22C55E", icon: "✓" },
+        skipped:  { dot: "#E5E7EB", bg: "#F9FAFB",      text: "#9CA3AF", fill: "#E5E7EB", icon: "⏭" },
+      };
+      const c = colors[st.state] || colors.pending;
+      const isActive = st.state === "active";
+      const showCounter = st.total > 0 && st.state !== "skipped";
+      const msg = isActive && st.message ? st.message : "";
+
+      return `
+        <div class="rounded-lg px-3 py-2 transition-all" style="background:${c.bg};border:1px solid ${c.dot};${isActive ? 'box-shadow:0 0 0 2px rgba(255,175,54,0.18);' : ''}">
+          <div class="flex items-center gap-2.5">
+            <div class="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0" style="background:${c.dot};color:#fff;">${c.icon}</div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center justify-between gap-2 flex-wrap">
+                <span class="text-[11px] font-semibold" style="color:${c.text};">${stepDef.label}</span>
+                ${showCounter ? `<span class="text-[10px] font-mono" style="color:${c.text};opacity:0.75;">${st.current}/${st.total} · ${pct}%</span>` : (st.state === "skipped" ? '<span class="text-[10px] text-gray-400 italic">non activé</span>' : (st.state === "done" ? '<span class="text-[10px] text-green-700">terminé</span>' : ''))}
+              </div>
+              <div class="mt-1 progress-bar" style="height:4px;background:#fff;">
+                <div class="progress-fill" style="width:${pct}%;background:${c.fill};"></div>
+              </div>
+              ${msg ? `<div class="text-[10px] mt-1 italic truncate" style="color:${c.text};opacity:0.85;" title="${msg}">${msg}</div>` : ''}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderRunProgress(target, status, opts, costUsd, durationS) {
+      // Init / update state
+      if (!status._init && target.dataset.runProgress !== "1") {
+        _runProgressState = {};  // reset à chaque nouveau run
+        target.dataset.runProgress = "1";
+      }
+      _updateStepState(status, opts || {});
+
+      // Compteur global (étapes non-skipped done / total non-skipped)
+      const all = PIPELINE_STEPS_DEF.filter(s => _runProgressState[s.id].state !== "skipped");
+      const doneCount = all.filter(s => _runProgressState[s.id].state === "done").length;
+      const activeStep = PIPELINE_STEPS_DEF.find(s => _runProgressState[s.id].state === "active");
+      const globalPct = all.length > 0 ? Math.round(100 * doneCount / all.length) : 0;
+
+      const costStr = costUsd ? ` · $${costUsd.toFixed(4)} cumulés` : '';
+      const durationStr = durationS ? ` · ${durationS}s écoulés` : '';
+      const headerLabel = activeStep
+        ? `${doneCount}/${all.length} étapes terminées · ${activeStep.icon} ${activeStep.label} en cours`
+        : (doneCount === all.length && all.length > 0 ? `✅ Pipeline terminé (${all.length} étapes)` : `Initialisation…`);
+
+      target.innerHTML = `
+        <div class="mb-3">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-xs font-bold text-amber-900">${headerLabel}</span>
+            <span class="text-[11px] text-amber-700 font-mono">${globalPct}%${costStr}${durationStr}</span>
+          </div>
+          <div class="progress-bar" style="height:8px;background:#fff;border:1px solid #FCD34D;">
+            <div class="progress-fill" style="width:${globalPct}%;background:linear-gradient(62deg, #FFAF36 0%, #FFC536 100%);"></div>
+          </div>
+        </div>
+        <div class="space-y-1.5">
+          ${PIPELINE_STEPS_DEF.map(_renderStepRow).join("")}
+        </div>
+      `;
+    }
+
     // ----- Sélection photos par toggle (cochées par défaut, décocher au clic) -----
     state.deselected = new Set();  // filenames désélectionnés
 
@@ -2137,25 +2292,32 @@ photo finale enhanced (jpeg)
       btnRun.textContent = "Analyse en cours...";
       runResult.classList.remove("hidden");
 
-      // Container pour la progress bar live
+      // Container pour la progress bar live (multi-étapes)
       const progBox = document.createElement("div");
-      progBox.className = "mb-4 bg-orange-50 border border-orange-200 rounded-lg p-4";
+      progBox.className = "mb-4 bg-amber-50 border border-amber-300 rounded-lg p-4";
       runResult.innerHTML = '';
       runResult.appendChild(progBox);
 
+      // Récupère les options AVANT de poll → on sait quelles étapes seront skip
+      const checkedFormats = Array.from(document.querySelectorAll('.format-checkbox:checked')).map(cb => cb.value);
+      const outpaintToggle = document.getElementById('outpaint-toggle');
+      const outpaintQualityEl = document.getElementById('outpaint-quality');
+      const outpaintEnabled = !!(outpaintToggle && outpaintToggle.checked);
+      const outpaintQuality = (outpaintQualityEl && outpaintQualityEl.value) || 'flash';
+      const slowmoToggle = document.getElementById('slowmo-toggle');
+      const slowmoEnabled = !!(slowmoToggle && slowmoToggle.checked);
+      const runOpts = {
+        slowmoEnabled,
+        multiformatEnabled: checkedFormats.length > 0,
+      };
+      const runStartedAt = Date.now();
+
       const stopPoll = pollProgress(state.slug, "_analyze", (s) => {
-        renderProgressBar(progBox, s.current || 0, s.total || state.uploaded, s.message || "Analyse Gemini en cours...", s.cost_usd_cumulated);
+        const elapsed = Math.round((Date.now() - runStartedAt) / 1000);
+        renderRunProgress(progBox, s, runOpts, s.cost_usd_cumulated, elapsed);
       });
 
       try {
-        // Récupère les formats cochés + flags outpainting dans la section Step 3
-        const checkedFormats = Array.from(document.querySelectorAll('.format-checkbox:checked')).map(cb => cb.value);
-        const outpaintToggle = document.getElementById('outpaint-toggle');
-        const outpaintQualityEl = document.getElementById('outpaint-quality');
-        const outpaintEnabled = !!(outpaintToggle && outpaintToggle.checked);
-        const outpaintQuality = (outpaintQualityEl && outpaintQualityEl.value) || 'flash';
-        const slowmoToggle = document.getElementById('slowmo-toggle');
-        const slowmoEnabled = !!(slowmoToggle && slowmoToggle.checked);
         // Mode reprise : récupère la radio sélectionnée (default scrape = tout refaire)
         const resumeRadio = document.querySelector('input[name="resume-from"]:checked');
         const resumeFrom = (resumeRadio && resumeRadio.value) || 'scrape';

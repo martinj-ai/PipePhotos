@@ -33,14 +33,15 @@ Schéma JSON à retourner :
 
 Violations à détecter :
 
-1. **invented_furniture** : du mobilier (daybed, transat, sofa, raft, plateforme flottante, etc.) a été AJOUTÉ alors qu'il n'existait pas dans l'originale. Particulièrement grave si placé sur l'eau ou en suspension.
-2. **subject_on_water** : une ou plusieurs personnes sont positionnées SUR la surface de l'eau (debout sur l'eau, marchant dessus, ou sur un meuble flottant qui n'existe pas dans l'originale).
-3. **subject_on_furniture_top** : personne debout sur un meuble fait pour s'allonger (daybed, sun lounger, sofa).
-4. **subject_wrong_side_barrier** : personne de l'autre côté d'une barrière de sécurité (rooftop railing, garde-corps).
-5. **scene_regenerated** : la photo a été quasi-régénérée — l'angle de caméra, la perspective, ou les éléments principaux ont fondamentalement changé entre l'avant et l'après. C'est une violation majeure.
-6. **inconsistent_scale** : 2+ subjets ajoutés ont des échelles incompatibles (un subjet beaucoup plus grand qu'un autre à la même distance camera).
-7. **architecture_changed** : l'architecture du bâtiment, la disposition du mobilier existant, ou le décor de fond ont été altérés.
-8. **lighting_break** : ombres / direction lumière incohérente entre les sujets ajoutés et la scène.
+1. **invented_furniture** : du VRAI mobilier (daybed, transat, sofa, sun lounger, chaise, table, raft solide en bois/métal, plateforme flottante) a été AJOUTÉ alors qu'il n'existait pas dans l'originale. ⚠️ Une **bouée gonflable décorative** (flamant rose, ananas, donut, cygne, anneau coloré, watermelon) est une catégorie À PART — ne PAS la classer comme `invented_furniture`, utilise `invented_pool_float` à la place.
+2. **invented_pool_float** : une bouée gonflable décorative (flamingo, pineapple, donut, swan, ring, watermelon, etc.) a été ajoutée dans une piscine. Considérée séparément du vrai mobilier car parfois autorisée par le pipeline.
+3. **subject_on_water** : une ou plusieurs personnes sont positionnées SUR la surface de l'eau (debout sur l'eau, marchant dessus, ou sur un meuble flottant qui n'existe pas dans l'originale).
+4. **subject_on_furniture_top** : personne debout sur un meuble fait pour s'allonger (daybed, sun lounger, sofa).
+5. **subject_wrong_side_barrier** : personne de l'autre côté d'une barrière de sécurité (rooftop railing, garde-corps).
+6. **scene_regenerated** : la photo a été quasi-régénérée — l'angle de caméra, la perspective, ou les éléments principaux ont fondamentalement changé entre l'avant et l'après. C'est une violation majeure. ⚠️ NE PAS classer comme `scene_regenerated` un simple changement d'heure (nuit→jour) ou d'éclairage (sombre→clair) si le cadrage, l'architecture, les meubles existants et les objets sont préservés — c'est un usage légitime du pipeline.
+7. **inconsistent_scale** : 2+ subjets ajoutés ont des échelles incompatibles (un subjet beaucoup plus grand qu'un autre à la même distance camera).
+8. **architecture_changed** : l'architecture du bâtiment, la disposition du mobilier existant, ou le décor de fond ont été altérés.
+9. **lighting_break** : ombres / direction lumière incohérente entre les sujets ajoutés et la scène.
 
 `ok` = true SEULEMENT si la liste violations est vide. Sinon `ok` = false.
 
@@ -108,6 +109,11 @@ def validate_ai_output(input_path: Path, output_path: Path,
                 "ai_remove_clutter": {"architecture_changed"},
                 # ai_add_character : ajout perso peut sembler "lighting_break" si shadows mismatch
                 "ai_add_character": set(),
+                # ai_add_pool_float : ajouter une bouée déclenche LÉGITIMEMENT invented_pool_float
+                # (mais PAS invented_furniture — si le validateur détecte du vrai mobilier
+                # inventé en plus, on rejette toujours). lighting_break/architecture_changed
+                # autorisés car la bouée crée une ombre/reflet qui modifie marginalement la scène.
+                "ai_add_pool_float": {"invented_pool_float", "lighting_break"},
             }
             # Construit la whitelist en unionnant toutes les actions du chaînage
             actions_to_consider = set(actions_chain or [])

@@ -968,8 +968,31 @@ def api_run():
     with ThreadPoolExecutor(max_workers=ENHANCE_WORKERS) as ex:
         futures = {ex.submit(_enhance_one_job, i, fn): (i, fn) for i, fn in enumerate(ordered_filenames, 1)}
         for fut in as_completed(futures):
-            ret = fut.result()
+            # ━━ Robuste aux exceptions : si UNE photo crashe (rate-limit, Gemini KO,
+            #    image corrompue…), on log et on continue avec les autres. Sinon
+            #    l'exception remonte hors du pool et coupe TOUT le pipeline avant
+            #    le multi-format → Martin voyait ses crops disparaître.
+            i, fn = futures[fut]
+            try:
+                ret = fut.result()
+            except Exception as e:
+                import traceback
+                print(f"❌ [enhance #{i}] {fn} : {type(e).__name__}: {e}")
+                traceback.print_exc()
+                # On insère un slot avec un résultat d'erreur pour ne pas perturber le tri
+                with enhance_lock:
+                    enhanced_by_slot[i] = {
+                        "filename": fn, "final_order_pos": i,
+                        "input_path": "", "output_path": None,
+                        "action": "error", "reason": f"Erreur enhance: {type(e).__name__}",
+                        "error": str(e)[:200],
+                        "steps": [], "cost_usd": 0, "duration_ms": 0,
+                    }
+                    enhance_progress["done"] += 1
+                continue
             if ret is None:
+                with enhance_lock:
+                    enhance_progress["done"] += 1
                 continue
             slot, filename, payload = ret
             result = payload["result"]
@@ -987,6 +1010,11 @@ def api_run():
                 total=len(ordered_filenames),
                 message=f"Retouche {done}/{len(ordered_filenames)} : {filename} ({strategy['action']})",
             )
+
+    # Sécurité : si enhanced_dir n'existe pas encore (toutes les photos ont raté ou aucune
+    # n'avait d'analyse valide), on le crée pour que le multi-format ne saute pas en silence
+    # (il logue "enhanced_dir absent" et continue) → Martin a un signal clair.
+    enhanced_dir.mkdir(parents=True, exist_ok=True)
 
     # Reconstruit l'ordre stable du pack final (slot 1, 2, 3, ...)
     enhanced_results = [enhanced_by_slot[s] for s in sorted(enhanced_by_slot.keys())]

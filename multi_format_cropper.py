@@ -656,7 +656,15 @@ def run_multi_format(
     with ThreadPoolExecutor(max_workers=MULTIFORMAT_WORKERS) as ex:
         futures = [ex.submit(_process_one, pp, im, sz, f) for (pp, im, sz, f) in tasks]
         for fut in as_completed(futures):
-            result = fut.result()
+            # ━━ Robuste aux exceptions (cf. fix enhance loop) : une variante qui
+            #    crashe ne doit pas arrêter le pool entier.
+            try:
+                result = fut.result()
+            except Exception as e:
+                print(f"  ❌ worker outpaint crash : {type(e).__name__}: {e}")
+                with manifest_lock:
+                    manifest["summary"]["errors"] += 1
+                continue
             if result is None:
                 continue
             with manifest_lock:

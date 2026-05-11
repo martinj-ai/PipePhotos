@@ -272,6 +272,9 @@ Le pipeline `/api/run` tourne **synchrone** dans la requête HTTP : un `POST /ap
 | Parallélisation `analyze_batch` 3→8 + `amenity_verifier` 4→8 + `dedup_vlm` 3→8 | — | — | `GEMINI_API_KEY` | async via ThreadPool | Gemini Vision Flash tier paid 1 = ~2000 RPM, large marge |
 | Outpaint prompt enrichi (direction explicite + anti-tile/anti-repeat) | — | — | — | sync OK | Réduit drastiquement les bugs "vues empilées" sur insta_story |
 | Pool float standalone (action `ai_add_pool_float` séparée d'add_character) | — | — | `GEMINI_API_KEY` | async | Photo piscine sans humain à ajouter peut quand même recevoir une bouée — proba ~55% (Family-Friendly) déterministe par filename |
+| Validator : nouvelle violation `invented_pool_float` distincte d'`invented_furniture` | — | — | `GEMINI_API_KEY` | sync OK | Whitelist conditionnelle (allowed pour `ai_add_pool_float`) ; nuit→jour aussi clarifié comme légitime via `scene_regenerated` whitelist sur `ai_lighting` |
+| UI Progress multi-étapes (6 étapes pipelines, mini-barres) | — | — | — | sync (UI only) | Plus de "barre qui reset à 0" : vue globale + détail par étape avec statuts pending/active/done/skipped |
+| ThreadPool enhance/multi-format robustes aux exceptions | — | error rows | — | sync OK | Avant : 1 photo crash → tout le pipeline coupé → multi-format jamais lancé. Maintenant : crash isolé, ligne d'erreur dans l'UI, pipeline continue |
 
 ### ⏳ Features à venir (à compléter)
 
