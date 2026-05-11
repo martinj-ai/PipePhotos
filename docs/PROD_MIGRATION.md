@@ -266,6 +266,8 @@ Le pipeline `/api/run` tourne **synchrone** dans la requête HTTP : un `POST /ap
 | Gate strict Booking : amenities non déclarées Booking → bucket désactivé | — | — | — | sync OK | Plus de risque de classer en cabana une photo lookalike d'un autre hôtel |
 | Veto étendu sur warnings critiques (éclairage hors-brand, pas de focus amenity) | — | rejected_low_score table | — | sync OK | Applique à TOUS les buckets, pas que non-amenity |
 | Photo transformable (nuit/sombre) : pas de pénalité dominance | — | — | — | sync OK | Score +45 typique sur une photo piscine nuit, lui permet d'être rescue propre par ai_lighting |
+| Outpainting checked par défaut (UI) | — | — | — | sync OK | Préférence Martin — il oubliait systématiquement |
+| Wipe `enhanced/` au début d'un run complet (sauf en replay) | écrasement | — | — | sync OK | **Important prod** : en CDN, lors d'un run complet, il faudra invalider/supprimer les anciennes versions enhanced d'un slug (sinon URLs cachées 1 an pointent vers anciennes) |
 
 ### ⏳ Features à venir (à compléter)
 

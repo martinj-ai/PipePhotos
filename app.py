@@ -824,6 +824,16 @@ def api_run():
     progress.update(f"{slug}_analyze", step="enhancing", current=0, total=len(selected_filenames))
 
     enhanced_dir = ROOT / "data" / "output" / slug / "enhanced"
+    # ━━ Cleanup enhanced/ au début d'un run COMPLET (resume_from=scrape) ━━
+    # Sans ce wipe, des photos enhanced d'anciens runs traînent sur disque et
+    # polluent le mode "reprendre depuis postprocess" (on chargerait des
+    # photos qui ne sont plus dans la sélection actuelle).
+    # On NE supprime PAS en mode replay : le but du replay c'est justement
+    # de re-utiliser ces fichiers.
+    if not use_analysis_cache and not use_enhance_cache and enhanced_dir.exists():
+        import shutil as _shutil
+        _shutil.rmtree(enhanced_dir)
+
     enhanced_results = []
     enhancement_cost_usd = 0.0
     enhancement_input_tokens = 0
