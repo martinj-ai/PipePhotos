@@ -181,6 +181,28 @@ def find_hotel_site(name: str, city: str | None = None, country: str | None = No
     if _is_blacklisted(url):
         return {"url": None, "source": "gemini", "error": f"URL Gemini = plateforme exclue ({urlparse(url).netloc})"}
 
+    # ━━ Trusted chain domains : on FAIT CONFIANCE à Gemini sans tester l'URL ━━
+    # Bug observé Martin (12/05/2026) sur Moxy Miami South Beach (Marriott) : Cloudflare
+    # Enterprise renvoie HTTP 403 à notre Playwright stealth pour les chaînes (Marriott,
+    # Hilton, Hyatt, Accor...). _check_url_alive échouait → erreur "URL Gemini ne répond
+    # pas : HTTP 403" → photos officielles perdues, alors que ces sites HÉBERGENT bien
+    # une galerie hôtel valide. TRUSTED_CHAIN_DOMAINS était déjà défini mais jamais
+    # utilisé. Fix : si l'URL appartient à un domaine trusted, on skip le check d'aliveness
+    # → l'extracteur (hotel_gallery_extractor) tentera Playwright sur l'URL. Si lui aussi
+    # échoue, on tombe naturellement sur Booking via le orchestrateur.
+    host = urlparse(url).netloc.lower().lstrip("www.")
+    is_trusted_chain = any(host == d or host.endswith("." + d) for d in TRUSTED_CHAIN_DOMAINS)
+
+    if is_trusted_chain:
+        return {
+            "url": url,
+            "source": "gemini",
+            "confidence": suggestion.get("confidence", "medium"),
+            "title": None,
+            "name_match": None,
+            "trusted_chain_skip_check": True,
+        }
+
     check = _check_url_alive(url, hotel_name=name)
     if not check["alive"]:
         return {
