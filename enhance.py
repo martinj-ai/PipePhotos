@@ -729,12 +729,22 @@ def compute_target_humans(persona: str, capacity: int) -> int:
 import hashlib
 
 POOL_FLOATS_OPTIONS = [
-    "a classic pink inflatable flamingo float",
-    "a giant inflatable pineapple float (yellow with green leaves)",
-    "a colorful donut pool float (pink with sprinkles)",
-    "a white inflatable swan float",
-    "a watermelon slice inflatable float (pink and green)",
-    "a translucent pastel-colored inflatable ring (clean minimal aesthetic)",
+    # Classiques iconiques (toujours efficaces)
+    "a classic pink inflatable flamingo float — full body, gold details, photogenic top-pose",
+    "a giant inflatable pineapple float — bright yellow body with realistic green leaves on top",
+    "a colorful donut pool float — pink frosting with rainbow sprinkles, glossy finish",
+    "a white inflatable swan float — elegant, large wings, gold beak accents",
+    "a watermelon slice inflatable float — pink flesh with dark seeds and green rind",
+    "a translucent pastel-colored inflatable ring — clean minimalist aesthetic, soft mint or peach tone",
+    # Instagrammable / influenceur-friendly (Martin 12/05/2026)
+    "a magical inflatable unicorn float — pastel rainbow mane, gold horn, soft white body",
+    "a giant inflatable rainbow arch float — multicolor stripes, photogenic from above",
+    "an avocado pool float — green outer ring with a centered brown stone (you can sit IN it)",
+    "an inflatable ice cream cone float — pastel scoop on a waffle cone pattern, cherry on top",
+    "a golden swan float — same as classic swan but in metallic gold finish (luxe instagram aesthetic)",
+    "an inflatable peacock float — turquoise and emerald body with realistic tail feather pattern",
+    "an inflatable shell float — iridescent pearl-pink scallop, mermaidcore aesthetic",
+    "an inflatable lemon slice float — bright yellow with white pulp pattern, summer-fresh look",
 ]
 
 POOL_FLOAT_BASE_PROBABILITY = 0.35
@@ -757,9 +767,10 @@ def pick_pool_float_hint(
     # Seuls les scènes piscine sont éligibles (rooftop ok ssi le mot pool est dedans)
     if "piscine" not in cat_lower and "pool" not in cat_lower:
         return None
-    # 12/05/2026 (Martin) : les vues aériennes piscine RESTENT éligibles pour les bouées.
+    # Les vues aériennes piscine RESTENT éligibles pour les bouées.
     # Référence : hero homepage Dayuse avec bouée flamingo en vue aérienne. La bouée est
     # parfaitement visible en aerial (contrairement à un humain qui serait trop petit).
+    is_aerial = "aerienne" in cat_lower or "aerial" in cat_lower
 
     # Probabilité ajustée par vibe
     prob = POOL_FLOAT_BASE_PROBABILITY
@@ -767,6 +778,13 @@ def pick_pool_float_hint(
         prob += 0.20
     elif vibe in ("Luxe", "Serene"):
         prob -= 0.20
+    # ━━ Boost vue aérienne (Martin 12/05/2026) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Sur piscine_vue_aerienne, l'ajout d'humain est interdit (figure trop petite) ⇒
+    # la bouée est le SEUL élément playful possible pour casser le cadrage plat.
+    # Cap à 0.70 → on garantit ~7/10 photos aerial pool avec bouée tout en gardant
+    # une part de variété (3/10 sans bouée pour les scènes type spa minimaliste).
+    if is_aerial:
+        prob = max(prob, 0.70)
     prob = max(0.0, min(1.0, prob))
 
     # Random déterministe par filename → reproductible sur replay
@@ -2023,6 +2041,20 @@ def enhance_one(input_path: Path, strategy: dict, output_dir: Path) -> dict:
             # ET celles de ai_add_character. Sinon faux positif → retry → fallback original.
             ai_steps = [s for s in steps if s["action"].startswith("ai_")]
             ai_actions_chain = [s["action"] for s in ai_steps]
+
+            # ━━ Injection virtuelle "ai_add_pool_float" si un step a utilisé pool_float_hint ━━
+            # Bug observé Martin (12/05/2026) sur booking_026 : ai_add_character avec
+            # pool_float_hint injecté dans le prompt → bouée ajoutée dans la photo →
+            # validator post-IA flag "invented_pool_float" car la whitelist de
+            # ai_add_character ne l'inclut pas. Faux positif → la photo paraît
+            # "Bouée inventée (hors règle pipeline)" alors qu'on a EXPLICITEMENT
+            # voulu cette bouée. Fix : si un step a pool_float_used (bouée VOULUE),
+            # on injecte "ai_add_pool_float" comme action virtuelle dans la chaîne
+            # → la whitelist union autorise invented_pool_float.
+            if any(s.get("pool_float_used") for s in steps):
+                if "ai_add_pool_float" not in ai_actions_chain:
+                    ai_actions_chain = list(ai_actions_chain) + ["ai_add_pool_float"]
+
             primary_ai_action = ai_actions_chain[-1] if ai_actions_chain else None
             try:
                 ai_validation = ai_validator.validate_ai_output(
