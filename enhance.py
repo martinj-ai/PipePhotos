@@ -197,6 +197,7 @@ KEEP EXACTLY IDENTICAL:
 - All hospitality furniture (loungers, daybeds, parasols, tables, chairs, sofas)
 - All structures, lighting fixtures, plants, water, sky, architecture proper
 - **Permanent safety fences / railings** : pool fences (glass, metal, wire mesh, wooden), spa enclosure fences, balcony railings, rooftop balustrades, terrace handrails, pool ladders, pool steps, pool grab-rails. Even if they look "industrial" or "ugly" — they MUST stay. Their absence makes the photo unusable (safety liability).
+- **Decorative inflatable pool floats** floating in the water (flamingo, unicorn, donut, pineapple, watermelon, swan, avocado, pastel ring, etc.). These are the EXACT type of "instagrammable playful" element Dayuse strategy actively ADDS to other photos. Removing them defeats the brand intent. Keep them. Only exception : a clearly broken / deflated / dirty float lying on the deck (not in water) can be removed.
 - Any food/drinks SERVED on a dining table (cocktail, plate of food → keep; abandoned dirty glass on a lounger → remove)
 - All people present in the scene
 
@@ -989,6 +990,17 @@ If you cannot follow the SCENARIO described below without modifying the surround
 🔢 COUNTING DOUBLE-CHECK (before finalizing):
 Before submitting your output, count the visible humans you've added. If count > {target_n}, REMOVE the extra people. The output must have EXACTLY {target_n} ADDED humans (in addition to any humans that were already in the original photo, which you must preserve).
 
+📏 SCALE LOCK — match the subject size to existing visible furniture (CRITICAL — non-negotiable) :
+The HUMAN HEIGHT in the output is fully constrained by the size of the existing furniture/architecture visible in the input. Use these references :
+- A STANDING ADULT is ≈ 2× the height of an empty pool lounger / daybed (lounger ≈ 80cm tall, adult ≈ 170cm). If the lounger in the photo appears N pixels tall, the standing adult should be ≈ 2N pixels tall.
+- An ADULT SITTING UPRIGHT on a lounger / chair is ≈ 1.3× the height of the seat (head sticking up).
+- An ADULT LYING / RECLINING on a lounger occupies ≈ 1× the lounger length.
+- An ADULT'S HEAD in the water (pool swimming) is ≈ ½ the width of a typical pool lane (≈ 1m).
+
+⚠️ If you cannot find a visible chair/lounger/parasol/window in the frame to anchor the scale, the photo is likely a wide shot or aerial — DO NOT add a full human, instead OMIT the addition (return the image WITHOUT a human) rather than guessing scale. A wrong-scale human (giant or tiny) is much worse than no human.
+
+Common failure mode to avoid : in a "panoramic" frame where the pool is small (e.g. drone-style shot of the whole hotel), do NOT place a person standing next to the pool sized like a regular ground-level photo — they would appear as 2-3× the pool width, completely breaking realism.
+
 PHYSICAL SAFETY & PLAUSIBILITY (CRITICAL — non-negotiable):
 
 🔥 PRIORITY RULE FOR POOL/WATER SCENES — the most common failure mode:
@@ -1649,8 +1661,13 @@ def is_add_character_candidate(analysis: dict) -> bool:
          Sans ce guard, l'alternance app.py compte faussement un "humain ajouté" sur ces
          slots qui seront skippés par enhance.py → casse l'alternance → cascade de slots
          sans humain (bug observé Martin 11/05/2026 sur pack avec piscine_vue_aerienne + f_and_b).
-      2. Champ explicite Gemini ai_add_character_candidate.is_candidate
-      3. Heuristique : catégorie ∈ AI_OK + pas de présence humaine narrative
+      2. Guard SHOT_TYPE problématique : aerial → toujours False (figure trop petite,
+         Gemini Image génère un humain mal proportionné), wide sans human_can_be_prominent
+         → False (cas où l'amenity domine et l'humain serait trop petit ou perdu dans
+         le cadre). Bug observé Martin 12/05/2026 sur booking_001 (exterieur shot_type=aerial,
+         humains ajoutés au bord de piscine vus de très loin = échelle complètement faussée).
+      3. Champ explicite Gemini ai_add_character_candidate.is_candidate
+      4. Heuristique : catégorie ∈ AI_OK + pas de présence humaine narrative
     """
     if not analysis:
         return False
@@ -1660,6 +1677,20 @@ def is_add_character_candidate(analysis: dict) -> bool:
 
     # ━ Guard #1 : catégories métier exclues — court-circuit indépendant de Gemini ━
     if cat in _BUSINESS_RULE_EXCLUDED_CATS:
+        return False
+
+    # ━ Guard #2 : shot_type problématique (échelle humain irréaliste) ━
+    shot_block = analysis.get("shot_type") or {}
+    shot_t = (shot_block.get("type") or "").lower()
+    human_can_be_prominent = bool(shot_block.get("human_can_be_prominent"))
+    if shot_t == "aerial":
+        # Vue drone / aérienne : l'humain serait minuscule (< 30px) ou complètement
+        # faussé par Gemini Image. La photo se passe d'humain.
+        return False
+    if shot_t == "wide" and not human_can_be_prominent:
+        # Wide où Gemini lui-même a dit que l'humain ne pourra PAS être proéminent
+        # (= pas de premier plan avec mobilier accueillant). Le résultat sera mal
+        # proportionné ou perdu dans le cadre.
         return False
 
     ai_block = analysis.get("ai_add_character_candidate")
