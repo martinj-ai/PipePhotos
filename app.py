@@ -1146,9 +1146,16 @@ def api_run():
                 with enhance_lock:
                     enhance_progress["done"] += 1
                 continue
-            slot, filename, payload = ret
-            result = payload["result"]
-            strategy = payload["strategy"]
+            # ━━ BUGFIX critique (Martin 12/05/2026) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # Avant : la variable `payload` était écrasée ICI par le résultat enhance
+            # → tout en bas (ligne ~1215), `payload.get("output_formats")`, `payload.get(
+            # "outpaint_enabled")`, `payload.get("slowmo_enabled")` lisaient sur le DICT
+            # enhance (`{"strategy":..., "result":...}`) au lieu du body HTTP original.
+            # → multi-format et slowmo SILENCIEUSEMENT désactivés peu importe ce que le
+            # client cochait. On utilise désormais un nom local distinct.
+            slot, filename, enhance_ret = ret
+            result = enhance_ret["result"]
+            strategy = enhance_ret["strategy"]
             with enhance_lock:
                 enhanced_by_slot[slot] = {"filename": filename, "final_order_pos": slot, **result}
                 enhancement_cost_usd += result.get("cost_usd", 0)
