@@ -1586,9 +1586,86 @@ def serve_multiformat(slug, filename):
     return send_from_directory(ROOT / "data" / "output" / slug / "multiformat", filename)
 
 
+def _seo_slug_from_name(name: str | None, fallback_slug: str) -> str:
+    """Construit un slug SEO-friendly depuis le nom de l'hôtel.
+
+    Préférence : 'Moxy Miami South Beach' → 'moxy-miami-south-beach' (lisible
+    par les bots IA). Si le nom est absent, on retombe sur le slug interne en
+    retirant les préfixes techniques (booking-, hyatt-, …).
+    """
+    if name:
+        import re as _re
+        # Lowercase + remplace tout ce qui n'est pas alphanumérique par "-"
+        slug = _re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+        if slug:
+            return slug
+    # Fallback : on retire un éventuel préfixe technique du slug interne
+    s = fallback_slug.lower()
+    for prefix in ("booking-", "hyatt-", "hilton-", "marriott-", "rp-"):
+        if s.startswith(prefix):
+            s = s[len(prefix):]
+            break
+    return s or fallback_slug
+
+
+def _build_seo_filename_map(slug: str, files: list[Path]) -> dict[str, str]:
+    """Renvoie {original_filename → SEO_filename} pour les fichiers passés.
+
+    Format SEO : `{hotel-slug}_{amenity}_{seq:02d}.{ext}`
+      - hotel-slug : nom de l'hôtel slugifié (depuis data/rp/{slug}.json)
+      - amenity    : catégorie principale Gemini (`factual.category`), nettoyée
+      - seq        : numéro séquentiel basé sur l'ordre alphabétique des filenames
+                     d'origine (qui suit en pratique l'ordre du pack final)
+
+    Permet de produire un ZIP où chaque fichier a un nom parlant pour les bots
+    IA / SEO image, ex: `moxy-miami-south-beach_piscine_01.jpg`.
+    """
+    # Lit le nom de l'hôtel depuis le RP scrapé (fallback : slug)
+    rp_path = ROOT / "data" / "rp" / f"{slug}.json"
+    hotel_name = None
+    if rp_path.exists():
+        try:
+            with open(rp_path) as f:
+                hotel_name = json.load(f).get("name")
+        except Exception:
+            pass
+    hotel_slug = _seo_slug_from_name(hotel_name, slug)
+
+    analyses_dir = ROOT / "data" / "analyses" / slug
+
+    # Pour chaque file, on récupère sa catégorie principale (factual.category)
+    name_map: dict[str, str] = {}
+    for seq, f in enumerate(files, 1):
+        amenity = "photo"  # fallback si l'analyse manque
+        analysis_path = analyses_dir / f"{f.stem}.json"
+        if analysis_path.exists():
+            try:
+                with open(analysis_path) as fh:
+                    data = json.load(fh)
+                cat = ((data.get("analysis") or {}).get("factual") or {}).get("category") or ""
+                cat = cat.lower().strip()
+                if cat:
+                    # Quelques renommages plus parlants côté brand
+                    amenity = {
+                        "f_and_b": "bar-restaurant",
+                        "piscine_vue_aerienne": "piscine-vue-aerienne",
+                        "interieur_commun": "lobby",
+                    }.get(cat, cat)
+            except Exception:
+                pass
+        ext = f.suffix.lower()
+        name_map[f.name] = f"{hotel_slug}_{amenity}_{seq:02d}{ext}"
+    return name_map
+
+
 @app.route("/api/download-zip/<slug>")
 def api_download_zip(slug):
-    """Pack les photos retouchées finales en ZIP pour téléchargement."""
+    """Pack les photos retouchées finales en ZIP pour téléchargement.
+
+    Renomme chaque fichier en `{hotel-slug}_{amenity}_{seq:02d}.jpg` pour que
+    les noms parlent aux bots IA / SEO image. L'ordre seq suit l'ordre du
+    pack final (= ordre alphabétique des filenames origine, qui matche).
+    """
     import zipfile
     import io as _io
 
@@ -1600,10 +1677,21 @@ def api_download_zip(slug):
     if not files:
         return jsonify({"error": "Dossier de retouches vide"}), 404
 
+    name_map = _build_seo_filename_map(slug, files)
+    # Préfixe du ZIP basé sur le hotel-slug aussi (cohérence)
+    rp_path = ROOT / "data" / "rp" / f"{slug}.json"
+    hotel_name = None
+    if rp_path.exists():
+        try:
+            hotel_name = json.load(open(rp_path)).get("name")
+        except Exception:
+            pass
+    hotel_slug = _seo_slug_from_name(hotel_name, slug)
+
     buf = _io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in files:
-            zf.write(f, arcname=f.name)
+            zf.write(f, arcname=name_map.get(f.name, f.name))
     buf.seek(0)
 
     from flask import send_file
@@ -1611,7 +1699,7 @@ def api_download_zip(slug):
         buf,
         mimetype="application/zip",
         as_attachment=True,
-        download_name=f"{slug}_dayaccess_final_pack.zip",
+        download_name=f"dayuse_{hotel_slug}_pack.zip",
     )
 
 
@@ -1802,7 +1890,12 @@ def api_mcscla_fields():
 
 @app.route("/api/download-multiformat-zip/<slug>")
 def api_download_multiformat_zip(slug):
-    """Pack le dossier multiformat (1 sous-dossier par format) en ZIP."""
+    """Pack le dossier multiformat (1 sous-dossier par format) en ZIP.
+
+    Chaque variante est renommée en `{hotel-slug}_{amenity}_{seq:02d}.jpg`
+    (seq calculé sur l'ordre alphabétique du nom d'origine = ordre du pack).
+    La structure du ZIP conserve les sous-dossiers par format_id.
+    """
     import zipfile
     import io as _io
 
@@ -1810,18 +1903,41 @@ def api_download_multiformat_zip(slug):
     if not multiformat_dir.exists():
         return jsonify({"error": "Aucun multi-format généré. Coche au moins un format dans Step 4 et relance la pipeline."}), 404
 
+    # Construit le mapping SEO une fois (basé sur l'ordre alphabétique du 1er
+    # sous-dossier non-vide) pour que tous les formats partagent la même
+    # numérotation séquentielle.
+    reference_files = []
+    for sub in sorted([s for s in multiformat_dir.iterdir() if s.is_dir()]):
+        candidates = sorted([f for f in sub.iterdir() if f.is_file() and f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")])
+        if candidates:
+            reference_files = candidates
+            break
+    name_map = _build_seo_filename_map(slug, reference_files) if reference_files else {}
+
     # Liste tous les fichiers (jpg dans sous-dossiers + manifest.json à la racine)
     files = []
     for sub in multiformat_dir.iterdir():
         if sub.is_dir():
             for f in sub.iterdir():
                 if f.is_file() and f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
-                    files.append((f, f"{sub.name}/{f.name}"))
+                    # Renomme via name_map (tous formats partagent le mapping)
+                    seo_name = name_map.get(f.name, f.name)
+                    files.append((f, f"{sub.name}/{seo_name}"))
         elif sub.is_file() and sub.name == "manifest.json":
             files.append((sub, sub.name))
 
     if not any(arcname.endswith((".jpg", ".jpeg", ".png", ".webp")) for _, arcname in files):
         return jsonify({"error": "Aucune variante générée (peut-être que tous les formats ont été skippés)."}), 404
+
+    # Préfixe ZIP cohérent avec le hotel slug
+    rp_path = ROOT / "data" / "rp" / f"{slug}.json"
+    hotel_name = None
+    if rp_path.exists():
+        try:
+            hotel_name = json.load(open(rp_path)).get("name")
+        except Exception:
+            pass
+    hotel_slug = _seo_slug_from_name(hotel_name, slug)
 
     buf = _io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -1834,7 +1950,7 @@ def api_download_multiformat_zip(slug):
         buf,
         mimetype="application/zip",
         as_attachment=True,
-        download_name=f"{slug}_multiformat_pack.zip",
+        download_name=f"dayuse_{hotel_slug}_multiformat.zip",
     )
 
 
