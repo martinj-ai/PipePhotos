@@ -42,6 +42,8 @@ import instagram_scraper
 import booking_amenities_extractor
 import slowmo_higgsfield
 import pdf_export
+import expedia_finder
+import expedia_scraper
 
 ROOT = Path(__file__).parent
 UPLOADS_DIR = ROOT / "data" / "uploads"
@@ -178,7 +180,7 @@ def api_fetch_all_sources():
     payload = request.get_json(silent=True) or {}
     slug = (payload.get("slug") or "").strip()
     booking_url = (payload.get("booking_url") or "").strip()
-    sources = payload.get("sources") or {"official": True, "booking": True, "rp": True}
+    sources = payload.get("sources") or {"official": True, "booking": True, "rp": True, "expedia": True, "instagram": True}
 
     if not slug:
         return jsonify({"error": "slug manquant (scrape RP d'abord)"}), 400
@@ -277,7 +279,62 @@ def api_fetch_all_sources():
         (hotel_dir / "_rp_temp").rmdir() if (hotel_dir / "_rp_temp").exists() and not list((hotel_dir / "_rp_temp").iterdir()) else None
         sources_summary["rp"] = {"photos_downloaded": len(ok)}
 
-    # ━━━ SOURCE 4 : Instagram ━━━
+    # ━━━ SOURCE 4 : Expedia ━━━
+    # URL trouvée automatiquement par Gemini (comme pour site officiel + Instagram).
+    # Risque connu : Gemini peut halluciner l'ID numérique (h{ID}) → URL inexistante
+    # → 0 photo. Dans ce cas on log proprement, le pipeline continue.
+    if sources.get("expedia"):
+        progress.update(f"{slug}_fetch_all", step="expedia_finding", current=70, total=100,
+                        message="Recherche URL Expedia via Gemini…")
+        expedia_result = expedia_finder.find_expedia_url(
+            name=rp_data.get("name", ""),
+            city=rp_data.get("city", ""),
+            country=rp_data.get("country", ""),
+        )
+        if expedia_result and expedia_result.get("url"):
+            expedia_url = expedia_result["url"]
+            progress.update(f"{slug}_fetch_all", step="expedia_scraping", current=73, total=100,
+                            message=f"Scraping Expedia (Playwright stealth)…")
+            try:
+                urls = expedia_scraper.scrape_expedia_photos(expedia_url)
+                results = expedia_scraper.download_photos_to_dir(urls, hotel_dir / "_expedia_temp", max_photos=80)
+                ok = [r for r in results if r["status"] == "ok"]
+                for i, r in enumerate(ok, 1):
+                    old = hotel_dir / "_expedia_temp" / r["filename"]
+                    base = r["filename"].split("_", 2)[-1] if "_" in r["filename"] else r["filename"]
+                    new_name = f"expedia_{i:03d}_{base}"
+                    new_path = hotel_dir / new_name
+                    if old.exists():
+                        old.rename(new_path)
+                        all_files.append({"name": new_name, "size": r["size"], "source": "expedia"})
+                tmp = hotel_dir / "_expedia_temp"
+                if tmp.exists() and not list(tmp.iterdir()):
+                    tmp.rmdir()
+                sources_summary["expedia"] = {
+                    "url": expedia_url,
+                    "confidence": expedia_result.get("confidence"),
+                    "photos_downloaded": len(ok),
+                    "photos_found": len(urls),
+                }
+                if len(urls) == 0:
+                    sources_summary["expedia"]["error"] = (
+                        "0 photo extraite (URL Gemini probablement hallucinée — "
+                        "ID Expedia inexistant)"
+                    )
+            except Exception as e:
+                sources_summary["expedia"] = {
+                    "url": expedia_url,
+                    "error": str(e)[:200],
+                    "photos_downloaded": 0,
+                }
+        else:
+            sources_summary["expedia"] = {
+                "url": None,
+                "error": (expedia_result or {}).get("error", "URL Expedia introuvable via Gemini"),
+                "photos_downloaded": 0,
+            }
+
+    # ━━━ SOURCE 5 : Instagram ━━━
     if sources.get("instagram"):
         progress.update(f"{slug}_fetch_all", step="instagram_finding", current=82, total=100,
                         message="Recherche compte Instagram via Gemini…")

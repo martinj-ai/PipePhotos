@@ -384,6 +384,15 @@
           </div>
         </label>
 
+        <!-- Source : Expedia (auto-discovery URL via Gemini) -->
+        <label class="flex items-start gap-3 border border-dayuse-border rounded-lg p-3 cursor-pointer hover:bg-amber-50/40">
+          <input type="checkbox" id="src-expedia" checked class="mt-0.5 w-4 h-4 accent-dayuse-primary">
+          <div class="flex-1">
+            <div class="text-sm font-semibold">🌍 Expedia <span class="text-gray-400 text-[10px] font-normal">(URL auto via Gemini)</span></div>
+            <div class="text-xs text-gray-600 mt-0.5">Cherche l'URL de la fiche hôtel sur expedia.com via Gemini, puis scrape la galerie photos (Playwright stealth). Comportement similaire au site officiel. <span class="text-amber-700">⚠️ Gemini peut halluciner l'ID Expedia (h{ID}) → 0 photo extraite. Dans ce cas un warning s'affiche, pas de blocage.</span></div>
+          </div>
+        </label>
+
         <!-- Source : Instagram -->
         <label class="flex items-start gap-3 border border-amber-200 bg-amber-50/40 rounded-lg p-3 cursor-pointer hover:bg-amber-50">
           <input type="checkbox" id="src-instagram" class="mt-0.5 w-4 h-4 accent-dayuse-primary">
@@ -2253,9 +2262,10 @@ photo finale enhanced (jpeg)
         official: $("src-official").checked,
         booking: $("src-booking").checked,
         rp: $("src-rp").checked,
+        expedia: $("src-expedia") ? $("src-expedia").checked : false,
         instagram: $("src-instagram").checked,
       };
-      if (!sources.official && !sources.booking && !sources.rp) {
+      if (!sources.official && !sources.booking && !sources.rp && !sources.expedia && !sources.instagram) {
         alert("Coche au moins une source.");
         return;
       }
@@ -2308,7 +2318,7 @@ photo finale enhanced (jpeg)
       if (!sources) { el.classList.add("hidden"); return; }
       el.classList.remove("hidden");
       const rows = [];
-      const SOURCE_LABELS = { official: "Site officiel", booking: "Booking.com", rp: "ResortPass", instagram: "Instagram" };
+      const SOURCE_LABELS = { official: "Site officiel", booking: "Booking.com", rp: "ResortPass", expedia: "Expedia", instagram: "Instagram" };
       for (const [key, info] of Object.entries(sources)) {
         const label = SOURCE_LABELS[key] || key;
         if (info.error) {
