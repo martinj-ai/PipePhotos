@@ -869,13 +869,14 @@ flowchart TD
 
           <!-- Règle 3 : Ajout humain -->
           <div class="border-l-4 border-orange-400 pl-3 py-1 bg-orange-50/50 rounded-r">
-            <div class="text-sm font-semibold text-orange-900">👤 Quand on ajoute un humain (alternance stricte)</div>
+            <div class="text-sm font-semibold text-orange-900">👤 Quand on ajoute un humain (alternance souple)</div>
             <ul class="text-xs text-gray-700 mt-1 ml-4 list-disc space-y-0.5">
-              <li><strong>Slot 1 obligatoire</strong> : ajout IA si pas d'humain natif (et photo candidate)</li>
-              <li><strong>Alternance 1 sur 2</strong> : jamais 2 photos sans humain à la suite. Si la précédente n'a pas d'humain → la suivante DOIT en avoir un (natif ou ajouté IA)</li>
-              <li><strong>Catégories autorisées</strong> pour ajout : pool, cabana, rooftop, beach, exterieur, interieur_commun, gym</li>
-              <li><strong>Catégories interdites</strong> pour ajout : f_and_b plats, chambre, staff, piscine_vue_aerienne (drone — humain serait minuscule)</li>
-              <li><strong>Rotation des personas</strong> selon vibe RP : Trendy → solos/couples/small_groups en alternance</li>
+              <li><strong>Slot 1 garanti</strong> : la photo en slot 1 a TOUJOURS un humain (natif ou ajouté IA). Si la 1<sup>ère</sup> photo prioritaire pool ne peut pas accueillir d'humain (shot_type aerial / wide non-prominent / catégorie exclue), l'ordering choisit la <em>suivante</em> de la même catégorie qui le permet.</li>
+              <li><strong>Slots N &gt; 1 — alternance 1 sur 2 souple</strong> : on essaie d'ajouter un humain si la photo précédente n'en avait pas. Mais on n'<strong>impose pas</strong> — si 3 photos consécutives ne se prêtent pas (ex: 2 vues aériennes + 1 F&B), on accepte 0 humain plutôt qu'un humain mal placé. <em>Mieux 0 humain bien fait qu'1 humain raté.</em></li>
+              <li><strong>Conditions pour qu'une photo soit candidate à l'ajout IA</strong> : catégorie autorisée + shot_type permettant un humain proportionné (pas aerial, pas wide-sans-mobilier-au-premier-plan).</li>
+              <li><strong>Catégories autorisées</strong> pour ajout : pool, cabana, rooftop, beach, exterieur, interieur_commun, gym, spa</li>
+              <li><strong>Catégories interdites</strong> pour ajout : f_and_b plats (risque inventer un plat), chambre, staff, piscine_vue_aerienne (drone — humain minuscule), detail, facade</li>
+              <li><strong>Rotation des personas</strong> selon vibe RP + family_friendly_indicators : couples / small_groups / solos / families</li>
               <li><strong>Bonus lifestyle</strong> : gardent leur humain natif, jamais d'ajout IA additionnel</li>
             </ul>
           </div>
@@ -1272,11 +1273,12 @@ flowchart TD
 
         <!-- Règle alternance -->
         <div class="border-l-4 border-orange-400 pl-3 py-3 bg-orange-50/50 rounded-r mb-4">
-          <h3 class="text-sm font-bold text-orange-900 mb-1.5">⚖ Règle d'alternance (1 photo sur 2)</h3>
+          <h3 class="text-sm font-bold text-orange-900 mb-1.5">⚖ Règle d'alternance (souple, pas imposée)</h3>
           <ul class="text-xs text-dayuse-ink2 space-y-1 ml-4 list-disc">
-            <li><strong>Slot 1</strong> : humain obligatoire (natif ou ajouté IA). Photo de couverture sans humain = manque chaleureux.</li>
-            <li><strong>Slots N &gt; 1</strong> : alternance stricte. Si la photo précédente n'a pas d'humain, la suivante DOIT en avoir.</li>
-            <li><strong>Jamais 2 photos sans humain à la suite</strong>, sauf cas de force majeure (toutes les photos restantes sont des catégories interdites à l'ajout : f_and_b plats, vue aérienne, etc.).</li>
+            <li><strong>Slot 1 — humain garanti</strong> : photo natif avec humain visible OU photo où l'ajout IA est sain (catégorie autorisée + shot_type permettant un humain proéminent). Si la photo candidate prioritaire (pool en Tier 0) ne le permet pas, l'<em>ordering choisit la suivante</em> de la même catégorie qui le permet — quitte à descendre dans le ranking interne. Garantit que la photo de couverture est toujours incarnée.</li>
+            <li><strong>Slots N &gt; 1 — alternance opportuniste</strong> : on essaie 1 sur 2. Si la photo précédente n'avait pas d'humain ET la photo actuelle est candidate → on ajoute. Si la photo actuelle n'est PAS candidate (aerial, F&B plat, etc.) → on n'ajoute pas et on accepte la cascade.</li>
+            <li><strong>Pas de garde-fou « force-add » sur cascade</strong> (changement Martin 12/05/2026) : on n'impose plus l'ajout après 2 slots sans humain. Trade-off accepté : un pack peut avoir 3+ photos consécutives sans humain si elles ne s'y prêtent vraiment pas. <em>Mieux 0 humain bien fait qu'un humain mal proportionné</em>.</li>
+            <li><strong>Conditions pour qu'une photo soit candidate à l'ajout IA</strong> : catégorie ∈ autorisées + shot_type ∈ {close_up, medium} OU (wide + human_can_be_prominent=true). Les vues aériennes et les wides sans mobilier au premier plan sont exclues automatiquement.</li>
             <li><strong>Bonus lifestyle</strong> : déjà des humains natifs, donc traitées comme « avec humain » dans l'alternance.</li>
           </ul>
         </div>

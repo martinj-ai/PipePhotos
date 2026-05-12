@@ -1023,22 +1023,27 @@ def api_run():
             order = pool_personas
         return order[rotation_idx % len(order)] if order else "couples"
 
-    # ━━ Alternance humains : on essaie 1/2 mais avec garde-fou anti-cascade ━━
-    # Bug observé Martin (11/05/2026) : sur un pack avec piscine_vue_aerienne + f_and_b
-    # (catégories où enhance.py skip l'ajout pour règle métier), `prev_will_have_human`
-    # devenait True à tort → cascade de slots sans humain.
-    # Fix 1 (côté enhance.is_add_character_candidate) : exclut ces cat de tête → is_candidate=False
-    # → l'alternance ne les compte pas faussement comme "humain ajouté".
-    # Fix 2 (ici, garde-fou) : si 2 slots consécutifs n'ont PAS d'humain (natif ni ajouté), on
-    # FORCE l'ajout sur le slot suivant SI is_candidate (peu importe l'alternance 1/2). Évite
-    # de se retrouver avec 3+ photos sans humain à la suite.
+    # ━━ Alternance humains : SOUPLE (Martin 12/05/2026 — "donner du mou") ━━
+    # Règles actuelles :
+    #   1. Slot 1 forcé avec humain SI is_candidate (mais ordering.py garantit en amont
+    #      qu'un slot 1 sans humain possible n'est PAS choisi → la photo slot 1 est
+    #      toujours human-ready)
+    #   2. Slots N>1 : alternance 1/2 — on ajoute SI is_candidate ET slot précédent
+    #      n'avait pas d'humain.
+    #   3. PAS de garde-fou cascade : si 3+ slots de suite sont non-candidats (ex: 2
+    #      aerial + 1 f_and_b), on accepte la cascade plutôt que de forcer un humain
+    #      mal placé. Retour Martin : "mieux avoir 0 humain bien fait qu'un humain
+    #      mal proportionné".
+    #
+    # Garanties :
+    #   - Slot 1 = TOUJOURS un humain (natif ou ajouté), via ordering.py qui exclut
+    #     les candidats non human-ready (aerial, cat exclue, wide non-prominent)
+    #   - Slots suivants : alternance opportuniste, pas de force
     prev_will_have_human = False
-    consecutive_no_human = 0
     persona_idx = 0
     for idx, entry in enumerate(ordered_pack, 1):
         if entry.get("is_bonus_lifestyle"):
             prev_will_have_human = True
-            consecutive_no_human = 0
             continue
         has_human_native = enhance.has_narrative_human(entry["analysis"])
         is_candidate = enhance.is_add_character_candidate(entry["analysis"])
@@ -1048,9 +1053,6 @@ def api_run():
             will_add = True
         elif not has_human_native and not prev_will_have_human and is_candidate:
             will_add = True
-        # ━ Garde-fou : ≥ 2 slots consécutifs sans humain → forcer si candidate ━
-        elif not has_human_native and consecutive_no_human >= 2 and is_candidate:
-            will_add = True
 
         if will_add:
             fname = entry["input"]["filename"]
@@ -1058,9 +1060,7 @@ def api_run():
             persona_per_filename[fname] = _pick_contextual_persona(entry, persona_idx)
             persona_idx += 1
 
-        slot_has_human = has_human_native or will_add
-        prev_will_have_human = slot_has_human
-        consecutive_no_human = 0 if slot_has_human else consecutive_no_human + 1
+        prev_will_have_human = has_human_native or will_add
 
     # === Boucle de retouche : on itère dans l'ORDRE FINAL du pack (slot 1, 2, ...) ===
     # ━━ Parallélisation : 3 workers ThreadPool (I/O-bound — chaque enhance fait des

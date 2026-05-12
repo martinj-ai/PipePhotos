@@ -147,18 +147,26 @@ def _is_slot1_eligible(entry: dict) -> bool:
     if _is_disguised_closeup(entry):
         return False
 
-    # ━ NEW : Slot 1 DOIT pouvoir avoir un humain (natif ou IA ajouté) ━
-    # Catégories où l'ajout perso IA est autorisé (cf enhance.AI_ADD_OK_CATEGORIES).
-    # Si primary_cat n'est PAS dans cette liste ET la photo n'a PAS d'humain natif visible,
-    # alors la photo ne peut pas finir en slot 1 (qui DOIT avoir un humain).
+    # ━ Slot 1 DOIT pouvoir avoir un humain (natif ou ajoutable IA) ━
+    # Sinon on viole la règle brand "slot 1 = photo incarnée".
+    # Si la photo n'a pas d'humain natif → on doit pouvoir EN AJOUTER un :
+    #   1. Catégorie compatible avec ai_add_character (SLOT1_AI_ADDABLE_CATS)
+    #   2. shot_type qui permet un humain proéminent (= pas aerial / pas wide-non-prominent)
+    # Bug observé Martin (12/05/2026) : photo "exterieur" en shot_type=aerial
+    # passait le check cat → slot 1 sélectionné → ajout perso forcé → échelle ratée.
+    # On vérifie maintenant les DEUX conditions.
     SLOT1_AI_ADDABLE_CATS = {
         "piscine", "cabana", "transat", "rooftop", "spa",
         "beach", "exterieur", "interieur_commun", "gym",
     }
     has_native_human = (presence in ("full_visible", "fully visible", "complete")) and human_count > 0
-    can_eventually_have_human = (primary_cat in SLOT1_AI_ADDABLE_CATS) or has_native_human
-    if not can_eventually_have_human:
-        return False
+    if not has_native_human:
+        if primary_cat not in SLOT1_AI_ADDABLE_CATS:
+            return False
+        # Le shot_type doit aussi permettre un humain visible (sinon Gemini Image
+        # ajoute un humain à mauvaise échelle / mal proportionné)
+        if not _human_can_be_prominent(entry):
+            return False
 
     if dom < 50:
         return False
@@ -289,7 +297,12 @@ def order_final_pack(
         )
 
     def _can_eventually_have_human(entry):
-        """Vrai si la photo PEUT recevoir un humain en slot 1 (natif ou ajout IA)."""
+        """Vrai si la photo PEUT recevoir un humain en slot 1 (natif ou ajout IA).
+
+        2 conditions cumulatives quand pas d'humain natif :
+          (a) catégorie autorisée pour ai_add_character
+          (b) shot_type permet un humain proéminent (pas aerial/wide-non-prominent)
+        """
         a = entry.get("analysis") or {}
         f = a.get("factual") or {}
         primary = (f.get("category") or "").lower()
@@ -297,7 +310,12 @@ def order_final_pack(
         AI_OK = {"piscine", "cabana", "transat", "rooftop", "spa", "beach",
                  "exterieur", "interieur_commun", "gym"}
         has_native = (presence in ("full_visible", "fully visible", "complete")) and (f.get("human_count") or 0) > 0
-        return (primary in AI_OK) or has_native
+        if has_native:
+            return True
+        # Pas d'humain natif → on doit pouvoir en ajouter SAFELY
+        if primary not in AI_OK:
+            return False
+        return _human_can_be_prominent(entry)
 
     def _pick_slot1_from_tier(tier_amenities: set) -> dict | None:
         """Sélectionne le meilleur slot 1 candidat dans les amenities de ce tier.
