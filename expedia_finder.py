@@ -37,7 +37,7 @@ EXPEDIA_DOMAINS = {
     "expedia.com.sg",
 }
 
-PROMPT = """Quel est l'URL de la page de l'hôtel suivant sur Expedia ?
+PROMPT = """Quel est l'URL de la fiche hôtel sur Expedia.com pour l'hôtel suivant ?
 
 Hôtel : {name}
 Ville : {city}
@@ -45,10 +45,12 @@ Pays : {country}
 
 Règles strictes :
 - Retourne UNIQUEMENT un objet JSON avec cette structure : {{"url": "https://...", "confidence": "high|medium|low"}}
-- L'URL doit pointer vers la fiche HÔTEL sur expedia.com (ou la version locale .fr, .co.uk, etc.)
-- Format typique : https://www.expedia.com/{{Ville}}-Hotels-{{Nom-Hotel}}.h{{ID_NUMERIQUE}}.Hotel-Information
-- L'URL doit commencer par https:// et le domaine doit être expedia.com (ou variante locale .fr/.co.uk/.de/.es/.it/.ca…)
-- Si tu n'es pas certain de l'URL exacte (notamment l'ID numérique h{{ID}}), retourne {{"url": "UNKNOWN", "confidence": "low"}} plutôt qu'une URL inventée.
+- L'URL doit pointer vers la fiche HÔTEL sur expedia.com (ou version locale .fr / .co.uk / .de / .es / .it / .ca / .com.au / .com.br / .co.jp …).
+- Format canonique : https://www.expedia.com/{{Ville}}-Hotels-{{Nom-Hotel-Tirets}}.h{{ID}}.Hotel-Information
+  où {{ID}} est l'identifiant numérique Expedia interne (8 chiffres environ, ex: h55553829).
+  Attention : la partie {{Ville}} est généralement la ville PRINCIPALE (ex: "Miami-Hotels" même pour un hôtel à Miami Beach).
+- L'URL doit commencer par https:// et le domaine doit être un domaine Expedia officiel.
+- Si tu n'es pas certain de l'ID Expedia (ne JAMAIS inventer un ID au hasard), retourne {{"url": "UNKNOWN", "confidence": "low"}}.
 - Pas de markdown, pas de texte hors JSON.
 """
 
@@ -67,7 +69,7 @@ def _get_client():
 
 
 def _ask_gemini(name: str, city: str, country: str) -> dict | None:
-    """Demande à Gemini l'URL Expedia de l'hôtel. Retourne {url, confidence} ou None."""
+    """Demande à Gemini l'URL Expedia. Pattern strict miroir de hotel_site_finder."""
     client = _get_client()
     try:
         response = client.models.generate_content(
