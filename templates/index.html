@@ -2497,26 +2497,23 @@ photo finale enhanced (jpeg)
         const resumeRadio = document.querySelector('input[name="resume-from"]:checked');
         const resumeFrom = (resumeRadio && resumeRadio.value) || 'scrape';
 
-        // ━━ Garde UX (Martin 12/05/2026) : en mode postprocess, le multi-format est
-        // LA SEULE chose qui re-tourne. Sans format coché, le pipe ne fait littéralement
-        // rien → l'utilisateur revoit juste les anciennes photos sans comprendre. On
-        // confirme explicitement avant de lancer.
+        // ━━ Garde UX (Martin 12/05/2026, reformulé) : en mode postprocess sans
+        // format coché, le pipe ne fait rien — on confirme avant de lancer.
+        // Convention navigateur : OK = procéder, Annuler = stop.
         if (resumeFrom === 'postprocess' && checkedFormats.length === 0) {
           stopPoll();
-          const confirmEmpty = confirm(
-            "Tu lances « Re-générer juste post-process » SANS aucun format de sortie coché.\n\n" +
-            "Dans ce mode, le pipe ne fait que régénérer les formats de sortie (multi-format crop). Sans format coché, RIEN ne sera régénéré — tu reverras juste les photos existantes.\n\n" +
-            "→ Annuler et cocher au moins un format dans la section « 📐 Formats de sortie » avant de relancer ?\n\n" +
-            "OK = annuler et cocher des formats\n" +
-            "Annuler = lancer quand même (revoir l'existant)"
+          const proceed = confirm(
+            "⚠️ « Re-générer juste post-process » SANS aucun format de sortie coché.\n\n" +
+            "Dans ce mode, le pipe ne re-génère QUE les formats de sortie (multi-format crop). Sans format coché, RIEN ne sera régénéré — tu reverras juste les photos existantes.\n\n" +
+            "OK         = lancer quand même (revoir l'existant)\n" +
+            "Annuler   = arrêter et revenir cocher des formats"
           );
-          if (confirmEmpty) {
-            // Ouvrir la section formats pour qu'il puisse cocher
+          if (!proceed) {
+            // L'utilisateur a cliqué "Annuler" → on ouvre la section formats pour cocher
             const formatsSection = document.getElementById('formats-section');
             if (formatsSection) {
               formatsSection.open = true;
               formatsSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              // Flash visuel
               formatsSection.style.transition = 'box-shadow 0.5s ease';
               formatsSection.style.boxShadow = '0 0 0 4px rgba(255, 175, 54, 0.5)';
               setTimeout(() => { formatsSection.style.boxShadow = ''; }, 1500);
@@ -2525,6 +2522,7 @@ photo finale enhanced (jpeg)
             btnRun.textContent = "Lancer le pipeline";
             return;
           }
+          // proceed === true → on continue avec output_formats=[] (assumé conscient)
         }
 
         const r = await fetch("/api/run", {
@@ -4024,28 +4022,11 @@ photo finale enhanced (jpeg)
           postInput.disabled = true;
         }
 
-        // ━━ Pré-cocher les formats déjà générés (Martin 12/05/2026) ━━
-        // Si l'hôtel a déjà des multi-formats sur disque, on coche automatiquement
-        // les mêmes dans Step 3. Évite que l'utilisateur oublie de cocher en mode
-        // « Re-générer juste post-process » (= bug observé : output_formats=[] envoyé,
-        // multi-format skip silencieux).
-        const existingFormats = (s.multiformat_formats || []).map(f => f.format_id);
-        if (existingFormats.length > 0) {
-          // Attend que les checkboxes soient render (loadOutputFormats peut être async)
-          const tryPreCheck = (attempt = 0) => {
-            const checkboxes = document.querySelectorAll(".format-checkbox");
-            if (checkboxes.length === 0 && attempt < 10) {
-              setTimeout(() => tryPreCheck(attempt + 1), 100);
-              return;
-            }
-            checkboxes.forEach(cb => {
-              if (existingFormats.includes(cb.value)) cb.checked = true;
-            });
-            // Update le summary text et le compteur
-            if (window.updateFormatsSummary) window.updateFormatsSummary();
-          };
-          tryPreCheck();
-        }
+        // ━━ Pré-cocher les formats existants : RETIRÉ (Martin 12/05/2026) ━━
+        // Avant : on cochait automatiquement les formats déjà présents sur disque.
+        // Mais Martin trouvait ça confus : il pensait ne rien faire en lançant le pipe
+        // et finissait par re-générer des crops sans le vouloir. Désormais, l'utilisateur
+        // doit cocher explicitement les formats qu'il veut.
       } catch (e) {
         console.error("[run-status] failed", e);
       }
