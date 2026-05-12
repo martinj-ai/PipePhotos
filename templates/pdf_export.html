@@ -158,24 +158,12 @@
     font-size: 11px;
     color: #8E8E93;
   }
-  .cover-signature-block {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .cover-signature-author {
+  .cover-signature-discrete {
     font-family: 'Manrope', sans-serif;
-    font-size: 14px;
-    font-weight: 700;
-    color: #292935;
-    letter-spacing: -0.3px;
-  }
-  .cover-signature-role {
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 500;
-    color: #54545D;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    color: #8E8E93;
+    letter-spacing: 0;
   }
   .cover-footer-tag {
     font-weight: 600;
@@ -669,10 +657,7 @@
   </div>
 
   <div class="cover-footer">
-    <div class="cover-signature-block">
-      <span class="cover-signature-author">Martin Juglair</span>
-      <span class="cover-signature-role">CRM Lead · Dayuse</span>
-    </div>
+    <span class="cover-signature-discrete">Martin Juglair</span>
     <div class="cover-meta-right">
       <span class="cover-footer-tag">Généré automatiquement par le pipeline Dayuse</span>
       <span>{{ stats.duration_human }} · ${{ "%.2f"|format(stats.cost_usd) }}</span>

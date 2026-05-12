@@ -1592,6 +1592,12 @@ def pick_strategy(
     float_step = next((s for s in steps if s.get("pool_float_used")), None)
     if float_step:
         out["pool_float_used"] = float_step["pool_float_used"]
+    # ━━ LUT profile adaptatif (12/05/2026, Martin retour "trop jaune") ━━
+    # On laisse brand_lut.pick_profile décider selon ambiance+palette de Gemini Vision.
+    # Photo lumineux-chaud aligned-warm → "soft" (pas re-pousser le warmth)
+    # Photo lumineux-froid / off-brand   → "strong"
+    # Sinon                              → "medium"
+    out["lut_profile"] = brand_lut.pick_profile(analysis)
     return out
 
 
@@ -1725,18 +1731,22 @@ def enhance_local_crop(input_path: Path, output_path: Path, crop_box_pct: dict) 
     }
 
 
-def enhance_local_warm(input_path: Path, output_path: Path) -> dict:
+def enhance_local_warm(input_path: Path, output_path: Path, profile: str | None = None) -> dict:
     """Applique la LUT brand Dayuse (= ton cible cohérent inter-photos / inter-hôtels).
 
     Paramètres dans config/brand_lut.json. C'est ce qu'on applique aux photos déjà
     conformes brand : pas besoin d'IA, juste l'harmonisation tonale.
+
+    Args:
+        profile : "soft"|"medium"|"strong" — chosen by `brand_lut.pick_profile(analysis)`
+                  upstream. Si None, fallback sur les params de config/brand_lut.json.
     """
     t0 = time.time()
-    res = brand_lut.apply_brand_lut(input_path, output_path)
+    res = brand_lut.apply_brand_lut(input_path, output_path, profile=profile)
     return {
         "duration_ms": int((time.time() - t0) * 1000),
         "cost_usd": 0,
-        "method": "brand_lut",
+        "method": "brand_lut" + (f"[{profile}]" if profile else ""),
         "params": res.get("params_applied"),
     }
 
@@ -1866,8 +1876,13 @@ def enhance_ai(input_path: Path, output_path: Path, prompt: str,
 
 # --- Orchestrateur ---
 
-def _apply_step(input_path: Path, output_path: Path, step: dict) -> dict:
-    """Applique UNE step. Retourne le dict de résultat de la fonction sous-jacente."""
+def _apply_step(input_path: Path, output_path: Path, step: dict, lut_profile: str | None = None) -> dict:
+    """Applique UNE step. Retourne le dict de résultat de la fonction sous-jacente.
+
+    lut_profile : si action == local_warm_boost, on transmet le profil LUT choisi
+                  par pick_strategy. Pour les autres actions, ignoré (la LUT post-
+                  traitement est appliquée séparément par enhance_one).
+    """
     action = step["action"]
     if action.startswith("ai_"):
         if not step.get("prompt"):
@@ -1876,7 +1891,7 @@ def _apply_step(input_path: Path, output_path: Path, step: dict) -> dict:
     if action == "local_smart_crop":
         return enhance_local_crop(input_path, output_path, step.get("crop_box_pct") or {})
     if action == "local_warm_boost":
-        return enhance_local_warm(input_path, output_path)
+        return enhance_local_warm(input_path, output_path, profile=lut_profile)
     raise RuntimeError(f"action inconnue : {action}")
 
 
@@ -1993,6 +2008,10 @@ def enhance_one(input_path: Path, strategy: dict, output_dir: Path) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / input_path.name
 
+    # Profil LUT adaptatif choisi par pick_strategy selon ambiance Gemini
+    # (soft/medium/strong). Propagé aux 2 call sites brand_lut.apply_brand_lut.
+    lut_profile = strategy.get("lut_profile") or "medium"
+
     steps = strategy.get("steps")
     if not steps:
         # Rétrocompat : une seule action au top-level
@@ -2016,7 +2035,7 @@ def enhance_one(input_path: Path, strategy: dict, output_dir: Path) -> dict:
             if step["action"].startswith("ai_"):
                 last_ai_step_input = current_input
                 last_ai_step_index = i
-            res = _apply_step(current_input, step_out, step)
+            res = _apply_step(current_input, step_out, step, lut_profile=lut_profile)
             total_cost_usd += res.get("cost_usd", 0)
             total_duration_ms += res.get("duration_ms", 0)
             methods.append(res.get("method", step["action"]))
@@ -2120,15 +2139,16 @@ def enhance_one(input_path: Path, strategy: dict, output_dir: Path) -> dict:
             except Exception:
                 pass
 
-        # ━━━ Post-traitement obligatoire : LUT brand Dayuse ━━━
+        # ━━━ Post-traitement obligatoire : LUT brand Dayuse (profil adaptatif) ━━━
         # Toutes les photos finales passent par la LUT pour cohérence inter-photos/inter-hôtels.
-        # Sauf si la dernière step était DÉJÀ local_warm_boost (= la LUT a déjà été appliquée).
+        # Sauf si la dernière step était DÉJÀ local_warm_boost (= la LUT a déjà été appliquée
+        # avec le bon profil par enhance_local_warm).
         last_action = steps[-1]["action"] if steps else None
         brand_lut_applied = False
         if last_action != "local_warm_boost":
             try:
-                brand_lut.apply_brand_lut(output_path, output_path)
-                methods.append("brand_lut")
+                brand_lut.apply_brand_lut(output_path, output_path, profile=lut_profile)
+                methods.append(f"brand_lut[{lut_profile}]")
                 brand_lut_applied = True
             except Exception:
                 # Si la LUT échoue (rare), on garde l'output sans LUT
