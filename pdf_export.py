@@ -106,6 +106,27 @@ def _build_html(slug: str, run_data: dict) -> str:
     cost_usd_total = float(run_data.get("cost_usd_total") or 0)
     pipeline_duration_s = float(run_data.get("pipeline_duration_s") or 0)
 
+    # ━━ Page "Preview Dayuse" : mock fidèle de la page hôtel sur dayuse.fr ━━
+    # Layout hero = 1 grande photo gauche + 2 petites empilées droite (matche le
+    # vrai design dayuse.fr). On prend les 3 premières photos finalistes du pack.
+    # Adresse + avis fictifs (le but est de visualiser le rendu en prod, pas de
+    # remplacer la vraie page).
+    hero_photos = photos_for_template[:3]
+    preview_data = {
+        "enabled": len(hero_photos) >= 3,
+        "hero_main": hero_photos[0] if len(hero_photos) >= 1 else None,
+        "hero_top": hero_photos[1] if len(hero_photos) >= 2 else None,
+        "hero_bottom": hero_photos[2] if len(hero_photos) >= 3 else None,
+        "address_fake": _make_fake_address(hotel.get("city", "")),
+        "rating": "4.5",
+        "rating_label": "Excellent",
+        "n_reviews": 9,
+        "review_quote": "Belle piscine, accueil chaleureux, vibe vraiment Dayuse. On reviendra.",
+        "review_author": "Robert",
+        # Breadcrumb façon dayuse.fr : États-Unis › Florida › Miami › Miami beach › South Beach
+        "breadcrumb": _make_breadcrumb(hotel.get("city", "")),
+    }
+
     context = {
         "slug": slug,
         "hotel_name": hotel.get("name") or slug,
@@ -113,6 +134,7 @@ def _build_html(slug: str, run_data: dict) -> str:
         "hotel_stars": hotel.get("stars") or "",
         "generated_at": _dt.datetime.now().strftime("%d %B %Y"),
         "photos": photos_for_template,
+        "preview": preview_data,
         "stats": {
             "n_total": n_total,
             "n_ai_retouched": n_ai_retouched,
@@ -126,6 +148,31 @@ def _build_html(slug: str, run_data: dict) -> str:
     }
     template = env.get_template("pdf_export.html")
     return template.render(**context)
+
+
+def _make_fake_address(city: str) -> str:
+    """Adresse fictive plausible pour la ville. Pas besoin d'être réelle —
+    le PDF sert à visualiser un mock, pas à donner une vraie adresse."""
+    if not city:
+        return "915 Washington Ave, USA"
+    return f"915 Washington Ave, {city}, USA"
+
+
+def _make_breadcrumb(city: str) -> list[str]:
+    """Reconstruit un breadcrumb façon dayuse.fr selon la ville détectée."""
+    if not city:
+        return ["États-Unis"]
+    city_lower = city.lower()
+    if "miami" in city_lower:
+        return ["États-Unis", "Florida", "Miami", "Miami beach"]
+    if "new york" in city_lower or "nyc" in city_lower:
+        return ["États-Unis", "New York", "Manhattan"]
+    if "paris" in city_lower:
+        return ["France", "Île-de-France", "Paris"]
+    if "los angeles" in city_lower or " la " in city_lower:
+        return ["États-Unis", "California", "Los Angeles"]
+    # Fallback : on garde juste la ville
+    return ["États-Unis", city]
 
 
 def _format_duration(seconds: float) -> str:

@@ -323,6 +323,276 @@
     color: #8E8E93;
   }
 
+  /* ━━━ Preview Dayuse (page 2) — mock de la page hôtel dayuse.fr ━━━ */
+  .preview-page {
+    padding: 0;
+    min-height: 277mm;
+    display: flex;
+    flex-direction: column;
+  }
+  .preview-eyebrow {
+    background: linear-gradient(135deg, #FFF8ED 0%, #FFFBF5 100%);
+    border-bottom: 1px solid rgba(255, 175, 54, 0.18);
+    padding: 14px 28px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .preview-eyebrow-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: #B45309;
+    text-transform: uppercase;
+    letter-spacing: 0.10em;
+  }
+  .preview-eyebrow-note {
+    font-size: 10px;
+    color: #8E8E93;
+    font-style: italic;
+  }
+
+  /* Mock Dayuse header */
+  .dayuse-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 28px;
+    background: #FFFFFF;
+    border-bottom: 1px solid #EAEAEB;
+  }
+  .dayuse-header .wordmark { font-size: 24px; }
+  .dayuse-search-pill {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    background: #F9F9F9;
+    border: 1px solid #EAEAEB;
+    border-radius: 100px;
+    padding: 8px 16px;
+    font-size: 11px;
+    color: #8E8E93;
+    max-width: 480px;
+  }
+  .dayuse-search-pill::before {
+    content: "📍";
+    margin-right: 8px;
+  }
+  .dayuse-cta-btn {
+    background: linear-gradient(62deg, #FFAF36 0%, #FFC536 100%);
+    color: #292935;
+    font-weight: 700;
+    font-size: 11px;
+    padding: 8px 18px;
+    border-radius: 100px;
+    border: none;
+  }
+  .dayuse-nav {
+    display: flex;
+    gap: 18px;
+    font-size: 11px;
+    color: #54545D;
+    font-weight: 500;
+  }
+
+  /* Breadcrumb */
+  .breadcrumb {
+    padding: 14px 28px 0;
+    font-size: 11px;
+    color: #8E8E93;
+  }
+  .breadcrumb-current {
+    color: #292935;
+    font-weight: 600;
+  }
+
+  /* Hotel title section */
+  .preview-title-block {
+    padding: 12px 28px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+  .preview-hotel-title {
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: -1px;
+    color: #292935;
+    line-height: 1.1;
+  }
+  .preview-actions {
+    display: flex;
+    gap: 8px;
+  }
+  .preview-actions-btn {
+    font-size: 10px;
+    font-weight: 600;
+    color: #54545D;
+    padding: 6px 12px;
+    border: 1px solid #EAEAEB;
+    border-radius: 100px;
+    background: #FFFFFF;
+  }
+
+  /* Hero photo grid (1 grande + 2 petites) — matche dayuse.fr */
+  .hero-grid {
+    margin: 0 28px;
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 8px;
+    height: 320px;
+    border-radius: 16px;
+    overflow: hidden;
+  }
+  .hero-cell {
+    background: #F9F9F9;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero-cell img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .hero-main { grid-row: 1 / span 2; border-top-left-radius: 16px; border-bottom-left-radius: 16px; }
+  .hero-top { border-top-right-radius: 16px; }
+  .hero-bottom { border-bottom-right-radius: 16px; }
+  .hero-view-photos-btn {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    background: rgba(255, 255, 255, 0.95);
+    color: #292935;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 7px 14px;
+    border-radius: 100px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+  }
+  .hero-view-photos-btn::before {
+    content: "▦  ";
+    font-size: 10px;
+  }
+
+  /* Bottom section : reviews left + info right */
+  .preview-bottom-grid {
+    margin: 20px 28px 0;
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 14px;
+  }
+  .preview-card {
+    background: #FFFFFF;
+    border: 1px solid #EAEAEB;
+    border-radius: 12px;
+    padding: 18px 20px;
+  }
+
+  /* Review block */
+  .review-flex {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  .review-rating-pill {
+    background: #51B0B0;
+    color: #FFFFFF;
+    width: 56px;
+    height: 56px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    font-weight: 800;
+    flex-shrink: 0;
+  }
+  .review-rating-label {
+    font-size: 16px;
+    font-weight: 700;
+    color: #292935;
+    text-align: center;
+    margin-top: 8px;
+  }
+  .review-count {
+    font-size: 11px;
+    color: #B45309;
+    text-decoration: underline;
+    text-align: center;
+    margin-top: 2px;
+  }
+  .review-card-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #292935;
+    margin-bottom: 8px;
+  }
+  .review-quote {
+    font-size: 12px;
+    color: #54545D;
+    line-height: 1.5;
+    padding: 12px;
+    background: #F5F5F7;
+    border-radius: 10px;
+    border-left: 3px solid #51B0B0;
+  }
+  .review-author {
+    font-size: 11px;
+    color: #8E8E93;
+    margin-top: 6px;
+    font-weight: 500;
+  }
+
+  /* Info block (address + fake map) */
+  .info-block-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #292935;
+    margin-bottom: 10px;
+  }
+  .info-address {
+    font-size: 12px;
+    color: #54545D;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: start;
+    gap: 6px;
+  }
+  .info-address::before {
+    content: "🏠";
+    flex-shrink: 0;
+  }
+  .info-map-placeholder {
+    height: 110px;
+    background: #EEF7F0;
+    border-radius: 10px;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid #D4E4D8;
+  }
+  .info-map-placeholder::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      repeating-linear-gradient(45deg, transparent 0, transparent 14px, rgba(81,176,176,0.10) 14px, rgba(81,176,176,0.10) 15px),
+      repeating-linear-gradient(-45deg, transparent 0, transparent 14px, rgba(81,176,176,0.06) 14px, rgba(81,176,176,0.06) 15px);
+  }
+  .info-map-cta {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    background: #FFFFFF;
+    color: #292935;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 100px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+  }
+
   /* ━━━ Print rules ━━━ */
   @page {
     size: A4;
@@ -376,7 +646,91 @@
   </div>
 </section>
 
-{# ━━━ Pages 2+ : 1 page par photo ━━━ #}
+{# ━━━ Page 2 : Preview Dayuse — mock de la page hôtel dayuse.fr ━━━ #}
+{% if preview and preview.enabled %}
+<section class="page preview-page">
+  <div class="preview-eyebrow">
+    <span class="preview-eyebrow-label">Aperçu page Dayuse · simulation avec les photos retouchées</span>
+    <span class="preview-eyebrow-note">avis et adresse fictifs — rendu visuel uniquement</span>
+  </div>
+
+  <div class="dayuse-header">
+    <span class="wordmark">dayuse</span>
+    <div class="dayuse-search-pill">Où ? Ville, hôtel, aéroport</div>
+    <button class="dayuse-cta-btn">Voir les hôtels</button>
+    <div class="dayuse-nav">
+      <span>Destinations</span>
+      <span>Comment ça marche ?</span>
+      <span>Aide</span>
+      <span>FR · EUR</span>
+    </div>
+  </div>
+
+  <div class="breadcrumb">
+    {% for crumb in preview.breadcrumb %}{{ crumb }} ›
+    {% endfor %}<span class="breadcrumb-current">{{ hotel_name }}</span>
+  </div>
+
+  <div class="preview-title-block">
+    <h1 class="preview-hotel-title">{{ hotel_name }}</h1>
+    <div class="preview-actions">
+      <button class="preview-actions-btn">↗ Partager</button>
+      <button class="preview-actions-btn">♡ Enregistrer</button>
+    </div>
+  </div>
+
+  <div class="hero-grid">
+    <div class="hero-cell hero-main">
+      {% if preview.hero_main and preview.hero_main.after_data_url %}
+      <img src="{{ preview.hero_main.after_data_url }}" alt="hero principal">
+      {% endif %}
+    </div>
+    <div class="hero-cell hero-top">
+      {% if preview.hero_top and preview.hero_top.after_data_url %}
+      <img src="{{ preview.hero_top.after_data_url }}" alt="hero secondaire 1">
+      {% endif %}
+    </div>
+    <div class="hero-cell hero-bottom">
+      {% if preview.hero_bottom and preview.hero_bottom.after_data_url %}
+      <img src="{{ preview.hero_bottom.after_data_url }}" alt="hero secondaire 2">
+      {% endif %}
+      <span class="hero-view-photos-btn">Voir les photos</span>
+    </div>
+  </div>
+
+  <div class="preview-bottom-grid">
+    <div class="preview-card">
+      <div class="review-flex">
+        <div>
+          <div class="review-rating-pill">{{ preview.rating }}</div>
+          <div class="review-rating-label">{{ preview.rating_label }}</div>
+          <div class="review-count">{{ preview.n_reviews }} Avis</div>
+        </div>
+        <div style="flex:1;">
+          <div class="review-card-title">Ce qu'en disent nos clients</div>
+          <div class="review-quote">{{ preview.review_quote }}</div>
+          <div class="review-author">— {{ preview.review_author }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="preview-card">
+      <div class="info-block-title">Information</div>
+      <div class="info-address">{{ preview.address_fake }}</div>
+      <div class="info-map-placeholder">
+        <span class="info-map-cta">Voir carte</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="page-footer" style="padding: 16px 28px; margin-top: auto;">
+    <span class="wordmark" style="font-size:13px;">dayuse</span>
+    <span>{{ hotel_name }} — Aperçu page hôtel · Page 2/{{ photos|length + 2 }}</span>
+  </div>
+</section>
+{% endif %}
+
+{# ━━━ Pages 3+ : 1 page par photo (avant/après) ━━━ #}
 {% for photo in photos %}
 <section class="page photo-page">
   <div class="photo-page-header">
@@ -442,7 +796,7 @@
 
   <div class="page-footer">
     <span class="wordmark" style="font-size:13px;">dayuse</span>
-    <span>{{ hotel_name }} — Page {{ loop.index + 1 }}/{{ photos|length + 1 }}</span>
+    <span>{{ hotel_name }} — Page {{ loop.index + (2 if preview and preview.enabled else 1) }}/{{ photos|length + (2 if preview and preview.enabled else 1) }}</span>
   </div>
 </section>
 {% endfor %}
