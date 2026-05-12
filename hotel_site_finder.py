@@ -162,49 +162,62 @@ def _check_url_alive(url: str, hotel_name: str | None = None) -> dict:
     return out
 
 
+def _ddg_request(query: str) -> str:
+    """Fait UNE requête DDG HTML et retourne le HTML brut. Lève sur erreur."""
+    ddg_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
+    req = urllib.request.Request(
+        ddg_url,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://duckduckgo.com/",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return r.read().decode("utf-8", errors="ignore")
+
+
 def _search_duckduckgo(name: str, city: str) -> str | None:
     """Recherche DuckDuckGo HTML pour trouver le site officiel.
 
-    Stratégie : on tape `{name} {city} official site` sur DDG, on extrait toutes
-    les URLs des redirects `uddg=...`, et on retourne la 1ère qui n'est PAS sur
-    une plateforme blacklistée (Booking, Expedia, TripAdvisor, ResortPass, etc.).
-
-    Plus fiable que Gemini sur les hôtels indépendants / boutique (Gemini connaît
-    bien les chaînes mais devine pour les indépendants → hallucinations).
+    Retry une fois après 3s si la 1ère requête retourne 0 résultats (rate
+    limit transient sur l'IP).
 
     Returns:
-        Première URL plausible du site officiel, ou None.
+        Première URL plausible du site officiel (non-blacklistée), ou None.
     """
+    import time
     query = f"{name} {city} official site"
-    ddg_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
-    try:
-        req = urllib.request.Request(ddg_url, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=10) as r:
-            html = r.read().decode("utf-8", errors="ignore")
-    except Exception:
-        return None
-
-    # DDG encode les liens dans /l/?uddg=<URL-encoded>&rut=…
     uddg_pattern = re.compile(r"uddg=([^&\"']+)")
-    seen = set()
-    for match in uddg_pattern.findall(html):
+
+    for attempt in range(2):
         try:
-            decoded = urllib.parse.unquote(match)
+            html = _ddg_request(query)
         except Exception:
-            continue
-        if not decoded.startswith(("http://", "https://")):
-            continue
-        # Normalise (retire fragment, garde uniquement le domaine + path principal)
-        if decoded in seen:
-            continue
-        seen.add(decoded)
-        # Filtre plateformes exclues
-        if _is_blacklisted(decoded):
-            continue
-        # Filtre les URLs qui pointent vers des PDFs / fichiers / images
-        if re.search(r"\.(pdf|jpg|jpeg|png|webp|svg|mp4|zip)(\?|$)", decoded, re.IGNORECASE):
-            continue
-        return decoded
+            html = ""
+
+        seen = set()
+        for match in uddg_pattern.findall(html):
+            try:
+                decoded = urllib.parse.unquote(match)
+            except Exception:
+                continue
+            if not decoded.startswith(("http://", "https://")):
+                continue
+            if decoded in seen:
+                continue
+            seen.add(decoded)
+            if _is_blacklisted(decoded):
+                continue
+            if re.search(r"\.(pdf|jpg|jpeg|png|webp|svg|mp4|zip)(\?|$)", decoded, re.IGNORECASE):
+                continue
+            return decoded
+
+        # 0 résultat → rate limit transient probable → wait + retry une fois
+        if attempt == 0:
+            time.sleep(3)
+
     return None
 
 

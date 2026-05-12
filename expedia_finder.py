@@ -105,47 +105,87 @@ def _is_expedia_domain(url: str) -> bool:
     return any(host == d or host.endswith("." + d) for d in EXPEDIA_DOMAINS)
 
 
+def _looks_hallucinated(url: str) -> bool:
+    """Détecte les IDs Expedia probablement hallucinés par Gemini.
+
+    Patterns observés empiriquement quand Gemini invente un ID :
+      - h67900000, h65900000, h12345678 (placeholders ronds avec beaucoup de zéros)
+      - h11111111 (chiffres identiques)
+      - h12345678 (séquence)
+
+    Les vrais IDs Expedia (h55553829, h18107, h16223760) ont une distribution
+    de chiffres "aléatoire" sans pattern évident.
+    """
+    m = re.search(r"\.h(\d+)\.", url)
+    if not m:
+        return False
+    digits = m.group(1)
+    # 4+ zéros consécutifs en fin → suspect (Gemini ajoute des 0 pour padding)
+    if re.search(r"0{4,}$", digits):
+        return True
+    # 4+ zéros consécutifs au milieu → suspect (h12000000, h67900000…)
+    if re.search(r"0{4,}", digits):
+        return True
+    # Chiffres tous identiques ou très peu de variété
+    if len(set(digits)) <= 2:
+        return True
+    return False
+
+
+def _ddg_request(query: str) -> str:
+    """Fait UNE requête DDG HTML et retourne le HTML brut. Lève sur erreur."""
+    ddg_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
+    req = urllib.request.Request(
+        ddg_url,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://duckduckgo.com/",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return r.read().decode("utf-8", errors="ignore")
+
+
 def _search_duckduckgo(name: str, city: str) -> str | None:
     """Recherche DuckDuckGo HTML pour trouver l'URL Expedia.
 
-    DDG est utilisé car gratuit, sans API key, et indexe correctement les pages
-    Expedia avec leurs vrais IDs internes (contrairement à Gemini qui hallucine).
-    Les URLs sont encoded dans le redirector `uddg=...` qu'on décode.
+    Si la 1ère requête retourne 0 uddg (souvent un rate limit transient sur l'IP
+    qui vient de faire plusieurs DDG calls), on attend 3s et retry une fois.
 
     Returns:
-        L'URL Expedia trouvée (la première match), ou None si rien.
+        L'URL Expedia trouvée (la première match), ou None si rien après retry.
     """
-    # Query : nom hôtel + ville + "expedia hotel-information" (le suffixe URL)
-    # On évite `site:expedia.com` car ça filtre trop dur DDG dans nos tests.
+    import time
     query = f"{name} {city} expedia hotel-information"
-    ddg_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
-    try:
-        req = urllib.request.Request(ddg_url, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=10) as r:
-            html = r.read().decode("utf-8", errors="ignore")
-    except Exception:
-        return None
-
-    # DDG redirige via /l/?uddg=<URL-encoded>. On extrait toutes les URLs
-    # Expedia depuis ces redirectors. Pattern strict : doit contenir
-    # `.h{NNN}.Hotel-Information` (ou variante locale type `.Informations-Hotel`).
-    uddg_pattern = re.compile(r"uddg=([^&\"']+)")
     expedia_pattern = re.compile(
         r"https?://(?:www\.)?expedia\.[a-z.]+/[^\s\"'<>]+?\.h\d+\.(?:Hotel-Information|Informations-Hotel|Hotel-Informationen|Informacion-Hotel|Informazioni-Hotel)",
         re.IGNORECASE,
     )
+    uddg_pattern = re.compile(r"uddg=([^&\"']+)")
 
-    for match in uddg_pattern.findall(html):
-        decoded = urllib.parse.unquote(match)
-        m = expedia_pattern.search(decoded)
-        if m:
-            return m.group(0)
+    for attempt in range(2):  # 1 essai + 1 retry après 3s
+        try:
+            html = _ddg_request(query)
+        except Exception:
+            html = ""
 
-    # Fallback : cherche directement dans le HTML (au cas où DDG aurait
-    # affiché les URLs sans redirector).
-    direct = expedia_pattern.search(html)
-    if direct:
-        return direct.group(0)
+        # Extrait depuis les redirects uddg=
+        for match in uddg_pattern.findall(html):
+            decoded = urllib.parse.unquote(match)
+            m = expedia_pattern.search(decoded)
+            if m:
+                return m.group(0)
+
+        # Fallback : cherche directement (au cas où DDG affiche les URLs nues)
+        direct = expedia_pattern.search(html)
+        if direct:
+            return direct.group(0)
+
+        # 0 résultat → rate limit probable → wait + retry une fois
+        if attempt == 0:
+            time.sleep(3)
 
     return None
 
@@ -184,6 +224,20 @@ def find_expedia_url(name: str, city: str | None = None, country: str | None = N
             "url": None,
             "source": "duckduckgo+gemini",
             "error": "Aucune URL Expedia trouvée (ni via DuckDuckGo ni via Gemini)",
+        }
+
+    # ━ Garde anti-hallucination : si l'ID Gemini paraît inventé (h67900000,
+    # h12345678, h11111111…), on préfère retourner UNKNOWN plutôt qu'une URL
+    # qui va donner 404 / 0 photos. Évite les faux positifs côté UI.
+    if _looks_hallucinated(suggestion["url"]):
+        return {
+            "url": None,
+            "source": "gemini",
+            "error": (
+                f"URL Gemini suspecte (ID hallucinable) : {suggestion['url']}. "
+                "DuckDuckGo n'a pas pu confirmer l'URL réelle (rate-limited ?)."
+            ),
+            "url_attempted": suggestion["url"],
         }
 
     return {
