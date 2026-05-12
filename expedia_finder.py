@@ -1,11 +1,13 @@
-"""Expedia finder — demande à Gemini l'URL de la page hôtel sur expedia.com.
+"""Expedia finder — trouve l'URL de la fiche hôtel sur expedia.com.
 
-Pattern identique à hotel_site_finder.py mais cible spécifiquement Expedia.
-Permet d'enrichir le pipeline avec une 5e source photos (en complément de
-official/booking/rp/instagram).
+Stratégie :
+  1. Recherche DuckDuckGo HTML (gratuit, sans API key) → première URL Expedia
+     dans les résultats. Fiable car DDG indexe les pages Expedia avec leurs IDs
+     réels (testé : Moxy Miami South Beach → h55553829 récupéré direct).
+  2. Fallback Gemini si DDG ne retourne rien (cas hôtel très obscur).
 
 URL Expedia typique :
-  https://www.expedia.com/Miami-Hotels-Moxy-Miami-South-Beach.h12572584.Hotel-Information
+  https://www.expedia.com/Miami-Hotels-Moxy-Miami-South-Beach.h55553829.Hotel-Information
   https://www.expedia.fr/Paris-Hotels-Hotel-de-Crillon.h12345.Informations-Hotel
 """
 
@@ -14,6 +16,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import urllib.parse
+import urllib.request
 from urllib.parse import urlparse
 
 from google import genai
@@ -101,13 +105,62 @@ def _is_expedia_domain(url: str) -> bool:
     return any(host == d or host.endswith("." + d) for d in EXPEDIA_DOMAINS)
 
 
+def _search_duckduckgo(name: str, city: str) -> str | None:
+    """Recherche DuckDuckGo HTML pour trouver l'URL Expedia.
+
+    DDG est utilisé car gratuit, sans API key, et indexe correctement les pages
+    Expedia avec leurs vrais IDs internes (contrairement à Gemini qui hallucine).
+    Les URLs sont encoded dans le redirector `uddg=...` qu'on décode.
+
+    Returns:
+        L'URL Expedia trouvée (la première match), ou None si rien.
+    """
+    # Query : nom hôtel + ville + "expedia hotel-information" (le suffixe URL)
+    # On évite `site:expedia.com` car ça filtre trop dur DDG dans nos tests.
+    query = f"{name} {city} expedia hotel-information"
+    ddg_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
+    try:
+        req = urllib.request.Request(ddg_url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            html = r.read().decode("utf-8", errors="ignore")
+    except Exception:
+        return None
+
+    # DDG redirige via /l/?uddg=<URL-encoded>. On extrait toutes les URLs
+    # Expedia depuis ces redirectors. Pattern strict : doit contenir
+    # `.h{NNN}.Hotel-Information` (ou variante locale type `.Informations-Hotel`).
+    uddg_pattern = re.compile(r"uddg=([^&\"']+)")
+    expedia_pattern = re.compile(
+        r"https?://(?:www\.)?expedia\.[a-z.]+/[^\s\"'<>]+?\.h\d+\.(?:Hotel-Information|Informations-Hotel|Hotel-Informationen|Informacion-Hotel|Informazioni-Hotel)",
+        re.IGNORECASE,
+    )
+
+    for match in uddg_pattern.findall(html):
+        decoded = urllib.parse.unquote(match)
+        m = expedia_pattern.search(decoded)
+        if m:
+            return m.group(0)
+
+    # Fallback : cherche directement dans le HTML (au cas où DDG aurait
+    # affiché les URLs sans redirector).
+    direct = expedia_pattern.search(html)
+    if direct:
+        return direct.group(0)
+
+    return None
+
+
 def find_expedia_url(name: str, city: str | None = None, country: str | None = None) -> dict | None:
     """Trouve l'URL Expedia de l'hôtel.
+
+    Stratégie en cascade :
+      1. DuckDuckGo HTML search (gratuit, fiable car DDG indexe les vrais IDs)
+      2. Gemini en fallback si DDG ne retourne rien (hôtel très obscur)
 
     Returns:
         {
             "url": str,
-            "source": "gemini",
+            "source": "duckduckgo" | "gemini",
             "confidence": "high|medium|low",
         }
         OU {"url": None, "error": "..."} si rien trouvé.
@@ -115,12 +168,22 @@ def find_expedia_url(name: str, city: str | None = None, country: str | None = N
     if not name:
         return None
 
+    # ━ Étape 1 : DuckDuckGo (priorité) ━
+    ddg_url = _search_duckduckgo(name, city or "")
+    if ddg_url and _is_expedia_domain(ddg_url):
+        return {
+            "url": ddg_url,
+            "source": "duckduckgo",
+            "confidence": "high",
+        }
+
+    # ━ Étape 2 : Gemini fallback (hôtel non indexé par DDG) ━
     suggestion = _ask_gemini(name, city or "", country or "")
     if not suggestion:
         return {
             "url": None,
-            "source": "gemini",
-            "error": "Gemini n'a pas trouvé d'URL Expedia fiable pour cet hôtel",
+            "source": "duckduckgo+gemini",
+            "error": "Aucune URL Expedia trouvée (ni via DuckDuckGo ni via Gemini)",
         }
 
     return {
