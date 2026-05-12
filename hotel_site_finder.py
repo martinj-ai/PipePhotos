@@ -1,11 +1,15 @@
-"""Trouve l'URL du site officiel d'un hôtel via Gemini, vérifie qu'elle répond.
+"""Trouve l'URL du site officiel d'un hôtel via DuckDuckGo + Gemini (cascade).
 
-Stratégie :
-  1. Demande à Gemini : URL officielle de cet hôtel ? (knowledge embedded + recherche)
-  2. Vérifie HTTP 200 (suit redirects)
-  3. Vérifie que le <title> de la page contient au moins un mot du nom hôtel
-  → Si tout passe : return {url, source: "gemini", confidence}
-  → Sinon : return None (le pipeline tombe sur fallback Booking/RP)
+Stratégie (12/05/2026 — diversifié les sources pour fiabilité) :
+  1. **DuckDuckGo HTML search** (gratuit, sans API key, indexe les vrais sites)
+     → première URL non-blacklistée des résultats
+  2. **Gemini** en fallback si DDG vide (cas d'hôtels très obscurs)
+  3. Pour les URLs Gemini : vérification HTTP 200 + match du nom dans <title>
+     (les URLs DDG sont supposées valides puisque issues d'un index public)
+
+→ Si tout passe : return {url, source: "duckduckgo" | "gemini", confidence}
+→ Sinon : return {url: None, error: "..."} (le pipeline tombe sur fallback
+   Booking/RP/Expedia).
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import urllib.parse
 import urllib.request
 from urllib.parse import urlparse
 import urllib3
@@ -157,25 +162,89 @@ def _check_url_alive(url: str, hotel_name: str | None = None) -> dict:
     return out
 
 
+def _search_duckduckgo(name: str, city: str) -> str | None:
+    """Recherche DuckDuckGo HTML pour trouver le site officiel.
+
+    Stratégie : on tape `{name} {city} official site` sur DDG, on extrait toutes
+    les URLs des redirects `uddg=...`, et on retourne la 1ère qui n'est PAS sur
+    une plateforme blacklistée (Booking, Expedia, TripAdvisor, ResortPass, etc.).
+
+    Plus fiable que Gemini sur les hôtels indépendants / boutique (Gemini connaît
+    bien les chaînes mais devine pour les indépendants → hallucinations).
+
+    Returns:
+        Première URL plausible du site officiel, ou None.
+    """
+    query = f"{name} {city} official site"
+    ddg_url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
+    try:
+        req = urllib.request.Request(ddg_url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            html = r.read().decode("utf-8", errors="ignore")
+    except Exception:
+        return None
+
+    # DDG encode les liens dans /l/?uddg=<URL-encoded>&rut=…
+    uddg_pattern = re.compile(r"uddg=([^&\"']+)")
+    seen = set()
+    for match in uddg_pattern.findall(html):
+        try:
+            decoded = urllib.parse.unquote(match)
+        except Exception:
+            continue
+        if not decoded.startswith(("http://", "https://")):
+            continue
+        # Normalise (retire fragment, garde uniquement le domaine + path principal)
+        if decoded in seen:
+            continue
+        seen.add(decoded)
+        # Filtre plateformes exclues
+        if _is_blacklisted(decoded):
+            continue
+        # Filtre les URLs qui pointent vers des PDFs / fichiers / images
+        if re.search(r"\.(pdf|jpg|jpeg|png|webp|svg|mp4|zip)(\?|$)", decoded, re.IGNORECASE):
+            continue
+        return decoded
+    return None
+
+
 def find_hotel_site(name: str, city: str | None = None, country: str | None = None) -> dict | None:
-    """Trouve l'URL du site officiel de l'hôtel.
+    """Trouve l'URL du site officiel de l'hôtel (cascade DDG + Gemini).
 
     Returns:
         {
             "url": str,
-            "source": "gemini",
+            "source": "duckduckgo" | "gemini",
             "confidence": "high|medium|low",
-            "title": str (titre de la page validée),
-            "name_match": bool,
+            "title": str (titre de la page si vérifié),
+            "name_match": bool (si vérifié),
         }
-        OU None si rien trouvé / non vérifiable.
+        OU {"url": None, "error": "..."} si rien trouvé.
     """
     if not name:
         return None
 
+    # ━ Étape 1 : DuckDuckGo (priorité — indexe les vrais sites) ━
+    ddg_url = _search_duckduckgo(name, city or "")
+    if ddg_url:
+        # DDG a renvoyé une URL non-blacklistée → on fait confiance et on évite
+        # de re-vérifier via Playwright (les sites de chaînes Cloudflare nous
+        # bloqueraient → faux négatif). Si l'extraction galerie échoue plus tard,
+        # le pipeline gère gracieusement (sources_summary.official.photos=0).
+        host = urlparse(ddg_url).netloc.lower().lstrip("www.")
+        return {
+            "url": ddg_url,
+            "source": "duckduckgo",
+            "confidence": "high",
+            "title": None,
+            "name_match": None,
+            "trusted_chain_skip_check": any(host == d or host.endswith("." + d) for d in TRUSTED_CHAIN_DOMAINS),
+        }
+
+    # ━ Étape 2 : Gemini fallback ━
     suggestion = _ask_gemini(name, city or "", country or "")
     if not suggestion:
-        return {"url": None, "source": "gemini", "error": "Gemini n'a pas trouvé d'URL fiable"}
+        return {"url": None, "source": "duckduckgo+gemini", "error": "Aucune URL trouvée (ni via DuckDuckGo ni via Gemini)"}
 
     url = suggestion["url"]
     if _is_blacklisted(url):
