@@ -44,6 +44,7 @@ import slowmo_higgsfield
 import pdf_export
 import expedia_finder
 import expedia_scraper
+import rp_finder
 
 ROOT = Path(__file__).parent
 UPLOADS_DIR = ROOT / "data" / "uploads"
@@ -123,6 +124,118 @@ def api_scrape_booking():
     return jsonify({"slug": slug, "data": data})
 
 
+@app.route("/api/identify-hotel", methods=["POST"])
+def api_identify_hotel():
+    """Étape 1 unifiée (Martin 12/05/2026) : Booking est la clé d'entrée, on
+    enrichit en parallèle avec les URLs des autres sources (RP, Expedia,
+    Site officiel, Instagram) via DDG/Gemini cascade.
+
+    Body : {url: "https://www.booking.com/hotel/..."}
+    Output : {
+        slug, data (= meta hôtel comme /api/scrape-booking),
+        urls: {rp_url, expedia_url, official_url, instagram_url},
+        urls_meta: {rp: {source, error?}, expedia: {...}, ...}
+    }
+
+    Permet à l'UI de pré-remplir les champs URL en Étape 2 → l'utilisateur
+    n'a qu'à éditer ce qui manque ou est faux.
+    """
+    payload = request.get_json(silent=True) or {}
+    url = (payload.get("url") or "").strip()
+    if not url.startswith("https://www.booking.com/hotel/"):
+        return jsonify({"error": "URL doit être une fiche hôtel Booking."}), 400
+
+    progress.init("booking_scrape", total=5, step="extracting")
+    progress.update("booking_scrape", message="Scraping Booking + analyse Gemini…")
+
+    # ━ Étape 1 : Scrape Booking pour récupérer nom/ville/amenities ━
+    try:
+        data = booking_amenities_extractor.extract_hotel_data_from_booking(url)
+    except Exception as e:
+        progress.finish("booking_scrape", message=f"Erreur : {str(e)[:200]}")
+        return jsonify({"error": f"Échec extraction Booking : {str(e)[:200]}"}), 500
+    if data.get("error"):
+        progress.finish("booking_scrape", message=f"Erreur : {data['error']}")
+        return jsonify({"error": data["error"]}), 500
+
+    # Slug + sauvegarde du rp_data au même endroit que /api/scrape-booking
+    parsed_path = url.rstrip("/").split("/")
+    booking_slug = parsed_path[-1].replace(".html", "") if parsed_path else "hotel"
+    slug = f"booking-{booking_slug}"
+    rp_dir = ROOT / "data" / "rp"
+    rp_dir.mkdir(parents=True, exist_ok=True)
+    with open(rp_dir / f"{slug}.json", "w") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+    # ━ Étape 2 : Recherche des URLs sources en PARALLÈLE ━
+    # Chaque finder fait DDG (3s + retry 3s) + fallback Gemini (1-2s).
+    # En parallèle (4 threads) : tout doit prendre ~5-8s max.
+    progress.update("booking_scrape", current=2, total=5,
+                    message="Recherche des URLs RP / Expedia / Site officiel / Instagram…")
+    name = data.get("name") or ""
+    city = data.get("city") or ""
+    country = data.get("country") or ""
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _find_rp():
+        try:
+            return rp_finder.find_rp_url(name, city, country)
+        except Exception as e:
+            return {"url": None, "error": f"crash: {e}"}
+
+    def _find_expedia():
+        try:
+            return expedia_finder.find_expedia_url(name, city, country)
+        except Exception as e:
+            return {"url": None, "error": f"crash: {e}"}
+
+    def _find_official():
+        try:
+            return hotel_site_finder.find_hotel_site(name, city, country)
+        except Exception as e:
+            return {"url": None, "error": f"crash: {e}"}
+
+    def _find_instagram():
+        try:
+            return instagram_finder.find_hotel_instagram(name, city, country)
+        except Exception as e:
+            return {"url": None, "error": f"crash: {e}"}
+
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        f_rp = ex.submit(_find_rp)
+        f_expedia = ex.submit(_find_expedia)
+        f_official = ex.submit(_find_official)
+        f_instagram = ex.submit(_find_instagram)
+        rp_result = f_rp.result()
+        expedia_result = f_expedia.result()
+        official_result = f_official.result()
+        instagram_result = f_instagram.result()
+
+    # ━ Construction du payload de retour ━
+    urls = {
+        "booking_url": url,  # déjà connue (input)
+        "rp_url": (rp_result or {}).get("url"),
+        "expedia_url": (expedia_result or {}).get("url"),
+        "official_url": (official_result or {}).get("url"),
+        "instagram_url": (instagram_result or {}).get("url"),
+    }
+    urls_meta = {
+        "rp": rp_result or {},
+        "expedia": expedia_result or {},
+        "official": official_result or {},
+        "instagram": instagram_result or {},
+    }
+
+    progress.finish("booking_scrape", message="Identification terminée")
+    return jsonify({
+        "slug": slug,
+        "data": data,
+        "urls": urls,
+        "urls_meta": urls_meta,
+    })
+
+
 @app.route("/api/fetch-rp-photos", methods=["POST"])
 def api_fetch_rp_photos():
     """Télécharge directement les photos haute résolution depuis RP dans data/uploads/{slug}/."""
@@ -172,14 +285,26 @@ def api_fetch_rp_photos():
 
 @app.route("/api/fetch-all-sources", methods=["POST"])
 def api_fetch_all_sources():
-    """Orchestre la récupération depuis les 3 sources cochées (officiel/booking/rp).
-    Dédup pHash inter-sources. Stocke tout dans data/uploads/{slug}/.
+    """Orchestre la récupération depuis les sources cochées (officiel/booking/rp/
+    expedia/instagram). Dédup pHash inter-sources. Stocke tout dans data/uploads/{slug}/.
 
-    Body : {slug, booking_url?, sources: {official, booking, rp}}
+    Body : {
+        slug,
+        booking_url?,        # URL Booking (saisie en Étape 1)
+        official_url?,       # URL site officiel pré-saisie (skip DDG/Gemini si fournie)
+        expedia_url?,        # idem Expedia
+        rp_url?,             # idem ResortPass (sinon utilise rp_data.image_urls)
+        instagram_url?,      # idem Instagram
+        sources: {official, booking, rp, expedia, instagram}
+    }
     """
     payload = request.get_json(silent=True) or {}
     slug = (payload.get("slug") or "").strip()
     booking_url = (payload.get("booking_url") or "").strip()
+    official_url_override = (payload.get("official_url") or "").strip() or None
+    expedia_url_override = (payload.get("expedia_url") or "").strip() or None
+    rp_url_override = (payload.get("rp_url") or "").strip() or None
+    instagram_url_override = (payload.get("instagram_url") or "").strip() or None
     sources = payload.get("sources") or {"official": True, "booking": True, "rp": True, "expedia": True, "instagram": True}
 
     if not slug:
@@ -203,13 +328,19 @@ def api_fetch_all_sources():
 
     # ━━━ SOURCE 1 : Site officiel ━━━
     if sources.get("official"):
-        progress.update(f"{slug}_fetch_all", step="official_finding", current=5, total=100,
-                        message="Recherche site officiel via Gemini…")
-        site_result = hotel_site_finder.find_hotel_site(
-            name=rp_data.get("name", ""),
-            city=rp_data.get("city", ""),
-            country=rp_data.get("country", ""),
-        )
+        # Si URL fournie en Étape 1, on l'utilise direct (skip DDG/Gemini)
+        if official_url_override:
+            progress.update(f"{slug}_fetch_all", step="official_finding", current=5, total=100,
+                            message=f"Site officiel : URL pré-saisie {official_url_override[:60]}…")
+            site_result = {"url": official_url_override, "source": "manual", "confidence": "high"}
+        else:
+            progress.update(f"{slug}_fetch_all", step="official_finding", current=5, total=100,
+                            message="Recherche site officiel via DuckDuckGo + Gemini…")
+            site_result = hotel_site_finder.find_hotel_site(
+                name=rp_data.get("name", ""),
+                city=rp_data.get("city", ""),
+                country=rp_data.get("country", ""),
+            )
         if site_result and site_result.get("url"):
             site_url = site_result["url"]
             progress.update(f"{slug}_fetch_all", step="official_extracting", current=15, total=100,
@@ -284,13 +415,18 @@ def api_fetch_all_sources():
     # Risque connu : Gemini peut halluciner l'ID numérique (h{ID}) → URL inexistante
     # → 0 photo. Dans ce cas on log proprement, le pipeline continue.
     if sources.get("expedia"):
-        progress.update(f"{slug}_fetch_all", step="expedia_finding", current=70, total=100,
-                        message="Recherche URL Expedia via Gemini…")
-        expedia_result = expedia_finder.find_expedia_url(
-            name=rp_data.get("name", ""),
-            city=rp_data.get("city", ""),
-            country=rp_data.get("country", ""),
-        )
+        if expedia_url_override:
+            progress.update(f"{slug}_fetch_all", step="expedia_finding", current=70, total=100,
+                            message=f"Expedia : URL pré-saisie {expedia_url_override[:60]}…")
+            expedia_result = {"url": expedia_url_override, "source": "manual", "confidence": "high"}
+        else:
+            progress.update(f"{slug}_fetch_all", step="expedia_finding", current=70, total=100,
+                            message="Recherche URL Expedia via DuckDuckGo + Gemini…")
+            expedia_result = expedia_finder.find_expedia_url(
+                name=rp_data.get("name", ""),
+                city=rp_data.get("city", ""),
+                country=rp_data.get("country", ""),
+            )
         if expedia_result and expedia_result.get("url"):
             expedia_url = expedia_result["url"]
             progress.update(f"{slug}_fetch_all", step="expedia_scraping", current=73, total=100,
@@ -336,13 +472,18 @@ def api_fetch_all_sources():
 
     # ━━━ SOURCE 5 : Instagram ━━━
     if sources.get("instagram"):
-        progress.update(f"{slug}_fetch_all", step="instagram_finding", current=82, total=100,
-                        message="Recherche compte Instagram via Gemini…")
-        ig_finder_result = instagram_finder.find_hotel_instagram(
-            name=rp_data.get("name", ""),
-            city=rp_data.get("city", ""),
-            country=rp_data.get("country", ""),
-        )
+        if instagram_url_override:
+            progress.update(f"{slug}_fetch_all", step="instagram_finding", current=82, total=100,
+                            message=f"Instagram : URL pré-saisie {instagram_url_override[:60]}…")
+            ig_finder_result = {"url": instagram_url_override, "source": "manual", "handle": None}
+        else:
+            progress.update(f"{slug}_fetch_all", step="instagram_finding", current=82, total=100,
+                            message="Recherche compte Instagram via Gemini…")
+            ig_finder_result = instagram_finder.find_hotel_instagram(
+                name=rp_data.get("name", ""),
+                city=rp_data.get("city", ""),
+                country=rp_data.get("country", ""),
+            )
         if ig_finder_result and ig_finder_result.get("url"):
             ig_url = ig_finder_result["url"]
             progress.update(f"{slug}_fetch_all", step="instagram_scraping", current=85, total=100,

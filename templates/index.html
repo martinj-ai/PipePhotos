@@ -314,35 +314,19 @@
         </div>
       </details>
 
-      <!-- Toggle source RP / Booking -->
-      <div class="flex gap-2 mb-4">
-        <button id="src-mode-rp" class="subtab-btn active" data-mode="rp">📋 ResortPass</button>
-        <button id="src-mode-booking" class="subtab-btn" data-mode="booking">🛏 Booking-only (indépendant RP)</button>
-      </div>
-
-      <!-- Mode RP -->
-      <div id="src-input-rp">
+      <!-- Mode unifié : Booking comme clé d'entrée + recherche URLs auto (Martin 12/05/2026) -->
+      <div>
         <div class="flex gap-2">
-          <input id="rp-url" type="url" placeholder="https://www.resortpass.com/hotels/..."
+          <input id="identify-booking-url" type="url" placeholder="https://www.booking.com/hotel/..."
                  class="input-dayuse flex-1">
-          <button id="btn-scrape" class="btn-dayuse-primary disabled:opacity-50">
-            Scraper RP
-          </button>
-        </div>
-      </div>
-
-      <!-- Mode Booking-only -->
-      <div id="src-input-booking" class="hidden">
-        <div class="flex gap-2">
-          <input id="booking-meta-url" type="url" placeholder="https://www.booking.com/hotel/..."
-                 class="input-dayuse flex-1">
-          <button id="btn-scrape-booking" class="btn-dayuse-primary disabled:opacity-50">
-            Scraper Booking
+          <button id="btn-identify-hotel" class="btn-dayuse-primary disabled:opacity-50">
+            🔎 Identifier l'hôtel
           </button>
         </div>
         <div class="mt-2 text-[11px] text-dayuse-ink2 italic">
-          Mode pilote : on récupère les amenities + meta hôtel via scraping Booking + analyse Gemini.
-          Plus de dépendance à RP. <strong>Vibes RP supprimées</strong> : on utilise une détection contextuelle par photo (toboggan détecté → families autorisée, sinon couples/solos par défaut).
+          Booking sert de clé d'entrée. On extrait les amenities + le nom/ville,
+          et on cherche en parallèle les URLs RP, Expedia, Site officiel, Instagram
+          (DuckDuckGo + Gemini). Tu pourras les éditer ou compléter à l'étape 2.
         </div>
       </div>
 
@@ -360,7 +344,9 @@
           <input type="checkbox" id="src-official" checked class="mt-0.5 w-4 h-4 accent-dayuse-primary">
           <div class="flex-1">
             <div class="text-sm font-semibold">⭐ Site officiel de l'hôtel</div>
-            <div class="text-xs text-gray-500">Auto-discovery via Gemini. Photos HD souvent les plus pro. Échoue silencieusement sur les chaînes (Hyatt/Hilton/Marriott protégées Cloudflare).</div>
+            <div class="text-xs text-gray-500 mb-2">URL pré-saisie depuis l'Étape 1 (DDG + Gemini cascade). Éditable.</div>
+            <input id="step2-official-url" type="url" placeholder="https://www.example.com (auto-rempli)"
+                   class="input-dayuse w-full text-xs" style="padding: 8px 16px;">
           </div>
         </label>
 
@@ -379,17 +365,21 @@
         <label class="flex items-start gap-3 border border-gray-200 rounded-lg p-3 cursor-pointer hover:bg-gray-50">
           <input type="checkbox" id="src-rp" checked class="mt-0.5 w-4 h-4 accent-dayuse-primary">
           <div class="flex-1">
-            <div class="text-sm font-semibold">ResortPass <span id="rp-photo-count" class="text-gray-500 font-normal"></span></div>
-            <div class="text-xs text-gray-500">Photos issues du scrape RP de l'étape 1. Source fiable, fallback automatique.</div>
+            <div class="text-sm font-semibold">📋 ResortPass <span id="rp-photo-count" class="text-gray-500 font-normal"></span></div>
+            <div class="text-xs text-gray-500 mb-2">URL pré-saisie depuis l'Étape 1. Si renseignée, on scrape les photos RP de cette URL (sinon : fallback sur les images_urls du scrape Booking si présentes).</div>
+            <input id="step2-rp-url" type="url" placeholder="https://www.resortpass.com/hotels/… (auto-rempli)"
+                   class="input-dayuse w-full text-xs" style="padding: 8px 16px;">
           </div>
         </label>
 
-        <!-- Source : Expedia (auto-discovery URL via Gemini) -->
+        <!-- Source : Expedia -->
         <label class="flex items-start gap-3 border border-dayuse-border rounded-lg p-3 cursor-pointer hover:bg-amber-50/40">
           <input type="checkbox" id="src-expedia" checked class="mt-0.5 w-4 h-4 accent-dayuse-primary">
           <div class="flex-1">
-            <div class="text-sm font-semibold">🌍 Expedia <span class="text-gray-400 text-[10px] font-normal">(URL auto via Gemini)</span></div>
-            <div class="text-xs text-gray-600 mt-0.5">Cherche l'URL de la fiche hôtel sur expedia.com via Gemini, puis scrape la galerie photos (Playwright stealth). Comportement similaire au site officiel. <span class="text-amber-700">⚠️ Gemini peut halluciner l'ID Expedia (h{ID}) → 0 photo extraite. Dans ce cas un warning s'affiche, pas de blocage.</span></div>
+            <div class="text-sm font-semibold">🌍 Expedia</div>
+            <div class="text-xs text-gray-500 mb-2">URL pré-saisie depuis l'Étape 1 (DDG + Gemini). Édite si nécessaire — format attendu : <code>…/Ville-Hotels-Nom.h{ID}.Hotel-Information</code>.</div>
+            <input id="step2-expedia-url" type="url" placeholder="https://www.expedia.com/...h{ID}.Hotel-Information (auto-rempli)"
+                   class="input-dayuse w-full text-xs" style="padding: 8px 16px;">
           </div>
         </label>
 
@@ -398,7 +388,9 @@
           <input type="checkbox" id="src-instagram" class="mt-0.5 w-4 h-4 accent-dayuse-primary">
           <div class="flex-1">
             <div class="text-sm font-semibold">📷 Instagram <span class="text-amber-700 text-[10px] font-normal">(expérimental — bloqué par Instagram en 2026)</span></div>
-            <div class="text-xs text-gray-600 mt-0.5">⚠️ <strong>Instagram bloque le scraping anonyme</strong> depuis 2024. Pour rendre cette source viable, il faudrait brancher une API tierce (RapidAPI Instagram Scraper ~$10/mo) ou un login Instagram (risque de ban). En l'état, cette case ne ramènera presque jamais de photos. Auto-discovery via Gemini conservée pour quand on aura une API.</div>
+            <div class="text-xs text-gray-500 mb-2">URL pré-saisie depuis l'Étape 1. ⚠️ Instagram bloque le scraping anonyme — cette case ne ramènera presque jamais de photos (auto-discovery conservé pour quand on aura une API).</div>
+            <input id="step2-instagram-url" type="url" placeholder="https://www.instagram.com/handle (auto-rempli)"
+                   class="input-dayuse w-full text-xs" style="padding: 8px 16px;">
           </div>
         </label>
       </div>
@@ -1755,63 +1747,26 @@ photo finale enhanced (jpeg)
     const state = { slug: null, rp: null, uploaded: 0 };
 
     const $ = (id) => document.getElementById(id);
-    const btnScrape = $("btn-scrape"), btnRun = $("btn-run");
+    const btnRun = $("btn-run");
     const rpResult = $("rp-result"), runResult = $("run-result");
     const dropzone = $("dropzone"), fileInput = $("file-input");
     const uploadSummary = $("upload-summary"), uploadPreview = $("upload-preview");
 
-    // ----- Toggle mode RP / Booking-only -----
-    document.querySelectorAll('[data-mode]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const mode = btn.dataset.mode;
-        document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
-        $("src-input-rp").classList.toggle('hidden', mode !== 'rp');
-        $("src-input-booking").classList.toggle('hidden', mode !== 'booking');
-      });
-    });
-
-    // ----- Scrape RP -----
-    btnScrape.onclick = async () => {
-      const url = $("rp-url").value.trim();
-      if (!url) return;
-      btnScrape.disabled = true;
-      btnScrape.textContent = "Scraping...";
-      try {
-        const r = await fetch("/api/scrape", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url }),
-        });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error || "Erreur");
-        state.slug = data.slug;
-        state.rp = data.data;
-        renderRP(data.data);
-        $("step-upload").classList.remove("opacity-50", "pointer-events-none");
-        // Replay : check si un run précédent existe pour ce slug
-        if (window.loadRunStatus) window.loadRunStatus(state.slug);
-      } catch (e) {
-        rpResult.classList.remove("hidden");
-        rpResult.innerHTML = `<div class="text-red-600 text-sm">${e.message}</div>`;
-      } finally {
-        btnScrape.disabled = false;
-        btnScrape.textContent = "Scraper RP";
-      }
-    };
-
-    // ----- Scrape Booking-only (mode indépendant RP) -----
-    const btnScrapeBooking = $("btn-scrape-booking");
-    if (btnScrapeBooking) {
-      btnScrapeBooking.onclick = async () => {
-        const url = $("booking-meta-url").value.trim();
+    // ----- Identifier l'hôtel (mode unifié Martin 12/05/2026) -----
+    // Booking URL → scrape meta + cherche les URLs des autres sources en parallèle.
+    // L'utilisateur pourra éditer / compléter les URLs trouvées en Étape 2.
+    const btnIdentifyHotel = $("btn-identify-hotel");
+    if (btnIdentifyHotel) {
+      btnIdentifyHotel.onclick = async () => {
+        const url = $("identify-booking-url").value.trim();
         if (!url.startsWith("https://www.booking.com/hotel/")) {
-          alert("Colle une URL Booking valide (https://www.booking.com/hotel/...)");
+          alert("Colle une URL Booking valide (https://www.booking.com/hotel/…)");
           return;
         }
-        btnScrapeBooking.disabled = true;
-        btnScrapeBooking.textContent = "Scraping Booking...";
+        btnIdentifyHotel.disabled = true;
+        btnIdentifyHotel.textContent = "🔎 Identification en cours…";
         try {
-          const r = await fetch("/api/scrape-booking", {
+          const r = await fetch("/api/identify-hotel", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ url }),
@@ -1819,30 +1774,79 @@ photo finale enhanced (jpeg)
           const data = await r.json();
           if (!r.ok) throw new Error(data.error || "Erreur");
           state.slug = data.slug;
-          state.rp = data.data;  // on stocke au même endroit (format compatible)
-          // Pré-remplit l'URL Booking dans l'étape 2 pour qu'on puisse scraper les photos
-          if ($("booking-url")) $("booking-url").value = url;
-          renderRP(data.data);
+          state.rp = data.data;
+          // Stocke les URLs trouvées + Booking URL (sera utilisé pour pré-remplir Étape 2)
+          state.identifiedUrls = data.urls || {};
+          state.urlsMeta = data.urls_meta || {};
+          renderRP(data.data, state.identifiedUrls, state.urlsMeta);
           $("step-upload").classList.remove("opacity-50", "pointer-events-none");
+          // Pré-remplit le champ Booking URL en Étape 2
+          if ($("booking-url")) $("booking-url").value = url;
+          // Pré-remplit les autres champs URL en Étape 2 (si présents)
+          prefillStep2Urls(state.identifiedUrls);
           // Replay : check si un run précédent existe pour ce slug
           if (window.loadRunStatus) window.loadRunStatus(state.slug);
         } catch (e) {
           rpResult.classList.remove("hidden");
           rpResult.innerHTML = `<div class="text-red-600 text-sm">${e.message}</div>`;
         } finally {
-          btnScrapeBooking.disabled = false;
-          btnScrapeBooking.textContent = "Scraper Booking";
+          btnIdentifyHotel.disabled = false;
+          btnIdentifyHotel.textContent = "🔎 Identifier l'hôtel";
         }
       };
     }
 
-    function renderRP(d) {
+    function prefillStep2Urls(urls) {
+      // Pré-remplit les champs URL en Étape 2. Si le champ n'existe pas encore
+      // dans le DOM (pas encore ajouté), on stocke juste dans state pour usage
+      // au moment du fetch.
+      if (urls.official_url && $("step2-official-url")) $("step2-official-url").value = urls.official_url;
+      if (urls.expedia_url && $("step2-expedia-url")) $("step2-expedia-url").value = urls.expedia_url;
+      if (urls.rp_url && $("step2-rp-url")) $("step2-rp-url").value = urls.rp_url;
+      if (urls.instagram_url && $("step2-instagram-url")) $("step2-instagram-url").value = urls.instagram_url;
+      if (urls.booking_url && $("booking-url")) $("booking-url").value = urls.booking_url;
+    }
+
+    function renderRP(d, urls, urlsMeta) {
       const allCats = ["pool", "cabana", "food", "bar", "spa", "beach", "rooftop", "gym"];
       const ameniteHTML = allCats.map(c => {
         const on = d.amenities_normalized?.[c];
         return `<span class="pill ${on ? 'pill-on' : 'pill-off'}">${c}</span>`;
       }).join(" ");
       const personasHTML = (d.personas_allowed || []).map(p => `<span class="pill">${p}</span>`).join(" ");
+
+      // ━ URLs trouvées par /api/identify-hotel : on les affiche pour transparence ━
+      let urlsHTML = "";
+      if (urls) {
+        const sourceBadge = (source) => {
+          if (!source) return "";
+          const color = source === "duckduckgo" ? "bg-emerald-100 text-emerald-700"
+                      : source === "gemini" ? "bg-purple-100 text-purple-700"
+                      : "bg-gray-100 text-gray-600";
+          return `<span class="text-[9px] uppercase font-bold ${color} px-1.5 py-0.5 rounded ml-1">${source}</span>`;
+        };
+        const row = (label, urlKey, metaKey) => {
+          const url = urls[urlKey];
+          const meta = (urlsMeta || {})[metaKey] || {};
+          if (url) {
+            return `<tr><td class="py-1 pr-2 text-xs font-semibold">✓ ${label}</td>
+                    <td class="py-1 text-[11px]"><a href="${url}" target="_blank" class="text-dayuse-orange underline">${url.substring(0, 70)}…</a>${sourceBadge(meta.source)}</td></tr>`;
+          }
+          const err = meta.error ? `<span class="text-red-600 text-[10px]">${meta.error.substring(0, 80)}</span>` : '<span class="text-gray-400 text-[10px] italic">non trouvée — éditable en Étape 2</span>';
+          return `<tr><td class="py-1 pr-2 text-xs font-semibold text-gray-400">○ ${label}</td>
+                  <td class="py-1">${err}</td></tr>`;
+        };
+        urlsHTML = `
+          <div class="mt-3 mb-3 pt-3 border-t border-gray-100">
+            <div class="text-xs font-semibold text-gray-700 mb-1.5">🔍 URLs trouvées (DuckDuckGo + Gemini)</div>
+            <table class="w-full"><tbody>
+              ${row("Site officiel", "official_url", "official")}
+              ${row("ResortPass", "rp_url", "rp")}
+              ${row("Expedia", "expedia_url", "expedia")}
+              ${row("Instagram", "instagram_url", "instagram")}
+            </tbody></table>
+          </div>`;
+      }
 
       rpResult.classList.remove("hidden");
       rpResult.innerHTML = `
@@ -1861,6 +1865,7 @@ photo finale enhanced (jpeg)
           <div class="text-xs text-gray-500 mb-1">Personas autorisés en ajout IA</div>
           <div>${personasHTML}</div>
         </div>
+        ${urlsHTML}
       `;
       // met à jour le compteur dans le bouton "Télécharger depuis RP"
       $("rp-photo-count").textContent = d.image_count ? `(${d.image_count} dispo)` : "";
@@ -2285,10 +2290,23 @@ photo finale enhanced (jpeg)
       });
 
       try {
+        // Récupère les URLs éditées par l'utilisateur dans les champs Step 2.
+        // Si vide → on laisse le backend faire la recherche DDG/Gemini classique.
+        const explicit_urls = {
+          official_url: $("step2-official-url") ? $("step2-official-url").value.trim() : "",
+          expedia_url: $("step2-expedia-url") ? $("step2-expedia-url").value.trim() : "",
+          rp_url: $("step2-rp-url") ? $("step2-rp-url").value.trim() : "",
+          instagram_url: $("step2-instagram-url") ? $("step2-instagram-url").value.trim() : "",
+        };
         const r = await fetch("/api/fetch-all-sources", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ slug: state.slug, booking_url: bookingUrl, sources }),
+          body: JSON.stringify({
+            slug: state.slug,
+            booking_url: bookingUrl,
+            sources,
+            ...explicit_urls,
+          }),
         });
         const data = await r.json();
         if (!r.ok) throw new Error(data.error || "Erreur");
