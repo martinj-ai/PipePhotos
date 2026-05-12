@@ -154,13 +154,41 @@
     border-top: 1px solid #EAEAEB;
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-end;
     font-size: 11px;
     color: #8E8E93;
+  }
+  .cover-signature-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .cover-signature-author {
+    font-family: 'Manrope', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    color: #292935;
+    letter-spacing: -0.3px;
+  }
+  .cover-signature-role {
+    font-size: 10px;
+    font-weight: 500;
+    color: #54545D;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
   }
   .cover-footer-tag {
     font-weight: 600;
     color: #54545D;
+  }
+  .cover-meta-right {
+    text-align: right;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .cover-meta-right .cover-footer-tag {
+    font-size: 10px;
   }
 
   /* ━━━ Photo pages ━━━ */
@@ -641,8 +669,14 @@
   </div>
 
   <div class="cover-footer">
-    <span class="cover-footer-tag">Généré automatiquement par le pipeline Dayuse</span>
-    <span>{{ stats.duration_human }} · ${{ "%.2f"|format(stats.cost_usd) }}</span>
+    <div class="cover-signature-block">
+      <span class="cover-signature-author">Martin Juglair</span>
+      <span class="cover-signature-role">CRM Lead · Dayuse</span>
+    </div>
+    <div class="cover-meta-right">
+      <span class="cover-footer-tag">Généré automatiquement par le pipeline Dayuse</span>
+      <span>{{ stats.duration_human }} · ${{ "%.2f"|format(stats.cost_usd) }}</span>
+    </div>
   </div>
 </section>
 
