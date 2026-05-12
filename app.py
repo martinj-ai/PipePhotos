@@ -1357,6 +1357,21 @@ def api_run():
         "local_warm_boost": sum(1 for r in enhanced_results if r.get("action") == "local_warm_boost"),
     })
 
+    # ━━ Construit le mapping SEO {filename → seo_filename} en amont ━━
+    # Seq basé sur le slot final (= final_order_pos) → la photo en slot 1 du
+    # pack aura `dayuse_{hotel}_{amenity}_01.jpg`, slot 2 → _02, etc.
+    # On persiste sur disque pour que les ZIPs (téléchargés a posteriori)
+    # utilisent les mêmes noms.
+    hotel_slug_seo = _hotel_slug_for(slug)
+    seo_names_map: dict[str, str] = {}
+    for r in enhanced_results:
+        fn = r["filename"]
+        slot = r.get("final_order_pos") or (len(seo_names_map) + 1)
+        amenity = _seo_amenity_for_file(slug, fn)
+        ext = Path(fn).suffix.lower() or ".jpg"
+        seo_names_map[fn] = _seo_filename(hotel_slug_seo, amenity, slot, ext)
+    _persist_seo_names_map(slug, seo_names_map)
+
     # Construit la liste enhanced pour le front : avant/après + justification
     enhanced_summary = []
     for r in enhanced_results:
@@ -1416,6 +1431,7 @@ def api_run():
             }
             enhanced_summary.append({
                 "filename": filename,
+                "seo_filename": seo_names_map.get(filename, filename),
                 "final_order_pos": r.get("final_order_pos"),
                 "before_url": f"/uploads/{slug}/{filename}",
                 "after_url": f"/output/{slug}/enhanced/{filename}",
@@ -1438,6 +1454,7 @@ def api_run():
         else:
             enhanced_summary.append({
                 "filename": filename,
+                "seo_filename": seo_names_map.get(filename, filename),
                 "final_order_pos": r.get("final_order_pos"),
                 "before_url": f"/uploads/{slug}/{filename}",
                 "after_url": None,
@@ -1589,17 +1606,15 @@ def serve_multiformat(slug, filename):
 def _seo_slug_from_name(name: str | None, fallback_slug: str) -> str:
     """Construit un slug SEO-friendly depuis le nom de l'hôtel.
 
-    Préférence : 'Moxy Miami South Beach' → 'moxy-miami-south-beach' (lisible
-    par les bots IA). Si le nom est absent, on retombe sur le slug interne en
-    retirant les préfixes techniques (booking-, hyatt-, …).
+    'Moxy Miami South Beach' → 'moxy-miami-south-beach'. Si le nom est absent,
+    on retombe sur le slug interne en retirant les préfixes techniques
+    (booking-, hyatt-, …).
     """
     if name:
         import re as _re
-        # Lowercase + remplace tout ce qui n'est pas alphanumérique par "-"
         slug = _re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
         if slug:
             return slug
-    # Fallback : on retire un éventuel préfixe technique du slug interne
     s = fallback_slug.lower()
     for prefix in ("booking-", "hyatt-", "hilton-", "marriott-", "rp-"):
         if s.startswith(prefix):
@@ -1608,19 +1623,53 @@ def _seo_slug_from_name(name: str | None, fallback_slug: str) -> str:
     return s or fallback_slug
 
 
-def _build_seo_filename_map(slug: str, files: list[Path]) -> dict[str, str]:
-    """Renvoie {original_filename → SEO_filename} pour les fichiers passés.
+# Mapping FR → EN pour les amenities (utilisé dans les noms de fichiers SEO).
+_AMENITY_EN = {
+    "piscine":                "pool",
+    "piscine_vue_aerienne":   "pool-aerial-view",
+    "cabana":                 "cabana",
+    "transat":                "sun-lounger",
+    "rooftop":                "rooftop",
+    "spa":                    "spa",
+    "f_and_b":                "bar-restaurant",
+    "beach":                  "beach",
+    "gym":                    "gym",
+    "chambre":                "room",
+    "interieur_commun":       "lobby",
+    "exterieur":              "outdoor",
+    "facade":                 "facade",
+    "detail":                 "detail",
+    "staff":                  "staff",
+    "autre":                  "other",
+}
 
-    Format SEO : `{hotel-slug}_{amenity}_{seq:02d}.{ext}`
-      - hotel-slug : nom de l'hôtel slugifié (depuis data/rp/{slug}.json)
-      - amenity    : catégorie principale Gemini (`factual.category`), nettoyée
-      - seq        : numéro séquentiel basé sur l'ordre alphabétique des filenames
-                     d'origine (qui suit en pratique l'ordre du pack final)
 
-    Permet de produire un ZIP où chaque fichier a un nom parlant pour les bots
-    IA / SEO image, ex: `moxy-miami-south-beach_piscine_01.jpg`.
+def _seo_amenity_for_file(slug: str, original_filename: str) -> str:
+    """Retourne l'amenity EN slugifiée pour cette photo (lue depuis l'analyse Gemini)."""
+    analyses_dir = ROOT / "data" / "analyses" / slug
+    stem = Path(original_filename).stem
+    analysis_path = analyses_dir / f"{stem}.json"
+    if not analysis_path.exists():
+        return "photo"
+    try:
+        with open(analysis_path) as fh:
+            data = json.load(fh)
+        cat = ((data.get("analysis") or {}).get("factual") or {}).get("category") or ""
+        cat = cat.lower().strip()
+        return _AMENITY_EN.get(cat, cat) if cat else "photo"
+    except Exception:
+        return "photo"
+
+
+def _seo_filename(hotel_slug: str, amenity: str, seq: int, ext: str) -> str:
+    """Format SEO unifié : `dayuse_{hotel-slug}_{amenity}_{seq:02d}.{ext}`."""
+    return f"dayuse_{hotel_slug}_{amenity}_{seq:02d}{ext}"
+
+
+def _hotel_slug_for(slug: str) -> str:
+    """Lit le nom de l'hôtel depuis data/rp/{slug}.json et le slugifie. Caché en
+    fonction pour éviter de répéter le lecture+slugify dans plusieurs call sites.
     """
-    # Lit le nom de l'hôtel depuis le RP scrapé (fallback : slug)
     rp_path = ROOT / "data" / "rp" / f"{slug}.json"
     hotel_name = None
     if rp_path.exists():
@@ -1629,46 +1678,64 @@ def _build_seo_filename_map(slug: str, files: list[Path]) -> dict[str, str]:
                 hotel_name = json.load(f).get("name")
         except Exception:
             pass
-    hotel_slug = _seo_slug_from_name(hotel_name, slug)
+    return _seo_slug_from_name(hotel_name, slug)
 
-    analyses_dir = ROOT / "data" / "analyses" / slug
 
-    # Pour chaque file, on récupère sa catégorie principale (factual.category)
+def _load_seo_names_map(slug: str) -> dict[str, str] | None:
+    """Lit le mapping persisté `data/output/{slug}/seo_names.json` (généré au
+    moment du run via _persist_seo_names_map). Retourne None si absent.
+    """
+    p = ROOT / "data" / "output" / slug / "seo_names.json"
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text())
+    except Exception:
+        return None
+
+
+def _persist_seo_names_map(slug: str, name_map: dict[str, str]) -> None:
+    """Sauvegarde le mapping {original_filename → seo_filename} sur disque pour
+    que ZIPs et front lisent les mêmes noms.
+    """
+    out = ROOT / "data" / "output" / slug
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "seo_names.json").write_text(json.dumps(name_map, ensure_ascii=False, indent=2))
+
+
+def _build_seo_filename_map(slug: str, files: list[Path]) -> dict[str, str]:
+    """Construit le mapping {original_filename → SEO_filename} à partir d'une
+    liste de fichiers triés alphabétiquement.
+
+    Format : `dayuse_{hotel-slug}_{amenity}_{seq:02d}.{ext}`. Le seq suit l'ordre
+    alphabétique des filenames (= ordre du pack final en pratique).
+
+    NOTE : si un mapping persisté existe (`seo_names.json`), on l'utilise en
+    priorité — il est aligné sur l'ordre du pack final (slot 1, 2, …) calculé
+    pendant le run, plus précis que l'ordre alpha.
+    """
+    persisted = _load_seo_names_map(slug)
+    if persisted:
+        # On rapatrie les noms persistés pour les fichiers demandés
+        result = {}
+        for f in files:
+            if f.name in persisted:
+                result[f.name] = persisted[f.name]
+            else:
+                # Fichier sans mapping persisté → fallback compute fresh
+                # (cas où un nouveau fichier serait apparu sur disque hors pipeline)
+                amenity = _seo_amenity_for_file(slug, f.name)
+                hotel_slug = _hotel_slug_for(slug)
+                seq = len(result) + 1
+                result[f.name] = _seo_filename(hotel_slug, amenity, seq, f.suffix.lower())
+        return result
+
+    # Pas de mapping persisté → calcul sur ordre alpha (fallback)
+    hotel_slug = _hotel_slug_for(slug)
     name_map: dict[str, str] = {}
     for seq, f in enumerate(files, 1):
-        amenity = "photo"  # fallback si l'analyse manque
-        analysis_path = analyses_dir / f"{f.stem}.json"
-        if analysis_path.exists():
-            try:
-                with open(analysis_path) as fh:
-                    data = json.load(fh)
-                cat = ((data.get("analysis") or {}).get("factual") or {}).get("category") or ""
-                cat = cat.lower().strip()
-                if cat:
-                    # Traduction FR → EN pour SEO international (Martin 12/05/2026 :
-                    # les fichiers doivent parler à des bots / utilisateurs anglophones).
-                    amenity = {
-                        "piscine":                "pool",
-                        "piscine_vue_aerienne":   "pool-aerial-view",
-                        "cabana":                 "cabana",
-                        "transat":                "sun-lounger",
-                        "rooftop":                "rooftop",
-                        "spa":                    "spa",
-                        "f_and_b":                "bar-restaurant",
-                        "beach":                  "beach",
-                        "gym":                    "gym",
-                        "chambre":                "room",
-                        "interieur_commun":       "lobby",
-                        "exterieur":              "outdoor",
-                        "facade":                 "facade",
-                        "detail":                 "detail",
-                        "staff":                  "staff",
-                        "autre":                  "other",
-                    }.get(cat, cat)
-            except Exception:
-                pass
-        ext = f.suffix.lower()
-        name_map[f.name] = f"{hotel_slug}_{amenity}_{seq:02d}{ext}"
+        amenity = _seo_amenity_for_file(slug, f.name)
+        name_map[f.name] = _seo_filename(hotel_slug, amenity, seq, f.suffix.lower())
     return name_map
 
 

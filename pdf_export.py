@@ -80,6 +80,7 @@ def _build_html(slug: str, run_data: dict) -> str:
             continue
         photos_for_template.append({
             "filename": filename,
+            "seo_filename": entry.get("seo_filename") or filename,
             "final_order_pos": entry.get("final_order_pos"),
             "action": entry.get("action"),
             "action_label": _action_label(entry.get("action", "")),

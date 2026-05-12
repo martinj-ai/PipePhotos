@@ -2923,7 +2923,7 @@ photo finale enhanced (jpeg)
         }).join(' <span class="text-gray-400 text-[10px]">+</span> ');
         if (!e.after_url) {
           return `<div class="border border-red-200 bg-red-50 rounded-lg p-3 text-xs">
-            <div class="font-semibold">${e.filename}</div>
+            <div class="font-semibold">${e.seo_filename || e.filename}</div>
             <div class="text-red-700 mt-1">Erreur : ${e.error || 'pas de sortie'}</div>
           </div>`;
         }
@@ -3084,7 +3084,7 @@ photo finale enhanced (jpeg)
                     <span class="text-dayuse-ink text-[11px] font-bold px-2 py-0.5 rounded-full" style="background: linear-gradient(62deg, #FFAF36 0%, #FFC536 100%); box-shadow: 0 2px 6px rgba(255, 175, 54, 0.25);">#${e.final_order_pos || '?'}</span>
                     ${e.is_fully_generated ? `<span class="bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide">📌 PHOTO 100% IA</span>` : ''}
                     ${e.is_bonus ? `<span class="bg-fuchsia-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide">✨ Bonus ${e.bonus_amenity || ''}</span>` : ''}
-                    <span class="text-xs font-semibold">${e.filename.length > 26 ? e.filename.substring(0, 24) + '…' : e.filename}</span>
+                    <span class="text-xs font-semibold" title="${e.filename}">${(() => { const fn = e.seo_filename || e.filename; return fn.length > 38 ? fn.substring(0, 36) + '…' : fn; })()}</span>
                   </div>
                   <div class="text-[10px] text-gray-500">${e.is_bonus ? `bonus lifestyle "${e.bonus_amenity || '?'}"` : `${j.category || '?'} → top ${j.selection_rank || '?'} de "${j.selection_category || '?'}"`}</div>
                   ${(() => {
