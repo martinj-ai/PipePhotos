@@ -103,8 +103,14 @@ def _build_html(slug: str, run_data: dict) -> str:
     n_clutter = sum(1 for p in photos_for_template if p["transformations"].get("clutter_removed"))
     n_lighting = sum(1 for p in photos_for_template if p["transformations"].get("ai_lighting"))
 
-    cost_usd_total = float(run_data.get("cost_usd_total") or 0)
+    # ━━ Stats globales — récup depuis la structure réelle de /api/run ━━
+    # Bug observé Martin (12/05/2026) : le PDF affichait 0$ car on lisait
+    # run_data.cost_usd_total qui n'existe pas. Le vrai chemin c'est run_data.cost.total_usd.
+    cost_block = run_data.get("cost") or {}
+    cost_usd_total = float(cost_block.get("total_usd") or 0)
     pipeline_duration_s = float(run_data.get("pipeline_duration_s") or 0)
+    stats_block = run_data.get("stats") or {}
+    n_sourced = int(stats_block.get("uploaded") or 0)
 
     # ━━ Page "Preview Dayuse" : mock fidèle de la page hôtel sur dayuse.fr ━━
     # Layout hero = 1 grande photo gauche + 2 petites empilées droite (matche le
@@ -136,6 +142,7 @@ def _build_html(slug: str, run_data: dict) -> str:
         "photos": photos_for_template,
         "preview": preview_data,
         "stats": {
+            "n_sourced": n_sourced,
             "n_total": n_total,
             "n_ai_retouched": n_ai_retouched,
             "n_human_added": n_human_added,

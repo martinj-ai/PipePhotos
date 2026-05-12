@@ -638,30 +638,27 @@
 
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="stat-value">{{ stats.n_total }}</div>
-        <div class="stat-label">Photos finales</div>
+        <div class="stat-value">{{ stats.n_sourced }}</div>
+        <div class="stat-label">Photos sourcées</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value">{{ stats.n_ai_retouched }}</div>
-        <div class="stat-label">Retouches IA appliquées</div>
+        <div class="stat-value">{{ stats.n_total }}</div>
+        <div class="stat-label">Photos finales du pack</div>
       </div>
       <div class="stat-card stat-secondary">
-        <div class="stat-value">{{ stats.n_human_added }}</div>
-        <div class="stat-label">Personnages ajoutés</div>
+        <div class="stat-value">{{ stats.duration_human }}</div>
+        <div class="stat-label">Durée du pipeline</div>
       </div>
       <div class="stat-card stat-secondary">
-        <div class="stat-value">{{ stats.n_clutter + stats.n_lighting }}</div>
-        <div class="stat-label">Nettoyages / re-éclairages</div>
+        <div class="stat-value">${{ "%.2f"|format(stats.cost_usd) }}</div>
+        <div class="stat-label">Coût total IA</div>
       </div>
     </div>
   </div>
 
   <div class="cover-footer">
     <span class="cover-signature-discrete">Martin Juglair</span>
-    <div class="cover-meta-right">
-      <span class="cover-footer-tag">Généré automatiquement par le pipeline Dayuse</span>
-      <span>{{ stats.duration_human }} · ${{ "%.2f"|format(stats.cost_usd) }}</span>
-    </div>
+    <span class="cover-footer-tag">Généré automatiquement par le pipeline Dayuse</span>
   </div>
 </section>
 
