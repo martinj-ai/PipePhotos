@@ -1645,11 +1645,25 @@ def _build_seo_filename_map(slug: str, files: list[Path]) -> dict[str, str]:
                 cat = ((data.get("analysis") or {}).get("factual") or {}).get("category") or ""
                 cat = cat.lower().strip()
                 if cat:
-                    # Quelques renommages plus parlants côté brand
+                    # Traduction FR → EN pour SEO international (Martin 12/05/2026 :
+                    # les fichiers doivent parler à des bots / utilisateurs anglophones).
                     amenity = {
-                        "f_and_b": "bar-restaurant",
-                        "piscine_vue_aerienne": "piscine-vue-aerienne",
-                        "interieur_commun": "lobby",
+                        "piscine":                "pool",
+                        "piscine_vue_aerienne":   "pool-aerial-view",
+                        "cabana":                 "cabana",
+                        "transat":                "sun-lounger",
+                        "rooftop":                "rooftop",
+                        "spa":                    "spa",
+                        "f_and_b":                "bar-restaurant",
+                        "beach":                  "beach",
+                        "gym":                    "gym",
+                        "chambre":                "room",
+                        "interieur_commun":       "lobby",
+                        "exterieur":              "outdoor",
+                        "facade":                 "facade",
+                        "detail":                 "detail",
+                        "staff":                  "staff",
+                        "autre":                  "other",
                     }.get(cat, cat)
             except Exception:
                 pass
