@@ -20,7 +20,7 @@ import os
 import shutil
 import time
 from pathlib import Path
-from flask import Flask, jsonify, render_template, request, send_from_directory
+from flask import Flask, jsonify, render_template, request, send_from_directory, Response
 
 import rp_scraper
 import booking_scraper
@@ -41,6 +41,7 @@ import instagram_finder
 import instagram_scraper
 import booking_amenities_extractor
 import slowmo_higgsfield
+import pdf_export
 
 ROOT = Path(__file__).parent
 UPLOADS_DIR = ROOT / "data" / "uploads"
@@ -1604,6 +1605,42 @@ def api_download_zip(slug):
         mimetype="application/zip",
         as_attachment=True,
         download_name=f"{slug}_dayaccess_final_pack.zip",
+    )
+
+
+@app.route("/api/export/<slug>.pdf", methods=["POST"])
+def api_export_pdf(slug):
+    """Génère un PDF branded Dayuse "avant/après" depuis le run_data POSTé.
+
+    Le front envoie le `state.lastRun` (= dernière réponse de /api/run) en JSON
+    dans le body. Le serveur génère un PDF via Playwright + Jinja2 (charte Dayuse)
+    et le retourne en attachment.
+
+    Pourquoi POST + body au lieu de GET + fichier sur disque : on évite de stocker
+    le `data` du run en plus (déjà persisté en bouts dispersés : enhanced/, analyses/,
+    rp/, etc.) et on garde le PDF reproductible exactement comme la page affichée.
+    """
+    run_data = request.get_json(silent=True) or {}
+    if not run_data:
+        return jsonify({"error": "Body JSON manquant (run_data attendu)"}), 400
+
+    try:
+        pdf_bytes = pdf_export.generate_pdf(slug, run_data)
+    except Exception as e:
+        return jsonify({"error": f"Génération PDF échouée : {type(e).__name__}: {str(e)[:200]}"}), 500
+
+    hotel_name = (run_data.get("hotel") or {}).get("name") or slug
+    # Slugify minimal pour le filename (espaces → underscores, char non-ASCII → ascii-safe)
+    safe = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in hotel_name)[:60]
+    filename = f"Dayuse_{safe}_pack_photos.pdf"
+
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
     )
 
 

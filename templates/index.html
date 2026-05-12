@@ -2514,6 +2514,7 @@ photo finale enhanced (jpeg)
         // Init sliders APRÈS injection HTML (le DOM est garanti d'être à jour ici)
         requestAnimationFrame(() => {
           requestAnimationFrame(initCompareSliders);  // double RAF = paint terminé
+          wireExportPdfButton();
         });
         // Stocke les data du run pour la viz workflow + render
         state.lastRun = data;
@@ -2526,6 +2527,57 @@ photo finale enhanced (jpeg)
         btnRun.textContent = "Lancer le pipeline";
       }
     };
+
+    // ━━━ Export PDF "avant/après" branded Dayuse ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Wire le bouton après render. Le PDF est généré côté serveur via Playwright
+    // (~5-15s selon le nombre de photos). Pendant ce temps : disable + label de
+    // progression. On télécharge le blob retourné via un <a> temporaire.
+    function wireExportPdfButton() {
+      const btn = document.getElementById('btn-export-pdf');
+      if (!btn) return;
+      btn.onclick = async () => {
+        if (!state.lastRun) {
+          alert("Aucun run actif — relance le pipeline d'abord.");
+          return;
+        }
+        const originalLabel = btn.innerHTML;
+        btn.disabled = true;
+        btn.style.opacity = '0.6';
+        btn.style.cursor = 'wait';
+        btn.innerHTML = '⏳ Génération du PDF…';
+        try {
+          const r = await fetch(`/api/export/${encodeURIComponent(state.slug)}.pdf`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(state.lastRun),
+          });
+          if (!r.ok) {
+            const err = await r.json().catch(() => ({error: "Erreur inconnue"}));
+            throw new Error(err.error || `HTTP ${r.status}`);
+          }
+          const blob = await r.blob();
+          const url = URL.createObjectURL(blob);
+          // Récupère filename depuis Content-Disposition si possible
+          const disposition = r.headers.get('Content-Disposition') || '';
+          const match = /filename="([^"]+)"/.exec(disposition);
+          const filename = match ? match[1] : `Dayuse_${state.slug}_pack_photos.pdf`;
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+        } catch (e) {
+          alert(`Erreur génération PDF : ${e.message}`);
+        } finally {
+          btn.disabled = false;
+          btn.style.opacity = '';
+          btn.style.cursor = '';
+          btn.innerHTML = originalLabel;
+        }
+      };
+    }
 
     // Panneau "Comment ça marche" — explique le scoring, la sélection, l'ordering, les retouches
     function renderScoringPanel() {
@@ -3265,9 +3317,18 @@ photo finale enhanced (jpeg)
 
       // (init des sliders fait par le caller APRÈS innerHTML — voir btnRun.onclick)
       return `
-        <div class="mb-4">
-          <div class="text-base font-semibold">${d.hotel.name}</div>
-          <div class="text-xs text-gray-500">${d.hotel.city} · ${d.hotel.stars}★ · vibe ${d.hotel.vibe} · personas: ${(d.hotel.personas_allowed || []).join(', ')}</div>
+        <div class="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <div class="text-base font-semibold">${d.hotel.name}</div>
+            <div class="text-xs text-gray-500">${d.hotel.city} · ${d.hotel.stars}★ · vibe ${d.hotel.vibe} · personas: ${(d.hotel.personas_allowed || []).join(', ')}</div>
+          </div>
+          <button id="btn-export-pdf" class="shrink-0 inline-flex items-center gap-2 text-xs font-semibold px-4 py-2 rounded-full text-[#292935]"
+                  style="background: linear-gradient(62deg, #FFAF36 0%, #FFC536 100%); border: none; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 2px 12px rgba(255, 175, 54, 0.18);"
+                  onmouseover="this.style.background='linear-gradient(62deg, #FF9F26 0%, #FFB526 100%)'"
+                  onmouseout="this.style.background='linear-gradient(62deg, #FFAF36 0%, #FFC536 100%)'"
+                  title="Télécharger un PDF branded Dayuse avec les photos avant/après">
+            📥 Télécharger le PDF
+          </button>
         </div>
         ${renderScoringPanel()}
         ${statsHTML}

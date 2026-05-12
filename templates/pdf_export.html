@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>{{ hotel_name }} — Pack photos Dayuse</title>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /* ━━━ Reset + base ━━━ */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    font-family: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-weight: 400;
+    color: #292935;
+    background: #FFFFFF;
+    -webkit-font-smoothing: antialiased;
+  }
+  body { font-size: 14px; line-height: 1.6; }
+  h1, h2, h3 { font-weight: 700; color: #292935; letter-spacing: -0.5px; }
+  p { color: #54545D; }
+
+  /* ━━━ Layout pagination ━━━ */
+  .page {
+    width: 100%;
+    min-height: 277mm; /* A4 - margins */
+    padding: 0;
+    page-break-after: always;
+    position: relative;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  /* ━━━ Wordmark Dayuse (header consistent) ━━━ */
+  .wordmark {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 2px;
+    font-family: 'Manrope', sans-serif;
+    font-weight: 800;
+    font-size: 22px;
+    letter-spacing: -0.5px;
+    background: linear-gradient(62deg, #FFAF36 0%, #FFC536 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .wordmark::after {
+    content: "";
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: linear-gradient(62deg, #FFAF36 0%, #FFC536 100%);
+    margin-left: 2px;
+    transform: translateY(-2px);
+    -webkit-text-fill-color: initial;
+  }
+
+  /* ━━━ Cover page ━━━ */
+  .cover {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 32px 28px;
+    min-height: 277mm;
+  }
+  .cover-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .cover-date {
+    font-size: 12px;
+    color: #8E8E93;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+  .cover-main {
+    margin-top: 80px;
+    flex: 1;
+  }
+  .cover-eyebrow {
+    font-size: 12px;
+    font-weight: 600;
+    color: #54545D;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 14px;
+  }
+  .cover-hotel-name {
+    font-size: 48px;
+    line-height: 1.1;
+    font-weight: 800;
+    letter-spacing: -1.5px;
+    color: #292935;
+    margin-bottom: 12px;
+  }
+  .cover-city {
+    font-size: 18px;
+    font-weight: 500;
+    color: #54545D;
+  }
+  .cover-stars {
+    display: inline-block;
+    margin-left: 10px;
+    color: #FFB800;
+    font-size: 18px;
+    letter-spacing: 1px;
+    vertical-align: middle;
+  }
+
+  /* ━━━ Stats grid (cover bottom) ━━━ */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin-top: 40px;
+  }
+  .stat-card {
+    background: linear-gradient(135deg, #FFF8ED 0%, #FFFBF5 100%);
+    border: 1px solid rgba(255, 175, 54, 0.18);
+    border-radius: 12px;
+    padding: 18px 20px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+  }
+  .stat-value {
+    font-size: 32px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -1px;
+    background: linear-gradient(62deg, #FFAF36 0%, #FFC536 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .stat-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #54545D;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-top: 6px;
+  }
+  .stat-secondary {
+    background: #F9F9F9;
+    border: 1px solid #EAEAEB;
+  }
+  .stat-secondary .stat-value {
+    -webkit-text-fill-color: #292935;
+    background: none;
+  }
+
+  .cover-footer {
+    margin-top: 60px;
+    padding-top: 24px;
+    border-top: 1px solid #EAEAEB;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: #8E8E93;
+  }
+  .cover-footer-tag {
+    font-weight: 600;
+    color: #54545D;
+  }
+
+  /* ━━━ Photo pages ━━━ */
+  .photo-page {
+    padding: 24px 28px;
+    min-height: 277mm;
+    display: flex;
+    flex-direction: column;
+  }
+  .photo-page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 18px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #EAEAEB;
+  }
+  .photo-slot-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: linear-gradient(62deg, #FFAF36 0%, #FFC536 100%);
+    color: #292935;
+    font-weight: 700;
+    font-size: 13px;
+    padding: 6px 14px;
+    border-radius: 100px;
+  }
+  .photo-page-hotel {
+    font-size: 11px;
+    font-weight: 500;
+    color: #8E8E93;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  /* ━━━ Avant/Après side-by-side ━━━ */
+  .ba-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  .ba-cell {
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.10);
+    position: relative;
+    background: #F9F9F9;
+  }
+  .ba-cell img {
+    width: 100%;
+    height: 240px;
+    object-fit: cover;
+    display: block;
+  }
+  .ba-label {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: rgba(41, 41, 53, 0.85);
+    color: #FFFFFF;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 100px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .ba-label.after {
+    background: #22C55E;
+  }
+
+  /* ━━━ Metadata block ━━━ */
+  .meta-block {
+    background: #F9F9F9;
+    border: 1px solid #EAEAEB;
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin-bottom: 12px;
+  }
+  .meta-row {
+    display: flex;
+    margin-bottom: 8px;
+    font-size: 12px;
+  }
+  .meta-row:last-child { margin-bottom: 0; }
+  .meta-key {
+    font-weight: 600;
+    color: #54545D;
+    min-width: 140px;
+    flex-shrink: 0;
+  }
+  .meta-value {
+    color: #292935;
+    flex: 1;
+  }
+
+  /* ━━━ Action chips ━━━ */
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 11px;
+    border-radius: 100px;
+    font-size: 11px;
+    font-weight: 600;
+    background: #EEEEF0;
+    color: #54545D;
+    border: 1px solid #D4D4D7;
+  }
+  .chip.active {
+    background: linear-gradient(135deg, #FFF8ED 0%, #FFFBF5 100%);
+    color: #B45309;
+    border-color: #FFAF36;
+  }
+  .chip.success {
+    background: #E8F5E9;
+    color: #2E7D32;
+    border-color: #4CAF50;
+  }
+  .chip.info {
+    background: #E3F2FD;
+    color: #1976D2;
+    border-color: #2196F3;
+  }
+  .chip.purple {
+    background: rgba(110, 105, 172, 0.10);
+    color: #6E69AC;
+    border-color: rgba(110, 105, 172, 0.30);
+  }
+
+  /* ━━━ Reason / justification text ━━━ */
+  .reason-text {
+    font-size: 12px;
+    color: #54545D;
+    line-height: 1.6;
+    font-style: italic;
+  }
+  .reason-text strong {
+    color: #292935;
+    font-style: normal;
+  }
+
+  /* ━━━ Page footer ━━━ */
+  .page-footer {
+    margin-top: auto;
+    padding-top: 16px;
+    border-top: 1px solid #EAEAEB;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 10px;
+    color: #8E8E93;
+  }
+
+  /* ━━━ Print rules ━━━ */
+  @page {
+    size: A4;
+    margin: 0;
+  }
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+
+{# ━━━ Page 1 : Cover ━━━ #}
+<section class="page cover">
+  <div class="cover-header">
+    <span class="wordmark">dayuse</span>
+    <span class="cover-date">{{ generated_at }}</span>
+  </div>
+
+  <div class="cover-main">
+    <div class="cover-eyebrow">Pack photos retouchées · Day Access</div>
+    <h1 class="cover-hotel-name">{{ hotel_name }}</h1>
+    <div class="cover-city">
+      {{ hotel_city }}
+      {% if hotel_stars %}<span class="cover-stars">{% for i in range(hotel_stars) %}★{% endfor %}</span>{% endif %}
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.n_total }}</div>
+        <div class="stat-label">Photos finales</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ stats.n_ai_retouched }}</div>
+        <div class="stat-label">Retouches IA appliquées</div>
+      </div>
+      <div class="stat-card stat-secondary">
+        <div class="stat-value">{{ stats.n_human_added }}</div>
+        <div class="stat-label">Personnages ajoutés</div>
+      </div>
+      <div class="stat-card stat-secondary">
+        <div class="stat-value">{{ stats.n_clutter + stats.n_lighting }}</div>
+        <div class="stat-label">Nettoyages / re-éclairages</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cover-footer">
+    <span class="cover-footer-tag">Généré automatiquement par le pipeline Dayuse</span>
+    <span>{{ stats.duration_human }} · ${{ "%.2f"|format(stats.cost_usd) }}</span>
+  </div>
+</section>
+
+{# ━━━ Pages 2+ : 1 page par photo ━━━ #}
+{% for photo in photos %}
+<section class="page photo-page">
+  <div class="photo-page-header">
+    <span class="photo-slot-badge">#{{ photo.final_order_pos or loop.index }} · {{ photo.action_label }}</span>
+    <span class="photo-page-hotel">{{ hotel_name }}</span>
+  </div>
+
+  <div class="ba-grid">
+    <div class="ba-cell">
+      <span class="ba-label">Avant</span>
+      {% if photo.before_data_url %}
+        <img src="{{ photo.before_data_url }}" alt="avant">
+      {% else %}
+        <div style="height:240px;display:flex;align-items:center;justify-content:center;color:#8E8E93;font-size:11px;">source non disponible</div>
+      {% endif %}
+    </div>
+    <div class="ba-cell">
+      <span class="ba-label after">Après</span>
+      <img src="{{ photo.after_data_url }}" alt="après">
+    </div>
+  </div>
+
+  <div class="meta-block">
+    <div class="meta-row">
+      <span class="meta-key">Catégorie</span>
+      <span class="meta-value">
+        {{ photo.justification.category or "—" }}
+        {% if photo.justification.selection_rank %}
+          <span style="color:#8E8E93;"> · top {{ photo.justification.selection_rank }} de "{{ photo.justification.selection_category }}"</span>
+        {% endif %}
+      </span>
+    </div>
+    {% if photo.persona_used %}
+    <div class="meta-row">
+      <span class="meta-key">Persona ajouté</span>
+      <span class="meta-value">{{ photo.persona_used }}</span>
+    </div>
+    {% endif %}
+    <div class="meta-row">
+      <span class="meta-key">Transformations</span>
+      <span class="meta-value">
+        <div class="chips">
+          {% set tx = photo.transformations %}
+          {% if tx.smart_crop %}<span class="chip">Recadrage</span>{% endif %}
+          {% if tx.brand_lut %}<span class="chip success">LUT brand</span>{% endif %}
+          {% if tx.ai_lighting %}<span class="chip purple">Lumière IA</span>{% endif %}
+          {% if tx.clutter_removed %}<span class="chip active">Clutter retiré</span>{% endif %}
+          {% if tx.character_added %}<span class="chip active">Personnage ajouté</span>{% endif %}
+          {% if tx.people_removed %}<span class="chip info">Personnes retirées</span>{% endif %}
+          {% if tx.warm_boost %}<span class="chip success">Warm boost</span>{% endif %}
+          {% if photo.is_fully_generated %}<span class="chip purple">Photo 100% IA</span>{% endif %}
+          {% if photo.is_bonus %}<span class="chip purple">Bonus lifestyle</span>{% endif %}
+        </div>
+      </span>
+    </div>
+  </div>
+
+  {% if photo.reason %}
+  <div class="reason-text">
+    <strong>Logique appliquée :</strong> {{ photo.reason }}
+  </div>
+  {% endif %}
+
+  <div class="page-footer">
+    <span class="wordmark" style="font-size:13px;">dayuse</span>
+    <span>{{ hotel_name }} — Page {{ loop.index + 1 }}/{{ photos|length + 1 }}</span>
+  </div>
+</section>
+{% endfor %}
+
+</body>
+</html>
