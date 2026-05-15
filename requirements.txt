@@ -6,3 +6,7 @@ Flask>=3.0.0
 ImageHash>=4.3.0
 higgsfield-client>=0.1.0
 imageio-ffmpeg>=0.5.0
+playwright>=1.40.0
+playwright-stealth>=2.0.0
+patchright>=1.59.0  # Playwright undetected (bypass DataDome Expedia)
+weasyprint>=60.0    # PDF export (alternative à Playwright PDF)

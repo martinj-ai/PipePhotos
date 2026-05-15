@@ -14,9 +14,22 @@ Usage :
 from __future__ import annotations
 
 import re
+import sys
+import tempfile
 from urllib.parse import urlparse, urljoin
 from playwright.sync_api import sync_playwright
 from playwright_stealth import Stealth
+
+# Patchright (undetected Playwright) pour bypass anti-bot des chaînes hôtelières.
+# Marriott / Hilton / Hyatt / IHG bloquent Playwright stealth en headless avec
+# « Access Denied » (Akamai/Imperva). Patchright + real Chrome + headless=False
+# passe ces protections. Fallback automatique si on détecte le blocage.
+try:
+    from patchright.sync_api import sync_playwright as patchright_sync
+    _HAS_PATCHRIGHT = True
+except ImportError:
+    _HAS_PATCHRIGHT = False
+    patchright_sync = None
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -371,91 +384,178 @@ def _find_gallery_links_from_home(page, base_url: str) -> list[str]:
     return candidates[:5]  # max 5 pages candidates
 
 
-def extract_gallery_photos(site_url: str, max_total_photos: int = 200) -> dict:
-    """Extrait les photos de galerie depuis le site officiel.
+def _detect_blocking(page) -> str | None:
+    """Retourne un libellé du blocage détecté, ou None si la page semble OK.
 
-    Stratégie :
-      1. Visite TOUJOURS `site_url` direct (cas single-page moderne : Yotel, Drupal, etc.
-         où la home contient déjà toute la galerie)
-      2. Cherche les liens internes vers galerie/rooms/spa/dining (max 5)
-      3. Tente quelques patterns URL relatifs au `site_url` (pas au domaine racine)
-
-    Returns:
-        {
-            "photos": [list of URLs],
-            "pages_visited": [list of URLs],
-            "error": str | None,
-        }
+    Signaux empiriques (Marriott, Hilton, Hyatt observés 12/05/2026) :
+      - Title contient « Access Denied », « Just a moment », « Blocked »
+      - HTML extrêmement court (< 5KB = page d'erreur générique)
+      - Body uniquement « Access Denied » ou similaire
     """
-    out = {"photos": [], "pages_visited": [], "error": None}
+    try:
+        title = (page.title() or "").lower()
+        if any(s in title for s in ("access denied", "blocked", "just a moment",
+                                     "attention required", "bot or not", "robot ou pas")):
+            return f"blocked_title:{page.title()[:50]}"
+        html_len = page.evaluate("document.documentElement.outerHTML.length")
+        if html_len and html_len < 5000:
+            body_text = page.evaluate("(document.body && document.body.innerText || '').slice(0,200).toLowerCase()")
+            if any(s in body_text for s in ("access denied", "blocked", "cloudflare",
+                                             "akamai", "verify you are human")):
+                return f"blocked_small_html:{html_len}b"
+    except Exception:
+        pass
+    return None
+
+
+def _run_extract_with_engine(site_url: str, max_total_photos: int, use_patchright: bool, headless: bool) -> dict:
+    """Lance l'extraction galerie avec un moteur Playwright donné.
+
+    Args:
+        use_patchright : si True, utilise patchright + channel='chrome' + headless=False
+                         (bypass DataDome/Akamai mais ouvre fenêtre Chrome visible).
+                         Sinon Playwright stealth + headless (rapide, invisible).
+        headless       : forcé False si use_patchright (sinon DataDome détecte).
+
+    Returns: même structure que extract_gallery_photos (photos, pages_visited, error,
+             + 'blocked_signal' si on a détecté un blocage sur la première page).
+    """
+    out = {"photos": [], "pages_visited": [], "error": None, "blocked_signal": None,
+           "engine": "patchright" if use_patchright else "playwright_stealth"}
     parsed = urlparse(site_url)
-    base = f"{parsed.scheme}://{parsed.netloc}"
-    # Préfixe basé sur la page hôtel concrète (ex: https://www.yotel.com/en/hotels/yotel-miami)
-    # PAS sur la racine du domaine — sinon les patterns hits une page générique de chaîne.
     site_prefix = site_url.rstrip("/")
 
-    try:
-        with Stealth().use_sync(sync_playwright()) as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=["--disable-blink-features=AutomationControlled"],
-            )
-            context = browser.new_context(
-                user_agent=USER_AGENT,
-                viewport={"width": 1920, "height": 1080},
-                locale="en-US",
-            )
-            page = context.new_page()
-            photos: list[str] = []
-            seen: set[str] = set()
+    def _run(p, ctx_or_browser, page):
+        photos: list[str] = []
+        seen: set[str] = set()
 
-            def _absorb(urls: list[str]):
-                for u in urls:
-                    if u not in seen:
-                        seen.add(u)
-                        photos.append(u)
+        def _absorb(urls):
+            for u in urls:
+                if u not in seen:
+                    seen.add(u)
+                    photos.append(u)
 
-            # 1) TOUJOURS visiter la page hôtel direct en premier (cas single-page Yotel/Drupal)
+        # 1) Page hôtel direct
+        try:
+            page.goto(site_url, wait_until="domcontentloaded", timeout=25000)
+            page.wait_for_timeout(2000)
+            # ━ Détection blocage côté chaîne hôtelière (Marriott/Hilton/Hyatt) ━
+            block = _detect_blocking(page)
+            if block:
+                out["blocked_signal"] = block
+                print(f"  [hotel_site] blocage détecté ({block}) sur {site_url[:80]}",
+                      file=sys.stderr)
+                return photos
+            imgs = _scroll_and_collect_images(page)
+            _absorb(_filter_images(imgs, site_url))
+            out["pages_visited"].append(site_url)
+        except Exception:
+            pass
+
+        # 2) Liens internes (gallery/rooms/spa/dining/explore)
+        if len(photos) < max_total_photos:
             try:
-                page.goto(site_url, wait_until="domcontentloaded", timeout=25000)
-                page.wait_for_timeout(1500)
-                imgs = _scroll_and_collect_images(page)
-                _absorb(_filter_images(imgs, site_url))
-                out["pages_visited"].append(site_url)
+                gallery_links = _find_gallery_links_from_home(page, site_url)
             except Exception:
-                pass
-
-            # 2) Liens internes (gallery/rooms/spa/dining/explore) — complément
-            if len(photos) < max_total_photos:
+                gallery_links = []
+            for link in gallery_links[:5]:
+                if len(photos) >= max_total_photos:
+                    break
                 try:
-                    gallery_links = _find_gallery_links_from_home(page, site_url)
-                except Exception:
-                    gallery_links = []
-                for link in gallery_links[:5]:
-                    if len(photos) >= max_total_photos:
-                        break
-                    try:
-                        response = page.goto(link, wait_until="domcontentloaded", timeout=20000)
-                        if not response or response.status != 200:
-                            continue
-                        out["pages_visited"].append(link)
-                        page.wait_for_timeout(1200)
-                        imgs = _scroll_and_collect_images(page)
-                        _absorb(_filter_images(imgs, link))
-                    except Exception:
+                    response = page.goto(link, wait_until="domcontentloaded", timeout=20000)
+                    if not response or response.status != 200:
                         continue
+                    out["pages_visited"].append(link)
+                    page.wait_for_timeout(1200)
+                    imgs = _scroll_and_collect_images(page)
+                    _absorb(_filter_images(imgs, link))
+                except Exception:
+                    continue
 
-            # 3) Patterns relatifs au préfixe hôtel (cas où l'hôtel a /gallery /photos en sous-page)
-            if len(photos) < 30:
-                more = _try_paths_and_collect(page, site_prefix, GALLERY_PATH_PATTERNS)
-                out["pages_visited"].extend([site_prefix + pth for pth in GALLERY_PATH_PATTERNS])
-                _absorb(more)
+        # 3) Patterns relatifs au préfixe hôtel
+        if len(photos) < 30:
+            more = _try_paths_and_collect(page, site_prefix, GALLERY_PATH_PATTERNS)
+            out["pages_visited"].extend([site_prefix + pth for pth in GALLERY_PATH_PATTERNS])
+            _absorb(more)
 
-            browser.close()
+        return photos
+
+    try:
+        if use_patchright:
+            if not _HAS_PATCHRIGHT:
+                out["error"] = "patchright non installé (pip install patchright + patchright install chromium)"
+                return out
+            with patchright_sync() as p:
+                user_data_dir = tempfile.mkdtemp(prefix="patchright_hotel_")
+                # IMPORTANT : pas de UA override / args custom → patchright gère.
+                kwargs = {"user_data_dir": user_data_dir, "headless": False, "no_viewport": True}
+                try:
+                    ctx = p.chromium.launch_persistent_context(channel="chrome", **kwargs)
+                except Exception as e:
+                    print(f"  [hotel_site] chrome channel KO ({e}) → fallback chromium",
+                          file=sys.stderr)
+                    ctx = p.chromium.launch_persistent_context(**kwargs)
+                page = ctx.pages[0] if ctx.pages else ctx.new_page()
+                photos = _run(p, ctx, page)
+                ctx.close()
+        else:
+            with Stealth().use_sync(sync_playwright()) as p:
+                browser = p.chromium.launch(
+                    headless=headless,
+                    args=["--disable-blink-features=AutomationControlled"],
+                )
+                context = browser.new_context(
+                    user_agent=USER_AGENT,
+                    viewport={"width": 1920, "height": 1080},
+                    locale="en-US",
+                )
+                page = context.new_page()
+                photos = _run(p, context, page)
+                browser.close()
         out["photos"] = photos[:max_total_photos]
     except Exception as e:
         out["error"] = f"{type(e).__name__}: {str(e)[:200]}"
     return out
+
+
+def extract_gallery_photos(site_url: str, max_total_photos: int = 200) -> dict:
+    """Extrait les photos de galerie depuis le site officiel.
+
+    Stratégie en cascade (Martin 12/05/2026) :
+      A. Playwright stealth + headless (rapide, invisible) ← tente d'abord.
+      B. Si bloqué (Access Denied / Just a moment / 0 photo après crawl complet)
+         ET patchright dispo → retry avec patchright + Chrome réel + headless=False.
+         ⚠️ Conséquence : fenêtre Chrome brièvement visible (~30s) sur le bureau.
+
+    Sites typiquement résolus uniquement par patchright :
+      Marriott, Hilton, Hyatt, IHG (Akamai/Imperva anti-bot).
+
+    Returns: {photos, pages_visited, error, engine}
+    """
+    # ━ Tentative A : moteur rapide (Playwright stealth headless) ━
+    result_a = _run_extract_with_engine(site_url, max_total_photos,
+                                          use_patchright=False, headless=True)
+
+    # ━ Heuristique de retry ━
+    # Retry si :
+    #   - blocage explicite détecté (Access Denied / Just a moment / etc.)
+    #   - OU 0 photo extraite après visite des pages (= probable blocage subtil)
+    should_retry = (
+        result_a.get("blocked_signal") is not None
+        or (len(result_a.get("photos") or []) == 0 and not result_a.get("error"))
+    )
+
+    if should_retry and _HAS_PATCHRIGHT:
+        print(f"  [hotel_site] retry avec patchright (signal={result_a.get('blocked_signal')}, "
+              f"photos={len(result_a.get('photos') or [])})", file=sys.stderr)
+        result_b = _run_extract_with_engine(site_url, max_total_photos,
+                                             use_patchright=True, headless=False)
+        # On garde le résultat avec le plus de photos (sauf si B a planté)
+        if not result_b.get("error") and len(result_b.get("photos") or []) > len(result_a.get("photos") or []):
+            result_b["fallback_from"] = result_a.get("blocked_signal") or "0_photos"
+            return result_b
+
+    return result_a
 
 
 # CLI

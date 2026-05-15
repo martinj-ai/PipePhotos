@@ -20,8 +20,9 @@ Liste des nœuds (ordre du pipeline réel) :
  11. retouche              — steps appliqués (clutter / lighting / add_character / etc.)
  12. validation_postIA     — ok / retry / fallback original
  13. lut_brand             — LUT cohérence brand appliqué
- 14. final_pack            — photo dans le pack final
- 15. slowmo_higgsfield     — 1 photo finale → cinemagraph mp4 loop (Kling 2.1 + ping-pong ffmpeg)
+ 14. upscale_lanczos       — 1264×843 → 2528×1686 systématique (HD finale)
+ 15. final_pack            — photo dans le pack final
+ 16. slowmo_higgsfield     — 1 photo finale → cinemagraph mp4 loop (Kling 2.1 + ping-pong ffmpeg)
 """
 
 from __future__ import annotations
@@ -343,6 +344,25 @@ def build_photo_journey(
         if r.get("brand_lut_applied"):
             j["events"].append({"node": "lut_brand", "result": "pass"})
 
+        # ━ Nœud upscale_lanczos : 1264x843 → 2528x1686 (×2 par défaut) ━
+        upscale_meta = r.get("upscale")
+        if upscale_meta and not upscale_meta.get("error"):
+            j["events"].append({
+                "node": "upscale_lanczos",
+                "result": "pass",
+                "details": {
+                    "method": upscale_meta.get("method"),
+                    "source_size": upscale_meta.get("source_size"),
+                    "final_size": upscale_meta.get("final_size"),
+                },
+            })
+        elif upscale_meta and upscale_meta.get("error"):
+            j["events"].append({
+                "node": "upscale_lanczos",
+                "result": "warn",
+                "reason": upscale_meta.get("error"),
+            })
+
         j["events"].append({
             "node": "final_pack",
             "result": "pass",
@@ -475,6 +495,15 @@ NODE_DEFINITIONS = [
                        "Garantit une cohérence visuelle inter-photos et inter-hôtels : mêmes tons chauds, même saturation, "
                        "même contraste. C'est ce qui donne l'identité Dayuse à la fiche.",
         "test": "Photo passée par la LUT brand pour homogénéité ?",
+    },
+    {
+        "id": "upscale_lanczos", "label": "Upscale Lanczos x2", "icon": "🔍",
+        "description": "Nano Banana 2 sort à 1264×843 fixe — pixelisé en plein écran Retina/4K. "
+                       "On applique un Lanczos ×2 (1264×843 → 2528×1686) sur TOUTES les photos finales pour servir "
+                       "une vraie HD aux UIs Dayuse. Lanczos = interpolation classique (n'ajoute pas de détail réel, "
+                       "n'hallucine rien) mais évite la pixelisation et préserve les arêtes. Gratuit, ~0.3s/photo. "
+                       "Désactivable via env FINAL_UPSCALE_FACTOR=1.0. Pour vraie super-résolution IA → Real-ESRGAN (backlog).",
+        "test": "Photo upscalée Lanczos ×2 avant le pack final ?",
     },
     {
         "id": "final_pack", "label": "Pack final", "icon": "📦",

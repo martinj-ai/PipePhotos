@@ -37,6 +37,16 @@ NANO_BANANA_MODEL = os.getenv("NANO_BANANA_MODEL", "gemini-3.1-flash-image-previ
 # Pricing Nano Banana 2 (USD/image)
 NANO_BANANA_PRICE_USD = 0.067
 
+# ━ Upscale Lanczos final ━
+# Nano Banana sort à ~1264x843 fixe (testé empiriquement 12/05/2026, indépendant
+# de la résolution source). Les UIs Dayuse desktop affichent ces photos en
+# 1500-1800px → upscale navigateur médiocre + pixelisation perceptible en Retina.
+# On applique un Lanczos final ×2 (1264→2528) pour servir des photos finales
+# nativement HD. Lanczos = interpolation classique, n'ajoute pas de détail réel
+# mais évite la pixelisation et garde des arêtes nettes.
+# Pour désactiver : FINAL_UPSCALE_FACTOR=1.0 dans .env. Pour x3 (8K) : 3.0.
+FINAL_UPSCALE_FACTOR = float(os.getenv("FINAL_UPSCALE_FACTOR", "2.0"))
+
 # --- Prompts (basés sur les exemples Martin) ---
 
 PROMPT_ENSOLEILLEMENT = (
@@ -47,6 +57,16 @@ PROMPT_ENSOLEILLEMENT = (
     "The image should feel fully illuminated by daylight, with crisp highlights, "
     "balanced contrast, and natural warm tones. "
     "Create a realistic, inviting, premium look with a clear sunny daytime ambiance.\n\n"
+    "💡 ARTIFICIAL LIGHTS — TURN THEM OFF / DIM TO INVISIBLE :\n"
+    "In sunlit daytime, artificial fixtures are NOT lit (or visually negligible vs the sun). "
+    "If the input shows lit lamps, wall sconces, ceiling spots / downlights, LED strips, "
+    "pendant lights, accent uplights, neon signage, candles or any glowing fixture :\n"
+    "- KEEP the FIXTURE itself visible (it's part of the architecture — don't invent / don't remove).\n"
+    "- TURN OFF its emission : no glow, no light spill on nearby walls/ceiling, no specular hotspot on the bulb/LED.\n"
+    "- Replace the cast pool of warm light on adjacent surfaces by the natural daylight ambient tone.\n"
+    "- The bulb / tube / LED panel appears as a dark or neutral object (not emissive).\n"
+    "Reason : a photo with visible lit lamps + bright daylight looks unnatural ('lights left on at noon'). "
+    "Real sunlit photos have all artificial lights off or imperceptible.\n\n"
     "🚨 ABSOLUTE ARCHITECTURAL PRESERVATION (CRITICAL — non-negotiable) :\n"
     "You may ONLY change the QUALITY of light (intensity, color temperature, direction, "
     "softness). You MUST NOT add, remove, transform, or invent any architectural element :\n"
@@ -58,9 +78,9 @@ PROMPT_ENSOLEILLEMENT = (
     "- DO NOT remove or replace existing decor (artwork, neon signage, color panels, "
     "wallpaper, murals) — even if it looks 'less aspirational' than sunlit walls.\n"
     "- If the input has a colored neon-lit alcove → it remains a colored neon-lit alcove "
-    "in the output, just illuminated by additional warm daylight ambient light.\n"
+    "in the output (the FIXTURE stays, but its EMISSION is dimmed/off — see ARTIFICIAL LIGHTS rule above).\n"
     "- The light SOURCES visible in the input (windows, lamps, skylights) stay at their "
-    "original positions, sizes and shapes — only their COLOR / INTENSITY can change.\n"
+    "original positions, sizes and shapes — but for LAMPS/SCONCES/SPOTS, turn their emission OFF.\n"
     "- Walls, ceilings, floors keep their materials and patterns identical. Tiles, paint, "
     "wood, carpet remain unchanged.\n\n"
     "If you cannot brighten the scene without inventing new windows or removing existing "
@@ -69,7 +89,9 @@ PROMPT_ENSOLEILLEMENT = (
     "A photo with fabricated architecture is REJECTED.\n\n"
     "NEGATIVE PROMPT : new windows, new openings, invented skylights, fabricated city view, "
     "removed artwork, removed neon, replaced wall panels, walls turned into glass facades, "
-    "alcoves turned into windows, transformed displays, new architectural elements."
+    "alcoves turned into windows, transformed displays, new architectural elements, "
+    "visibly glowing lamps in daylight, lit sconces under sunlight, emissive ceiling spots, "
+    "warm light pools on walls under bright daylight, lamps left on at noon."
 )
 
 PROMPT_ENHANCEMENT = (
@@ -257,284 +279,542 @@ def _classify_safe_zone(zone_text: str) -> str:
 
     Returns: l'un de {"in_water", "pool_edge", "lounger", "cabana_daybed",
                        "dining_table", "rooftop_deck", "outdoor_deck",
-                       "indoor_seating", "gym_mat", "unknown"}
+                       "indoor_seating",
+                       "cardio_machine", "weight_bench", "weights_area", "gym_mat",
+                       "unknown"}
+
+    (Martin 13/05/2026 v3) : ajout reconnaissance FR + équipements gym spécifiques
+    (tapis de course, banc muscu, haltères) pour éviter le bug "yoga sur tapis de
+    course" — auparavant tout terminait en zone_type='gym_mat' (= yoga par défaut).
+    Si AUCUN match précis, on retourne 'unknown' → le scenario AUTO sera utilisé.
     """
     z = (zone_text or "").lower()
-    # Eau / piscine — priorité sur edge si "in the water" est explicite
+    # ── EAU / PISCINE (priorité haute) ──
     if any(k in z for k in ["in the pool water", "in the water", "in the pool", "pool water",
-                              "swimming", "submerged", "wading in"]):
+                              "swimming", "submerged", "wading in",
+                              # FR
+                              "dans la piscine", "dans l'eau", "en train de nager", "en nageant"]):
         return "in_water"
     if any(k in z for k in ["pool edge", "pool rim", "rim of the pool", "edge of the pool",
-                              "sitting at the edge", "edge of pool"]):
+                              "sitting at the edge", "edge of pool",
+                              # FR
+                              "rebord de la piscine", "bord de la piscine", "rebord de piscine",
+                              "bord de piscine", "lèvre de la piscine"]):
         return "pool_edge"
-    if any(k in z for k in ["lounger", "sun lounger", "sunbed", "sun bed", "deck chair", "transat"]):
+    # ── MOBILIER OUTDOOR PISCINE ──
+    if any(k in z for k in ["lounger", "sun lounger", "sunbed", "sun bed", "deck chair",
+                              "transat", "chaise longue"]):
         return "lounger"
-    if any(k in z for k in ["cabana", "daybed", "day bed", "pool bed"]):
+    if any(k in z for k in ["cabana", "daybed", "day bed", "pool bed", "lit de jour"]):
         return "cabana_daybed"
+    # ── F&B ──
     if any(k in z for k in ["dining table", "restaurant table", "around the table",
-                              "at the table", "bar counter"]):
+                              "at the table", "bar counter",
+                              # FR
+                              "table à manger", "à la table", "comptoir du bar"]):
         return "dining_table"
-    if any(k in z for k in ["rooftop", "roof terrace", "skydeck"]):
+    # ── ROOFTOP ──
+    if any(k in z for k in ["rooftop", "roof terrace", "skydeck", "rooftop deck"]):
         return "rooftop_deck"
-    if any(k in z for k in ["yoga mat", "yoga", "gym floor", "stretching mat"]):
+    # ── GYM — disambiguation FINE (Martin 13/05/2026 — bug yoga sur tapis course) ──
+    # On vérifie d'abord les équipements SPÉCIFIQUES (tapis course, vélo, banc muscu)
+    # AVANT le générique "gym mat" qui couvre uniquement yoga.
+    if any(k in z for k in ["treadmill", "running mat", "cardio machine", "elliptical",
+                              "stationary bike", "rowing machine",
+                              # FR
+                              "tapis de course", "tapis course", "vélo elliptique",
+                              "vélo stationnaire", "rameur", "vélo d'appartement"]):
+        return "cardio_machine"
+    if any(k in z for k in ["weight bench", "bench press", "weight bench",
+                              # FR
+                              "banc de musculation", "banc musculation", "banc de muscu"]):
+        return "weight_bench"
+    if any(k in z for k in ["dumbbell rack", "dumbbells", "free weights area", "weights rack",
+                              # FR
+                              "haltères", "rack à haltères", "zone haltères"]):
+        return "weights_area"
+    if any(k in z for k in ["yoga mat", "yoga", "stretching mat", "stretching area",
+                              # FR
+                              "tapis de yoga", "tapis yoga", "espace stretching"]):
         return "gym_mat"
-    if any(k in z for k in ["sofa", "armchair", "lounge chair", "bench", "indoor seat"]):
+    # ── INTÉRIEUR / SEATING ──
+    if any(k in z for k in ["sofa", "armchair", "lounge chair", "bench", "indoor seat",
+                              "wicker chair", "rattan chair",
+                              # FR
+                              "canapé", "fauteuil", "siège intérieur", "fauteuil en osier",
+                              "fauteuil en rotin"]):
         return "indoor_seating"
-    if any(k in z for k in ["deck", "patio", "terrace", "ground", "floor"]):
+    # ── OUTDOOR DECK générique (dernier filet avant unknown) ──
+    if any(k in z for k in ["deck", "patio", "terrace", "ground", "floor",
+                              # FR
+                              "sol", "dalle", "carrelage", "zone carrelée",
+                              "terrasse", "plancher"]):
         return "outdoor_deck"
     return "unknown"
 
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# IDENTITÉS RÉCURRENTES — California influencer beach aesthetic (Martin
+# 12/05/2026, niveau 7-8/10 sur l'échelle sexy : aspirational confident,
+# jamais aguicheur, jamais lingerie/sous-vêt.).
+# Inspiration : prompts JSON UGC model (Reformation / Solid&Striped /
+# Mediterranean influencer summer aesthetic).
+# Ces strings sont inlinées dans chaque scenario pour rester self-contained
+# côté Gemini Image (qui aime les prompts denses sans variables externes).
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Look California sun-kissed influencer (femme adulte 22-28)
+_CA_WOMAN = (
+    "She has a slim toned hourglass figure with soft feminine curves, deep golden "
+    "Californian/Mediterranean tan, radiant sun-kissed glowing skin (natural radiance, "
+    "no contouring), medium-long sun-bleached beachy blonde hair in loose tousled waves "
+    "with casual middle part, heart-shaped face with defined cheekbones, warm hazel or "
+    "ocean blue eyes, full plump lips with glossy nude balm. Soft natural \"beach glam\" "
+    "makeup : sheer bronzer, peachy blush, mascara only, glossy nude lips. Layered fine "
+    "gold chain necklaces, small gold hoop earrings. Confident relaxed expression with a "
+    "soft natural smile."
+)
+
+# Look California sun-kissed (homme adulte 25-32)
+_CA_MAN = (
+    "He has a lean athletic build with toned shoulders and light defined abs, deep golden "
+    "Mediterranean tan, casual tousled medium-brown hair, soft natural stubble, warm brown "
+    "eyes, confident relaxed expression with a soft natural smile. Minimal jewelry : "
+    "single thin gold chain around the neck."
+)
+
+# Look family vacation sun-kissed (parents + 1 enfant) — version adoucie, pas influencer
+_FAMILY_LOOK = (
+    "Both parents are lean and toned with a healthy Mediterranean golden tan, soft natural "
+    "smiles, late 20s. The mother has medium-long sun-bleached wavy hair, the father has "
+    "casual tousled brown hair with light stubble. Child age 6-7 with natural happy energy, "
+    "wind-tousled hair, sun-kissed cheeks. No heavy jewelry on parents, no makeup on the "
+    "child. Real family vacation vibe — never staged."
+)
 
 # Catalogue des scenarios. Chaque entrée = (persona, zone_type) → bloc texte précis.
 # Le bloc DOIT décrire UNE seule pose, position, attribut. Pas de "ou", pas de "(1)/(2)/(3)".
 # Termes anglais car Gemini Image y répond mieux en pratique.
 _SCENARIO_CATALOG: dict[tuple[str, str], str] = {
 
-    # ━━ COUPLES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # ━━ COUPLES (California influencer aesthetic 7-8/10) ━━━━━━━━━━━━━━━━━
     ("couples", "in_water"): (
-        "Place exactly TWO subjects in the existing pool water — a mixed-race adult couple "
-        "(one woman late 20s, one man late 20s). Both are STANDING in chest-deep water "
-        "near the visible center of the pool. Water level on both : sternum / upper-chest "
-        "(only upper torso, shoulders, neck and head are above water — belly button, hips, "
-        "thighs MUST be fully submerged). She wears a sleek navy one-piece swimsuit. He wears "
-        "classic dark swim shorts. They face each other in profile to the camera, sharing a "
-        "soft natural smile mid-conversation. Their hands are clasped between them at chest "
-        "height in the water. Hair slightly wet at the temples. Soft water ripples around both "
-        "bodies. They do NOT look at the camera."
+        f"Place exactly TWO subjects in the existing pool water — a young adult couple "
+        f"(one woman 24-26, one man 26-28). "
+        f"WOMAN : {_CA_WOMAN} She wears a chic sleek black bandeau bikini (or terracotta "
+        f"if pool tones already cool) — strapless, modern silhouette. "
+        f"MAN : {_CA_MAN} He wears classic tailored swim shorts in matching neutral tone "
+        f"(cream / navy / olive). "
+        f"POSE : Both are STANDING in chest-deep water near the visible center of the pool. "
+        f"Water level on both : sternum / upper-chest (only upper torso, shoulders, neck and "
+        f"head above water — belly button, hips, thighs MUST be fully submerged). They face "
+        f"each other in soft three-quarter profile to camera, sharing a candid laughing moment "
+        f"mid-conversation. Their hands are clasped between them at chest height in the water. "
+        f"Hair slightly wet at temples for her, water droplets on his shoulders. Soft "
+        f"concentric water ripples spreading around both bodies. They do NOT look at the camera."
     ),
     ("couples", "pool_edge"): (
-        "Place exactly TWO subjects sitting on the dry pool deck right at the pool edge — "
-        "a mixed-race adult couple (one woman late 20s, one man late 20s). They sit side by "
-        "side with feet and calves submerged in the pool water (water at mid-calf). Both lean "
-        "slightly toward each other, sharing a candid laughing moment. She wears a chic bikini "
-        "with a thin gold chain ; he wears swim shorts, no shirt. He holds a tall glass of cold "
-        "drink in his outer hand. Neither looks at the camera ; they look at each other. Soft "
-        "water reflections on their lower legs."
+        f"Place exactly TWO subjects sitting DIRECTLY on the existing bare pool deck (concrete / "
+        f"tile / wood — exact same material as input) right at the pool edge — "
+        f"a young adult couple (one woman 24-26, one man 26-28). "
+        f"WOMAN : {_CA_WOMAN} She wears a chic high-waisted bikini set in soft terracotta or "
+        f"cream (full coverage bottoms, modern bandeau or triangle top). "
+        f"MAN : {_CA_MAN} He wears tailored cream swim shorts, no shirt. "
+        f"POSE : They sit side by side with feet and calves submerged in the pool water "
+        f"(water at mid-calf). Their HANDS rest flat behind them ON THE BARE DECK for support "
+        f"(no cushion, no towel, no mat under them — body weight rests directly on the concrete/tile). "
+        f"Both lean slightly toward each other, sharing a candid laughing moment. He holds a "
+        f"tall iced drink with citrus slice in his outer hand. A pair of sleek tortoise-shell "
+        f"sunglasses rests on her head. Soft water reflections shimmer on their lower legs. "
+        f"Neither looks at the camera ; they look at each other.\n"
+        f"🚫 DO NOT add any cushion, towel, bench, mat, or extra surface under them. DO NOT "
+        f"extend the deck or invent a step. DO NOT modify the pool shape."
     ),
     ("couples", "lounger"): (
-        "Place exactly TWO subjects on two adjacent existing sun loungers visible in the photo "
-        "— a mixed-race adult couple (one woman late 20s, one man late 20s). The woman reclines "
-        "on the lounger closest to the camera, sunglasses on, reading a slim paperback book. "
-        "The man reclines on the adjacent lounger, propped on one elbow, looking out at the "
-        "scene with a relaxed half-smile. Both wear stylish swimwear (her: olive one-piece ; "
-        "him: navy swim shorts). They do NOT touch ; they share calm relaxed energy. Neither "
-        "looks at the camera."
+        f"Place exactly TWO subjects on two adjacent existing sun loungers visible in the "
+        f"photo — a young adult couple (one woman 24-26, one man 26-28). "
+        f"WOMAN : {_CA_WOMAN} She wears a chic olive or cream high-cut one-piece swimsuit "
+        f"(modern silhouette, NOT racy — elegant), oversized straw-brimmed hat resting on her "
+        f"lap, sleek dark sunglasses on. "
+        f"MAN : {_CA_MAN} He wears navy tailored swim shorts, no shirt, sleek aviator "
+        f"sunglasses. "
+        f"POSE : The woman reclines comfortably on the lounger closest to camera, propped on "
+        f"a flat cushion, one knee slightly bent, reading a slim hardback book held in both "
+        f"hands with a relaxed half-smile. The man reclines on the adjacent lounger, propped "
+        f"on one elbow facing slightly away, looking out at the scene. They do NOT touch ; "
+        f"calm confident relaxed energy. Neither looks at the camera."
     ),
     ("couples", "cabana_daybed"): (
-        "Place exactly TWO subjects together on the existing cabana daybed / pool sofa visible "
-        "in the photo — a mixed-race adult couple (one woman late 20s, one man late 20s). They "
-        "sit close, the woman leaning her shoulder against his, both gazing out at the pool. "
-        "She wears a chic bikini with a light sarong tied at her hips ; he wears swim shorts, "
-        "no shirt. He holds a tall iced drink in one hand resting on his knee. Soft mid-day "
-        "shadow under the cabana canopy. Neither looks at the camera ; they share a quiet "
-        "candid moment."
+        f"Place exactly TWO subjects together on the existing cabana daybed / pool sofa "
+        f"visible in the photo — a young adult couple (one woman 24-26, one man 26-28). "
+        f"WOMAN : {_CA_WOMAN} She wears a chic terracotta high-waist bikini with a light "
+        f"cream open sarong loosely tied at her hips, sleek sunglasses. "
+        f"MAN : {_CA_MAN} He wears tailored swim shorts, no shirt, aviator sunglasses. "
+        f"POSE : They sit close together — the woman cross-legged leaning her shoulder "
+        f"against him, both gazing out at the pool. He holds a tall iced cocktail with "
+        f"citrus in one hand resting on his knee. A crochet tote bag in natural straw "
+        f"color rests on the daybed beside them. Soft mid-day shadow under the cabana canopy. "
+        f"Neither looks at the camera ; they share a quiet candid moment."
     ),
     ("couples", "dining_table"): (
-        "Place exactly TWO subjects around the existing dining table visible in the photo — "
-        "a mixed-race adult couple (one woman late 20s, one man late 20s) sitting across from "
-        "each other. The woman is pouring a glass of sparkling water for him while smiling. "
-        "Both wear casual smart attire (her: light linen dress, him: linen shirt). One existing "
-        "wine glass and one water glass on the table. They are mid-conversation, NOT looking at "
-        "the camera."
+        f"Place exactly TWO subjects around the existing dining table visible in the photo — "
+        f"a young adult couple (one woman 24-26, one man 26-28) sitting across from each "
+        f"other. "
+        f"WOMAN : {_CA_WOMAN} She wears a chic cream linen midi dress with thin straps. "
+        f"MAN : {_CA_MAN} He wears a relaxed open linen shirt in oat / sand tone, sleeves "
+        f"casually rolled. "
+        f"POSE : The woman is mid-laugh, hand gesturing softly. The man leans slightly "
+        f"forward, attentive, soft smile. One existing wine glass and one water glass on the "
+        f"table only. They are clearly mid-conversation, NOT looking at the camera."
     ),
     ("couples", "rooftop_deck"): (
-        "Place exactly TWO subjects standing on the rooftop deck near the railing (on the safe "
-        "interior side of the existing balustrade) — a mixed-race adult couple (one woman late "
-        "20s, one man late 20s). They stand close, the woman's shoulder leaning against him, "
-        "both looking out at the city skyline (NOT at the camera). She wears a chic light "
-        "summer dress, he wears a linen shirt and tailored shorts. He holds a cocktail glass "
-        "in his outer hand. Natural late-afternoon warm light on their profiles."
+        f"Place exactly TWO subjects standing on the rooftop deck near (on the safe interior "
+        f"side of) the existing railing — a young adult couple (one woman 24-26, one man "
+        f"26-28). "
+        f"WOMAN : {_CA_WOMAN} She wears a flowy cream silk slip dress reaching mid-thigh, "
+        f"slim heeled sandals. "
+        f"MAN : {_CA_MAN} He wears an open cream linen shirt with tailored sand chino shorts, "
+        f"clean white sneakers. "
+        f"POSE : They stand close, her shoulder against his arm, both gazing out at the "
+        f"horizon / city skyline (NOT at camera). He holds a sleek cocktail glass with "
+        f"clear ice and citrus in his outer hand. Natural late-afternoon golden warm light "
+        f"hits their profiles, slight golden hour glow."
     ),
     ("couples", "outdoor_deck"): (
-        "Place exactly TWO subjects standing casually on the existing outdoor deck — a "
-        "mixed-race adult couple (one woman late 20s, one man late 20s). They face each other "
-        "in profile to the camera, mid-conversation, the woman holding a takeaway coffee cup. "
-        "Both wear stylish casual resort attire (her: light dress, him: linen shirt and shorts). "
-        "Neither looks at the camera."
+        f"Place exactly TWO subjects standing casually on the existing outdoor deck — a "
+        f"young adult couple (one woman 24-26, one man 26-28). "
+        f"WOMAN : {_CA_WOMAN} She wears a flowy cream or terracotta linen short dress, "
+        f"crochet tote bag in straw color slung over one shoulder. "
+        f"MAN : {_CA_MAN} He wears an open linen shirt in oat tone, tailored sand chino "
+        f"shorts, clean sneakers. "
+        f"POSE : They face each other in soft profile to camera, mid-conversation. She "
+        f"holds a takeaway coffee cup in one hand with a soft laugh. Natural golden warm "
+        f"light. Neither looks at the camera."
     ),
     ("couples", "indoor_seating"): (
-        "Place exactly TWO subjects on the existing sofa or lounge chair visible in the photo — "
-        "a mixed-race adult couple (one woman late 20s, one man late 20s). The woman sits "
-        "cross-legged on one end of the sofa, scrolling on her phone with a half-smile. The man "
-        "sits at the other end, an open laptop on his lap, glancing toward her. Both wear casual "
-        "smart attire. Neither looks at the camera."
+        f"Place exactly TWO subjects on the existing sofa or lounge chair visible in the "
+        f"photo — a young adult couple (one woman 24-26, one man 26-28). "
+        f"WOMAN : {_CA_WOMAN} She wears casual smart attire : silk cream camisole and slim "
+        f"high-waist linen trousers. "
+        f"MAN : {_CA_MAN} He wears a relaxed crew neck tee in oat color and slim tailored "
+        f"trousers. "
+        f"POSE : The woman sits cross-legged at one end of the sofa, scrolling on her phone "
+        f"with a soft half-smile. The man sits at the other end facing her, propped on one "
+        f"elbow, glancing toward her with a relaxed smile. Neither looks at the camera."
     ),
 
-    # ━━ SOLOS (1 femme adulte) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # ━━ SOLOS (1 femme adulte, California influencer 7-8/10) ━━━━━━━━━━━━━
     ("solos", "in_water"): (
-        "Place exactly ONE subject in the existing pool water — a mixed-race adult woman late "
-        "20s. She is swimming gentle breaststroke in the center of the visible water surface, "
-        "her head above water (chin level), arms making soft swim motion with slight wake "
-        "behind her. Wet hair slicked back. She wears a sleek black one-piece swimsuit. Soft "
-        "mid-day sun on her shoulders. She does NOT look at the camera ; her gaze is directed "
-        "slightly ahead of her along the water surface."
+        f"Place exactly ONE subject in the existing pool water — a young adult woman 24-26. "
+        f"LOOK : {_CA_WOMAN} She wears a sleek black or terracotta one-piece swimsuit "
+        f"(modern silhouette, deep scoop neckline, NOT racy). "
+        f"POSE : She is swimming gentle breaststroke in the center of the visible water "
+        f"surface, her head above water (chin level), arms making soft swim motion with "
+        f"slight wake behind her. Wet hair slicked back, droplets glistening on her shoulders. "
+        f"Soft mid-day golden sun on her tanned shoulders. She does NOT look at the camera ; "
+        f"her gaze is directed slightly ahead along the water surface."
     ),
     ("solos", "pool_edge"): (
-        "Place exactly ONE subject sitting at the existing pool edge — a mixed-race adult "
-        "woman late 20s. She sits on the dry pool deck with her legs dangling into the water "
-        "(water at her mid-calf). She wears a stylish white one-piece swimsuit with a thin gold "
-        "chain. Sunglasses pushed up in her hair. She is reading a slim paperback book held in "
-        "both hands, looking down at the page with a relaxed half-smile. Soft water reflection "
-        "on her lower legs. She does NOT look at the camera."
+        f"Place exactly ONE subject sitting DIRECTLY on the existing bare pool deck (concrete / "
+        f"tile / wood — exact same material as input) right at the pool edge — a young adult "
+        f"woman 24-26. LOOK : {_CA_WOMAN} She wears a chic cream or terracotta high-waist bikini "
+        f"set (modern bandeau top + full-coverage bottoms). Sleek tortoise-shell sunglasses "
+        f"pushed up on her head. "
+        f"POSE : She sits on the BARE pool deck with legs dangling in the water (water at "
+        f"mid-calf). One hand rests flat BEHIND HER ON THE BARE DECK for support (no cushion, no "
+        f"towel underneath), the other hand holds a cold drink with citrus. Soft confident "
+        f"half-smile, gaze toward the water (NOT at camera). Soft water reflection shimmering "
+        f"on her lower legs. A natural straw crochet tote bag rests beside her on the deck.\n"
+        f"🚫 DO NOT add any cushion, towel, bench, mat, or extra surface under her. DO NOT "
+        f"extend the deck or invent a step. DO NOT modify the pool shape."
     ),
     ("solos", "lounger"): (
-        "Place exactly ONE subject on the existing sun lounger visible in the photo — a "
-        "mixed-race adult woman late 20s. She reclines comfortably on the lounger, propped "
-        "slightly up on a flat cushion, sunglasses on, slim paperback book held open in one "
-        "hand. She wears a chic olive bikini with a thin gold chain. A wide-brimmed straw hat "
-        "rests on the lounger next to her. She is reading, gaze on the book — NOT at the camera. "
-        "Natural mid-afternoon sun on her body."
+        f"Place exactly ONE subject on the existing sun lounger visible in the photo — a "
+        f"young adult woman 24-26. LOOK : {_CA_WOMAN} She wears a chic olive or cream "
+        f"high-cut one-piece swimsuit (elegant modern silhouette, NOT racy), wide-brimmed "
+        f"straw sun hat on her lap, sleek dark sunglasses. "
+        f"POSE : She reclines comfortably on the lounger, propped slightly up on a flat "
+        f"cushion, one knee bent. Slim hardback book held open in one hand, the other hand "
+        f"resting on her thigh. Soft confident half-smile, gaze on the book (NOT at camera). "
+        f"Natural mid-afternoon golden sun on her tanned body, soft glowing skin."
     ),
     ("solos", "cabana_daybed"): (
-        "Place exactly ONE subject on the existing cabana daybed visible in the photo — a "
-        "mixed-race adult woman late 20s. She sits cross-legged with her back against the "
-        "cushions, holding a tall iced drink in one hand and her phone in the other. She wears "
-        "a chic bikini with a light open sarong tied at her hips. Sunglasses on. She looks "
-        "down at her phone with a half-smile — NOT at the camera."
+        f"Place exactly ONE subject on the existing cabana daybed visible in the photo — a "
+        f"young adult woman 24-26. LOOK : {_CA_WOMAN} She wears a chic terracotta bikini with "
+        f"a light cream open sarong loosely tied at her hips, sleek sunglasses. "
+        f"POSE : She sits cross-legged with her back against the cushions, holding a tall "
+        f"iced drink in one hand. The other hand rests gracefully on her knee. Her face is "
+        f"turned slightly toward the pool with a soft confident smile (NOT at camera). A "
+        f"natural straw crochet tote bag rests at her side."
     ),
     ("solos", "rooftop_deck"): (
-        "Place exactly ONE subject standing on the rooftop deck near (but on the safe interior "
-        "side of) the existing railing — a mixed-race adult woman late 20s. She holds a "
-        "cocktail glass in one hand, the other hand resting lightly on the railing. She looks "
-        "out at the city skyline, profile to the camera, with a soft serene expression. She "
-        "wears a chic light summer dress. Natural late-afternoon warm light on her side."
+        f"Place exactly ONE subject standing on the rooftop deck (on the safe interior side "
+        f"of the existing railing) — a young adult woman 24-26. LOOK : {_CA_WOMAN} She wears "
+        f"a flowy cream silk slip dress reaching mid-thigh, slim heeled sandals. "
+        f"POSE : She holds a sleek cocktail glass with clear ice and citrus in one hand, the "
+        f"other hand resting lightly on the railing. She gazes out at the city skyline / "
+        f"horizon (profile to camera, NOT at camera). Confident serene expression. Natural "
+        f"late-afternoon golden hour warm light glowing on her tanned side and hair."
     ),
     ("solos", "outdoor_deck"): (
-        "Place exactly ONE subject standing casually on the existing outdoor deck — a "
-        "mixed-race adult woman late 20s. She holds a takeaway coffee cup in one hand, looking "
-        "out at the scene with a relaxed half-smile, profile to the camera. She wears a stylish "
-        "summer dress. She does NOT look at the camera."
+        f"Place exactly ONE subject standing casually on the existing outdoor deck — a "
+        f"young adult woman 24-26. LOOK : {_CA_WOMAN} She wears a flowy cream or terracotta "
+        f"short linen dress, natural straw crochet tote bag slung over one shoulder. "
+        f"POSE : She holds a takeaway coffee cup in one hand, gazing out at the scene with "
+        f"a soft confident smile (profile to camera, NOT at camera). Natural golden hour "
+        f"warm light."
     ),
     ("solos", "indoor_seating"): (
-        "Place exactly ONE subject on the existing sofa or lounge chair visible in the photo — "
-        "a mixed-race adult woman late 20s. She sits cross-legged at one end, an open laptop "
-        "on her lap, glancing at the screen with a focused half-smile. She wears casual smart "
-        "attire (light shirt, slim trousers). A coffee cup sits on the nearby existing table "
-        "(only if one is clearly visible in the input). She does NOT look at the camera."
+        f"Place exactly ONE subject on the existing sofa or lounge chair visible in the "
+        f"photo — a young adult woman 24-26. LOOK : {_CA_WOMAN} (slightly more muted makeup "
+        f"for the indoor setting — still glowing tan and lips). She wears casual smart attire "
+        f": silk cream camisole and slim high-waist linen trousers. "
+        f"POSE : She sits cross-legged at one end of the sofa, an open laptop on her lap, "
+        f"focused half-smile gazing at the screen. A natural-toned ceramic coffee cup rests "
+        f"on the nearby existing table (only if one is clearly visible in the input). She "
+        f"does NOT look at the camera."
     ),
     ("solos", "gym_mat"): (
-        "Place exactly ONE subject on the existing yoga mat / gym floor visible in the photo — "
-        "a mixed-race adult woman late 20s in a downward-dog yoga pose, focused expression "
-        "looking down. She wears matching athleisure (high-waist black leggings and a fitted "
-        "sports bra). Natural light on her toned body. She does NOT look at the camera."
+        f"Place exactly ONE subject on the existing yoga mat / gym floor visible in the "
+        f"photo — a young adult woman 24-26 in a graceful warrior-II yoga pose (NOT downward "
+        f"dog — too revealing). She has the same {_CA_WOMAN.replace(' Confident relaxed', ' Focused calm').replace('soft natural smile', 'serene neutral expression')} "
+        f"She wears matching premium athleisure (high-waist black or sage leggings and a "
+        f"fitted scoop-neck sports bra). Natural studio light on her toned tanned body, soft "
+        f"glowing skin. She does NOT look at the camera ; gaze focused along her front arm."
+    ),
+    # ━━ GYM ÉQUIPEMENTS SPÉCIFIQUES (Martin 13/05/2026 — fix bug yoga sur tapis course) ━━
+    ("solos", "cardio_machine"): (
+        f"Place exactly ONE subject ON the existing treadmill / running machine visible in the "
+        f"photo — a young adult woman 24-26 IN MOTION of running at moderate pace, both feet "
+        f"in mid-stride on the running belt, hands holding the front rail lightly, looking "
+        f"FORWARD (not at camera). She has the same {_CA_WOMAN.replace(' Confident relaxed', ' Focused energetic').replace('soft natural smile', 'concentrated expression')} "
+        f"She wears matching premium athleisure (high-waist black leggings, fitted sports bra "
+        f"or athletic tank top, clean white running sneakers — running shoes are MANDATORY on "
+        f"the treadmill, NEVER barefoot). Earbuds in ears optional. Natural studio gym light. "
+        f"NEVER place her doing yoga / stretching / standing still on the machine — she must "
+        f"be ACTIVELY using the treadmill (running stride, contact with the belt)."
+    ),
+    ("solos", "weight_bench"): (
+        f"Place exactly ONE subject ON the existing weight bench visible in the photo — a "
+        f"young adult woman 24-26 SITTING UPRIGHT on the bench, holding light dumbbells (one "
+        f"in each hand) at shoulder height in a controlled shoulder-press position, gaze "
+        f"forward and focused (not at camera). She has the same {_CA_WOMAN.replace(' Confident relaxed', ' Focused energetic').replace('soft natural smile', 'concentrated expression')} "
+        f"She wears premium athleisure (high-waist black or sage leggings, fitted sports bra "
+        f"or athletic tank top, clean training sneakers). Natural studio gym light, slight "
+        f"sheen on her toned shoulders. NEVER place her doing yoga or stretching on the bench."
+    ),
+    ("solos", "weights_area"): (
+        f"Place exactly ONE subject standing in the existing free-weights area visible in the "
+        f"photo — a young adult woman 24-26 reaching for / picking up a dumbbell from the rack "
+        f"with one hand, body slightly turned in profile, focused expression (not at camera). "
+        f"She has the same {_CA_WOMAN.replace(' Confident relaxed', ' Focused energetic').replace('soft natural smile', 'concentrated expression')} "
+        f"She wears premium athleisure (high-waist black leggings, fitted sports bra or tank "
+        f"top, clean training sneakers). Natural studio gym light. NEVER place her doing yoga, "
+        f"standing on the dumbbells, or lying on the floor — she is actively selecting weights."
     ),
 
-    # ━━ FAMILIES (couple + 1-2 enfants) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # ━━ FAMILIES (couple + 1-2 enfants, sun-kissed family vacation) ━━━━━━━
+    # Tone adouci vs influencer : pas de gold chains layered, pas de makeup
+    # heavy. Vrai look "famille en vacances Méditerranée".
     ("families", "in_water"): (
-        "Place exactly THREE subjects in the existing pool water — a young mixed-race family "
-        "(mother late 20s, father late 20s, one child age 6). Both parents stand chest-deep "
-        "(water at sternum on adults). The mother holds the child in front of her at the water "
-        "surface, helping the child gently splash and laugh. The father stands next to them, "
-        "smiling and lightly splashing the water with one hand. Adult swimwear : navy one-piece "
-        "for mother, dark swim shorts for father. Child wears a colorful kids' swimsuit. None "
-        "look at the camera ; their gaze is on the child / between each other."
+        f"Place exactly THREE subjects in the existing pool water — a young family. "
+        f"{_FAMILY_LOOK} Mother wears a sleek terracotta or olive one-piece swimsuit, "
+        f"father wears tailored navy swim shorts (no shirt), child wears a bright colorful "
+        f"kids' swimsuit. "
+        f"POSE : Both parents stand chest-deep (water at sternum on adults). The mother "
+        f"holds the child in front of her at the water surface, helping the child gently "
+        f"splash and laugh with a wide candid smile. The father stands close to them, soft "
+        f"natural smile, one hand lightly resting on the mother's shoulder. None look at "
+        f"the camera ; their gaze is on the child / between each other. Natural mid-day "
+        f"warm sun."
     ),
     ("families", "pool_edge"): (
-        "Place exactly THREE subjects at the pool edge — a young mixed-race family (mother late "
-        "20s, father late 20s, one child age 7). Mother sits on the dry pool deck with her "
-        "feet in the water, holding the child's hand who sits beside her with a wide laughing "
-        "smile. Father kneels next to them on the deck, smiling at the child. All wear casual "
-        "swimwear. None look at the camera."
+        f"Place exactly THREE subjects at the pool edge, ALL sitting/kneeling DIRECTLY on the "
+        f"existing bare pool deck (concrete / tile / wood — exact same material as input) — a "
+        f"young family. {_FAMILY_LOOK} Mother wears a chic cream high-waist bikini (modern, "
+        f"modest), father wears tailored swim shorts in oat tone, child wears bright kids' "
+        f"swimwear. "
+        f"POSE : Mother sits on the BARE pool deck with her feet in the water, holding the "
+        f"child's hand who sits beside her with a wide laughing smile. Father kneels next to "
+        f"them on the BARE DECK, smiling at the child. None look at the camera. A natural "
+        f"straw beach bag rests on the deck.\n"
+        f"🚫 DO NOT add any cushion, towel, bench, mat, or extra surface under them. DO NOT "
+        f"extend the deck or invent a step. DO NOT modify the pool shape."
     ),
     ("families", "lounger"): (
-        "Place exactly THREE subjects on existing sun loungers visible in the photo — a young "
-        "mixed-race family. Mother reclines on one lounger, smiling at the child age 6 who is "
-        "sitting up at her feet showing her a colorful inflatable beach ball. Father reclines "
-        "on the adjacent lounger, propped on one elbow, looking at them with a relaxed smile. "
-        "All wear casual swimwear. None look at the camera."
+        f"Place exactly THREE subjects on existing sun loungers visible in the photo — a "
+        f"young family. {_FAMILY_LOOK} All wear casual modern swimwear. "
+        f"POSE : Mother reclines on one lounger, sleek sunglasses on, soft natural smile "
+        f"toward the child age 6 who is sitting up at her feet showing her a colorful "
+        f"inflatable beach toy. Father reclines on the adjacent lounger, propped on one "
+        f"elbow, soft smile watching them. Natural mid-afternoon warm sun on tanned skin. "
+        f"None look at the camera."
     ),
     ("families", "cabana_daybed"): (
-        "Place exactly THREE subjects together on the existing cabana daybed — a young "
-        "mixed-race family. Father at one end, mother at the other end, the child age 6 sitting "
-        "between them with a wide smile, showing the parents a small toy. All wear casual "
-        "swimwear / beach attire. They are mid-laugh, none looking at the camera."
+        f"Place exactly THREE subjects together on the existing cabana daybed — a young "
+        f"family. {_FAMILY_LOOK} Mother in chic terracotta bikini with cream sarong over "
+        f"hips, father in tailored swim shorts and a light open cream linen shirt, child "
+        f"in bright kids' swimwear. "
+        f"POSE : Father at one end, mother at the other end, the child age 6 sitting "
+        f"between them with a wide smile, showing the parents a small toy or shell. All "
+        f"mid-laugh, real candid family moment. None looks at the camera."
     ),
     ("families", "dining_table"): (
-        "Place exactly THREE subjects around the existing dining table — a young mixed-race "
-        "family. Mother at one side passing a small dish to the child age 7 sitting across "
-        "from her. Father next to the child, mid-conversation. Existing wine/water glasses "
-        "on the table only. They are sharing a candid laughing meal moment. None looks at "
-        "the camera."
+        f"Place exactly THREE subjects around the existing dining table — a young family. "
+        f"{_FAMILY_LOOK} Mother in a flowy cream linen short dress, father in a relaxed "
+        f"open linen shirt in oat tone, child in casual sun-kissed summer attire. "
+        f"POSE : Mother at one side passing a small dish to the child age 7 sitting across "
+        f"from her, soft natural laugh. Father next to the child, mid-conversation with a "
+        f"warm smile. Existing wine/water glasses on the table only. They share a candid "
+        f"laughing meal moment. None looks at the camera."
     ),
     ("families", "outdoor_deck"): (
-        "Place exactly THREE subjects on the existing outdoor deck — a young mixed-race family "
-        "casually standing close, the child age 6 between the parents, all smiling at "
-        "something just out of frame (off-camera). Mother wears a light summer dress, father "
-        "wears linen shirt and shorts, child wears casual summer clothes. None looks at the "
-        "camera."
+        f"Place exactly THREE subjects on the existing outdoor deck — a young family. "
+        f"{_FAMILY_LOOK} Mother in a flowy cream short linen dress, father in linen shirt "
+        f"and tailored sand chino shorts, child in casual summer clothes. "
+        f"POSE : All casually standing close, the child age 6 between the parents, all "
+        f"smiling at something just out of frame (off-camera). Natural golden warm light. "
+        f"None looks at the camera."
     ),
 
-    # ━━ SMALL_GROUPS (2-3 amis trendy) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # ━━ SMALL_GROUPS (3 amis trendy California influencer) ━━━━━━━━━━━━━━
     ("small_groups", "in_water"): (
-        "Place exactly THREE subjects in the existing pool water — three trendy mixed-race "
-        "friends, two women and one man, all late 20s. All three stand chest-deep near the "
-        "center of the pool, forming a loose triangle, laughing together mid-conversation. "
-        "Adult swimwear : two stylish bikinis (one navy, one olive) and dark swim shorts. "
-        "Water level at sternum on all three. None look at the camera ; they look at each "
-        "other / off-frame."
+        f"Place exactly THREE subjects in the existing pool water — three young adult friends "
+        f"(two women 24-26, one man 26-28). Both women have the look : {_CA_WOMAN} The man "
+        f"has the look : {_CA_MAN} "
+        f"Outfits : woman 1 in a sleek black bandeau bikini, woman 2 in a chic terracotta "
+        f"high-waist bikini, the man in tailored cream swim shorts. "
+        f"POSE : All three stand chest-deep (water at sternum) near the center of the pool, "
+        f"forming a loose triangle, mid-laugh in conversation. Hair slightly wet at temples "
+        f"for both women. Soft concentric water ripples around their bodies. None look at "
+        f"the camera ; they look at each other / off-frame."
     ),
     ("small_groups", "pool_edge"): (
-        "Place exactly THREE subjects sitting in a row at the existing pool edge — three "
-        "trendy mixed-race friends, all late 20s, casual conversation, feet and calves in the "
-        "water. Adult swimwear visible. The one in the center is holding a cold drink, telling "
-        "a story while the others laugh. None look at the camera."
+        f"Place exactly THREE subjects sitting in a row DIRECTLY on the existing bare pool deck "
+        f"(concrete / tile / wood — exact same material as input) at the pool edge — three "
+        f"young adult friends (two women 24-26, one man 26-28). Both women look : "
+        f"{_CA_WOMAN} Man : {_CA_MAN} "
+        f"Outfits : woman 1 in cream high-waist bikini set, woman 2 in olive bandeau bikini, "
+        f"man in tailored navy swim shorts (no shirt). Sleek sunglasses on all three. "
+        f"POSE : They sit side by side ON THE BARE DECK, feet and calves in the water, hands "
+        f"resting flat behind them on the BARE concrete/tile for support (no cushion, no towel "
+        f"under them). The friend in the center holds an iced cocktail with citrus, telling a "
+        f"story while the others laugh with confident soft smiles. Natural straw crochet tote "
+        f"bag visible on the deck. None look at the camera.\n"
+        f"🚫 DO NOT add any cushion, towel, bench, mat, or extra surface under them. DO NOT "
+        f"extend the deck or invent a step. DO NOT modify the pool shape."
     ),
     ("small_groups", "lounger"): (
-        "Place exactly THREE subjects on three adjacent existing sun loungers — three trendy "
-        "mixed-race friends, all late 20s. The center friend sits up reading a magazine ; the "
-        "other two recline relaxed with sunglasses on. Adult swimwear visible. None looks "
-        "at the camera."
+        f"Place THREE subjects on EXISTING sun loungers visible in the photo — three young "
+        f"adult friends (two women 24-26, one man 26-28). Women look : {_CA_WOMAN} Man : "
+        f"{_CA_MAN} "
+        f"⚠️ ADAPTIVE PLACEMENT — count the EMPTY loungers actually visible in the input :\n"
+        f"  • If 3+ adjacent loungers visible : place all 3 subjects there, reclined.\n"
+        f"  • If only 2 loungers visible : place 2 subjects reclining, the 3rd standing "
+        f"casually beside them holding a cocktail.\n"
+        f"  • If only 1 lounger visible : place 1 subject reclining, 2 standing beside or "
+        f"sitting on the deck nearby. DO NOT invent additional loungers.\n"
+        f"  • If 0 lounger visible (only deck/water) : DO NOT use this scenario — return "
+        f"image unchanged.\n"
+        f"Outfits : woman 1 in cream high-cut one-piece, woman 2 in terracotta bandeau "
+        f"bikini, man in tailored navy swim shorts. Sleek sunglasses on all, wide-brimmed "
+        f"straw hat on the center lounger if present. "
+        f"POSE : Reclined subjects propped on one elbow, standing subjects in relaxed contrapposto "
+        f"holding a cocktail with citrus. Natural mid-afternoon golden sun on their tanned bodies. "
+        f"None look at the camera."
     ),
     ("small_groups", "cabana_daybed"): (
-        "Place exactly THREE subjects on the existing cabana daybed / large pool sofa — three "
-        "trendy mixed-race friends, all late 20s, sharing a candid laughing moment. Existing "
-        "cocktail glasses visible in their hands only if a tray/glasses are already in the "
-        "input. None looks at the camera."
+        f"Place exactly THREE subjects on the existing cabana daybed / large pool sofa — "
+        f"three young adult friends (two women 24-26, one man 26-28). Women look : "
+        f"{_CA_WOMAN} Man : {_CA_MAN} "
+        f"Outfits : modern chic swimwear with light open cream linen shirts loosely worn "
+        f"over for the women, tailored swim shorts and open linen shirt for the man. Sleek "
+        f"sunglasses on all. "
+        f"POSE : They sit close, mid-laugh in candid conversation. Existing cocktail glasses "
+        f"in their hands only if a tray / glasses are clearly visible in the input. A natural "
+        f"straw crochet tote bag rests at one corner of the daybed. None looks at the camera."
     ),
     ("small_groups", "dining_table"): (
-        "Place exactly THREE subjects around the existing dining table — three trendy "
-        "mixed-race friends late 20s, mid-meal candid moment, one passing a small bread "
-        "basket to another. Casual smart attire. None looks at the camera."
+        f"Place exactly THREE subjects around the existing dining table — three young adult "
+        f"friends (two women 24-26, one man 26-28). Women look : {_CA_WOMAN} Man : {_CA_MAN} "
+        f"Outfits : flowy cream / terracotta linen midi dresses for women, open oat linen "
+        f"shirt with tailored shorts for man. "
+        f"POSE : Mid-meal candid moment, one woman passing a small bread basket to the man, "
+        f"both women mid-laugh, man with a soft attentive smile. Natural straw tote bag slung "
+        f"on the chair back. Existing wine glasses / water carafe on the table only. None "
+        f"looks at the camera."
     ),
     ("small_groups", "rooftop_deck"): (
-        "Place exactly THREE subjects standing on the rooftop deck (on the safe interior side "
-        "of the existing railing) — three trendy mixed-race friends late 20s. They form a "
-        "loose group facing each other in profile, cocktails in hand, mid-laugh. Casual chic "
-        "evening attire. None looks at the camera."
+        f"Place exactly THREE subjects standing on the rooftop deck (on the safe interior "
+        f"side of the existing railing) — three young adult friends (two women 24-26, one "
+        f"man 26-28). Women look : {_CA_WOMAN} Man : {_CA_MAN} "
+        f"Outfits : flowy cream silk slip dresses for women with slim heeled sandals, open "
+        f"cream linen shirt and tailored sand chino shorts for the man. "
+        f"POSE : They form a loose group facing each other in soft profile, sleek cocktail "
+        f"glasses with clear ice in hand, mid-laugh. Natural late-afternoon golden hour warm "
+        f"light glowing on their tanned profiles. None looks at the camera."
     ),
     ("small_groups", "outdoor_deck"): (
-        "Place exactly THREE subjects standing in a loose group on the existing outdoor deck "
-        "— three trendy mixed-race friends late 20s, sharing a candid laugh. Casual chic resort "
-        "attire. None looks at the camera."
+        f"Place exactly THREE subjects standing in a loose group on the existing outdoor "
+        f"deck — three young adult friends (two women 24-26, one man 26-28). Women look : "
+        f"{_CA_WOMAN} Man : {_CA_MAN} "
+        f"Outfits : flowy cream / terracotta short linen dresses for women, oat linen shirt "
+        f"and tailored sand shorts for the man. Sleek sunglasses on all. "
+        f"POSE : They share a candid laugh, slightly turned toward each other. Natural "
+        f"golden warm light. None looks at the camera."
     ),
 
-    # ━━ GROUPS (4-5 amis énergie festive) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # ━━ GROUPS (4 amis énergie festive California) ━━━━━━━━━━━━━━━━━━━━━━
     ("groups", "in_water"): (
-        "Place FOUR subjects in the existing pool water — a group of trendy mixed-race friends "
-        "late 20s (two men, two women), all standing chest-deep near the center, laughing "
-        "together. Adult swimwear visible. Water level at sternum on all. None looks at the "
-        "camera ; festive but tasteful daytime vibe."
+        f"Place FOUR subjects in the existing pool water — a group of young adult friends "
+        f"(two women 24-26, two men 26-28). Women look : {_CA_WOMAN} Men look : {_CA_MAN} "
+        f"Outfits : women in chic modern bikinis (one cream high-waist, one terracotta "
+        f"bandeau), men in tailored navy / oat swim shorts. "
+        f"POSE : All four stand chest-deep (water at sternum) near the center of the pool, "
+        f"forming a loose circle. Two of them mid-laugh, the others smiling in conversation. "
+        f"Soft water ripples around their bodies. None look at the camera ; festive confident "
+        f"daytime vibe."
     ),
     ("groups", "pool_edge"): (
-        "Place FOUR subjects sitting in a row at the existing pool edge with feet in the water "
-        "— a group of trendy mixed-race friends late 20s. They are mid-conversation, two of "
-        "them mid-laugh. None looks at the camera."
+        f"Place FOUR subjects sitting in a row DIRECTLY on the existing bare pool deck "
+        f"(concrete / tile / wood — exact same material as input) at the pool edge with feet in "
+        f"the water — a group of young adult friends (two women 24-26, two men 26-28). Women : "
+        f"{_CA_WOMAN} Men : {_CA_MAN} "
+        f"Outfits : modern chic swimwear (high-waist bikinis for women, tailored swim shorts "
+        f"for men). Sleek sunglasses on all. "
+        f"POSE : They sit side by side ON THE BARE DECK, hands resting flat behind them on the "
+        f"BARE concrete/tile for support (no cushion, no towel under them). Mid-conversation, "
+        f"two of them mid-laugh, one holding a cold cocktail glass with citrus. Natural straw "
+        f"crochet tote bag at the end of the row. None looks at the camera.\n"
+        f"🚫 DO NOT add any cushion, towel, bench, mat, or extra surface under them. DO NOT "
+        f"extend the deck or invent a step. DO NOT modify the pool shape."
     ),
     ("groups", "lounger"): (
-        "Place FOUR subjects on four adjacent existing sun loungers — a group of trendy "
-        "mixed-race friends late 20s. They share a candid relaxed moment, one of them sitting "
-        "up to talk to the others. None looks at the camera."
+        f"Place FOUR subjects on four adjacent existing sun loungers — a group of young adult "
+        f"friends (two women 24-26, two men 26-28). Women : {_CA_WOMAN} Men : {_CA_MAN} "
+        f"Outfits : chic modern swimwear, wide-brimmed straw hats and sleek sunglasses. "
+        f"POSE : They share a candid relaxed moment — one sitting up to talk to the others, "
+        f"the others reclining propped on one elbow. Natural mid-afternoon golden sun on "
+        f"their tanned bodies. None looks at the camera."
     ),
     ("groups", "rooftop_deck"): (
-        "Place FOUR subjects standing in a loose semicircle on the rooftop deck (on the safe "
-        "interior side of the existing railing) — a group of trendy mixed-race friends late "
-        "20s, mid-toast with cocktails in hand. Casual chic evening attire. None looks at "
-        "the camera."
+        f"Place FOUR subjects standing in a loose semicircle on the rooftop deck (on the "
+        f"safe interior side of the existing railing) — a group of young adult friends "
+        f"(two women 24-26, two men 26-28). Women : {_CA_WOMAN} Men : {_CA_MAN} "
+        f"Outfits : flowy cream / terracotta silk slip dresses for women, open cream linen "
+        f"shirts with tailored sand chino shorts for men. "
+        f"POSE : Mid-toast with sleek cocktail glasses (clear ice + citrus) in hand, all "
+        f"smiling, two of them mid-laugh. Natural late-afternoon golden hour warm light on "
+        f"profiles. None looks at the camera."
     ),
     ("groups", "outdoor_deck"): (
-        "Place FOUR subjects standing in a loose semicircle on the existing outdoor deck — a "
-        "group of trendy mixed-race friends late 20s, mid-laugh. Casual chic resort attire. "
-        "None looks at the camera."
+        f"Place FOUR subjects standing in a loose semicircle on the existing outdoor deck "
+        f"— a group of young adult friends (two women 24-26, two men 26-28). Women : "
+        f"{_CA_WOMAN} Men : {_CA_MAN} "
+        f"Outfits : flowy linen short dresses for women, oat linen shirts and tailored "
+        f"sand shorts for men. Sleek sunglasses, natural straw crochet tote bag visible. "
+        f"POSE : Mid-laugh in candid group conversation, slightly turned toward each other. "
+        f"Natural golden warm light. None looks at the camera."
     ),
     ("groups", "dining_table"): (
         "Place FOUR subjects around the existing dining table — a group of trendy mixed-race "
@@ -544,30 +824,176 @@ _SCENARIO_CATALOG: dict[tuple[str, str], str] = {
 }
 
 
+def _coerce_scenario_count(scenario_block: str, target_n: int) -> str:
+    """Réécrit les mentions de quantité dans le scenario pour matcher target_n.
+
+    Bug récurrent (Martin 13/05/2026) : le scenario hardcoded dit "Place exactly
+    THREE subjects" mais target_n=1 (capé pour cause de barrière par exemple).
+    Gemini Image suit le scenario plus détaillé → 3 humains au lieu de 1.
+
+    Fix : on patch le scenario AVANT l'envoi pour aligner les chiffres.
+    Conserve les autres mentions numériques (ex: "24-26") intactes.
+    """
+    if not scenario_block or target_n is None:
+        return scenario_block
+    import re as _re
+    word_n = {1: "ONE", 2: "TWO", 3: "THREE", 4: "FOUR", 5: "FIVE"}.get(target_n, str(target_n))
+    # Remplace "Place exactly TWO/THREE/FOUR/FIVE subjects" → "Place exactly {N} subject(s)"
+    patched = _re.sub(
+        r"Place exactly (ONE|TWO|THREE|FOUR|FIVE)\s+(subject|subjects)\b",
+        f"Place exactly {word_n} subject(s)",
+        scenario_block,
+    )
+    # Remplace aussi "Place FOUR subjects" sans "exactly"
+    patched = _re.sub(
+        r"\bPlace\s+(ONE|TWO|THREE|FOUR|FIVE)\s+(subject|subjects)\b",
+        f"Place {word_n} subject(s)",
+        patched,
+    )
+    return patched
+
+
+def _build_auto_description_scenario(
+    persona: str,
+    zone_text: str,
+    target_n: int,
+) -> str:
+    """Construit un scenario générique adapté à la safe_zone Gemini réelle.
+
+    Utilisé quand aucun scenario hardcoded ne match précisément la safe_zone
+    (= évite le bug "yoga sur tapis de course"). Plutôt que d'imposer une pose
+    spécifique qui peut être incohérente avec l'équipement réel, on délègue la
+    décision de pose à Gemini Image en lui donnant :
+      - l'identité du sujet (look California influencer)
+      - la zone EXACTE telle que décrite par Gemini Vision
+      - une pose ADAPTÉE à la zone, dérivée des mots-clés de la zone_text
+
+    Returns : bloc texte prêt à insérer dans le prompt.
+    """
+    # Look + outfit selon persona
+    if persona == "solos":
+        identity = f"a young adult woman 24-26. {_CA_WOMAN}"
+        outfit_hint = (
+            "Outfit adapted to the zone : swimwear if pool/beach context, premium "
+            "athleisure if gym, flowy silk slip dress if rooftop/lounge, smart "
+            "casual if dining."
+        )
+    elif persona == "couples":
+        identity = f"a young adult couple (one woman 24-26, one man 26-28). WOMAN : {_CA_WOMAN} MAN : {_CA_MAN}"
+        outfit_hint = (
+            "Outfits adapted to the zone : swimwear for pool/beach, premium athleisure "
+            "for gym, slip dress + linen shirt for rooftop, smart casual for dining."
+        )
+    elif persona == "families":
+        identity = f"a young family with one child age 6-7. {_FAMILY_LOOK}"
+        outfit_hint = (
+            "Outfits adapted to the zone : swimwear for pool/beach, casual play "
+            "clothes for outdoor, smart casual for dining."
+        )
+    elif persona in ("small_groups", "groups"):
+        n_women = 2 if persona == "small_groups" else 2
+        n_men = 1 if persona == "small_groups" else 2
+        identity = (
+            f"a group of young adult friends ({n_women} women 24-26, {n_men} men "
+            f"26-28). WOMEN : {_CA_WOMAN} MEN : {_CA_MAN}"
+        )
+        outfit_hint = (
+            "Outfits adapted to the zone : swimwear for pool/beach, athleisure for "
+            "gym, slip dresses + linen shirts for rooftop/lounge, smart casual for "
+            "dining."
+        )
+    else:
+        identity = f"a young adult subject. {_CA_WOMAN}"
+        outfit_hint = "Outfit adapted to the zone context."
+
+    # Pose hint déduite des mots-clés dans zone_text (FR + EN)
+    zl = (zone_text or "").lower()
+    if any(k in zl for k in ["course", "treadmill", "running"]):
+        pose_hint = (
+            "POSE : The subject is ACTIVELY using the machine — mid-stride running "
+            "with both feet on the belt (running shoes mandatory), hands lightly "
+            "holding the front rail. NOT yoga, NOT stretching, NOT standing still."
+        )
+    elif any(k in zl for k in ["banc", "bench", "musculation"]):
+        pose_hint = (
+            "POSE : The subject is SITTING UPRIGHT on the bench, holding light "
+            "dumbbells in a controlled shoulder-press position, focused expression."
+        )
+    elif any(k in zl for k in ["haltère", "dumbbell", "weight"]):
+        pose_hint = (
+            "POSE : The subject is reaching for / picking up a dumbbell from the rack, "
+            "body slightly turned in profile, focused expression."
+        )
+    elif any(k in zl for k in ["yoga", "stretching"]):
+        pose_hint = (
+            "POSE : The subject is in a graceful warrior-II yoga pose on the mat, "
+            "gaze focused along front arm."
+        )
+    elif any(k in zl for k in ["debout", "standing", "admir"]):
+        pose_hint = (
+            "POSE : The subject stands relaxed, soft confident posture, gazing out "
+            "at the scene / horizon (NOT at camera)."
+        )
+    elif any(k in zl for k in ["assise", "assis", "sit", "seated"]):
+        pose_hint = (
+            "POSE : The subject is sitting in the position described by the zone, "
+            "relaxed and natural."
+        )
+    elif any(k in zl for k in ["allong", "lying", "reclin", "lecture", "lit"]):
+        pose_hint = (
+            "POSE : The subject is reclining/lying on the surface described, in a "
+            "relaxed natural pose."
+        )
+    elif any(k in zl for k in ["nag", "swim"]):
+        pose_hint = (
+            "POSE : The subject is swimming gently, head above water, chest-deep."
+        )
+    else:
+        pose_hint = (
+            "POSE : Choose a pose that is PHYSICALLY COHERENT with the zone described "
+            "above — sitting on a seat, standing on solid ground, lying on a flat "
+            "surface, etc. NEVER pick an incoherent pose (e.g. yoga on a treadmill, "
+            "lying on an upright machine)."
+        )
+
+    return (
+        f"Place exactly {target_n} subject(s) — {identity} "
+        f"LOCATION : EXACTLY in the zone described as «{zone_text}» — same spot, "
+        f"same orientation. Do NOT relocate to a different area. "
+        f"{outfit_hint} "
+        f"{pose_hint} "
+        f"Subject(s) gaze : NEVER at the camera (look forward, at each other, at the "
+        f"horizon, or at the activity). Natural ambient light matching the existing "
+        f"scene direction."
+    )
+
+
 def pick_human_scenario(
     persona: str,
     category: str,
     safe_zones: list[str] | None,
     capacity: int | None,
+    target_n: int | None = None,
 ) -> dict | None:
     """Choisit UN scenario unique pour cette photo. Retourne None si pas de scenario valide.
 
-    Approche : on regarde la safe_zone N°1 (priorité Gemini) et on map vers un zone_type.
-    Si un mapping persona×zone_type existe → on retourne le bloc texte précis.
-    Sinon → None (= ne pas ajouter d'humain pour cette photo).
+    Approche v3 (Martin 13/05/2026) :
+      1. Map la safe_zone[0] vers un zone_type via _classify_safe_zone.
+      2. Cherche un scenario hardcoded matchant (persona, zone_type).
+      3. Si match → vérifie cohérence SÉMANTIQUE entre zone_text et scenario_text.
+         (ex: scenario "yoga warrior-II" vs zone "tapis de course" → REJET).
+      4. Si pas de match OU rejet → fallback vers _build_auto_description_scenario
+         qui construit un scenario à partir des mots-clés de la zone Gemini.
     """
     if not safe_zones:
         return None
-    # Catégorie spéciale : vue aérienne piscine → jamais d'humain
     cat_lower = (category or "").lower()
     if cat_lower in ("piscine_vue_aerienne", "facade", "chambre", "staff"):
         return None
 
-    # Map la priority safe_zone
     zone_text = safe_zones[0] if safe_zones else ""
     zone_type = _classify_safe_zone(zone_text)
 
-    # Fallback heuristique selon la catégorie si zone_type unknown
     if zone_type == "unknown":
         if cat_lower in ("piscine", "rooftop"):
             zone_type = "in_water" if "piscine" in cat_lower else "rooftop_deck"
@@ -578,7 +1004,8 @@ def pick_human_scenario(
         elif cat_lower in ("f_and_b",):
             zone_type = "dining_table"
         elif cat_lower in ("gym",):
-            zone_type = "gym_mat"
+            # ⚠️ pas de fallback aveugle gym→gym_mat — on délègue au scenario AUTO
+            zone_type = "AUTO_GYM"
         elif cat_lower in ("interieur_commun",):
             zone_type = "indoor_seating"
         else:
@@ -587,13 +1014,51 @@ def pick_human_scenario(
     # Cherche le scenario exact (persona, zone_type)
     block = _SCENARIO_CATALOG.get((persona, zone_type))
     if block is None:
-        # Fallback : on essaie avec persona=couples si rien d'autre, puis solos
         for fallback_persona in ("couples", "solos", "small_groups"):
             block = _SCENARIO_CATALOG.get((fallback_persona, zone_type))
             if block:
                 break
+
+    # ━ COHERENCE CHECK SÉMANTIQUE (Martin 13/05/2026 — fix yoga sur tapis course) ━
+    # On regarde UNIQUEMENT les ~250 premiers chars du scenario (= pose principale),
+    # pas les phrases NEGATIVE en fin qui mentionnent "NEVER yoga" etc.
+    rejected_reason = None
+    if block:
+        pose_intro = block[:250].lower()  # zone où la pose principale est décrite
+        zone_lower = zone_text.lower()
+        incoherences = [
+            (("yoga pose", "warrior-ii", "downward dog"),
+             ("tapis de course", "treadmill", "running", "course", "banc de musc", "vélo", "haltère", "rower", "bench press")),
+            (("running stride", "mid-stride running", "on the treadmill"),
+             ("yoga mat", "tapis de yoga", "stretching mat")),
+            (("swimming", "submerged", "chest-deep"),
+             ("rooftop deck", "outdoor deck", "patio", "interior seat", "lounge chair", "canapé")),
+            (("around the dining table", "at the existing dining table"),
+             ("pool water", "in the pool", "lounger", "transat")),
+        ]
+        for scenario_kws, zone_kws in incoherences:
+            if any(s in pose_intro for s in scenario_kws) and any(z in zone_lower for z in zone_kws):
+                rejected_reason = f"scenario décrit {scenario_kws} mais zone Gemini dit {zone_kws}"
+                block = None
+                break
+
+    # Fallback vers AUTO-DESCRIPTION si rien ne match ou incohérence
     if block is None:
-        return None
+        eff_n = target_n if target_n else (
+            compute_target_humans(persona, capacity) if capacity else
+            (2 if persona in ("couples", "small_groups", "families", "groups") else 1)
+        )
+        eff_n = max(1, min(eff_n, 5))
+        block = _build_auto_description_scenario(persona, zone_text, eff_n)
+        return {
+            "scenario_id": f"{persona}__AUTO",
+            "persona": persona,
+            "zone_type": zone_type,
+            "primary_safe_zone": zone_text,
+            "prompt_block": block,
+            "auto_description_used": True,
+            "rejected_hardcoded_reason": rejected_reason,
+        }
 
     return {
         "scenario_id": f"{persona}__{zone_type}",
@@ -800,48 +1265,118 @@ def pick_pool_float_hint(
     return POOL_FLOATS_OPTIONS[idx]
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Détection structurelle "rooftop avec barrière de sécurité au premier plan"
+# (Martin 13/05/2026 — Andaz West Hollywood bug : Gemini Image plaçait des
+# humains DERRIÈRE la barrière en verre en INVENTANT des transats dans le
+# vide). Si Gemini Vision a flaggé une unsafe_zone contenant des mots-clés
+# barrière au premier plan → on injecte un bloc EXTRA-STRICT en tête de
+# prompt + on force max_humans à 1 (réduit la tentation d'éparpiller hors zone).
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_BARRIER_KEYWORDS = (
+    "barrière", "barriere", "garde-corps", "garde corps", "guardrail",
+    "guard rail", "guard-rail", "balustrade", "railing", "glass barrier",
+    "glass panel", "safety rail", "safety fence", "parapet", "verre au premier plan",
+)
+
+
+def _detect_barrier_risk(unsafe_zones: list[str] | None, category: str | None) -> bool:
+    """Retourne True si la scène a une barrière de sécurité explicitement listée
+    en unsafe_zone — typique des rooftops, balcons, terrasses en hauteur.
+
+    Quand True, le prompt ajout perso injecte un bloc EXTRA strict pour empêcher
+    Gemini Image de placer des humains du mauvais côté de la barrière (et inventer
+    du mobilier dans le vide).
+    """
+    if not unsafe_zones:
+        return False
+    cat = (category or "").lower()
+    # On ne déclenche que sur scènes à risque (rooftop, balcony, terrasse, piscine
+    # en hauteur). Pour une piscine au sol, "railing" autour de la piscine est OK
+    # et ne doit pas déclencher ce flag.
+    if cat not in ("rooftop", "piscine", "exterieur_commun", "vue_panoramique"):
+        return False
+    for z in unsafe_zones:
+        if not z:
+            continue
+        z_low = z.lower()
+        if any(k in z_low for k in _BARRIER_KEYWORDS):
+            return True
+    return False
+
+
 def build_persona_prompt(persona: str, category: str, vibe: str | None = None,
                          safe_zones: list[str] | None = None,
                          unsafe_zones: list[str] | None = None,
                          max_humans: int | None = None,
                          capacity: int | None = None,
-                         pool_float_hint: str | None = None) -> str:
-    """Construit le prompt ajout personnage à partir des templates validés Martin.
+                         pool_float_hint: str | None = None,
+                         scenario_block_override: str | None = None) -> str:
+    """Construit le prompt ajout personnage.
 
-    Pattern issu de ses prompts Higgsfield :
-      [Enhance & add subjects]
-      → Subjects (description détaillée)
-      → Action & mood
-      → Lighting & realism
-      → Integration rules (perspective, scale, contact)
-      → Style (camera ref + film stock)
-      → Negative prompt
+    ━━━ HISTORIQUE & VERSIONS ━━━
+    • V1 (longue, ~5000 tokens) — version actuellement utilisée PAR DÉFAUT.
+        Cumul de règles construit au fil des bugs avr.→mai 2026. Beaucoup de
+        doublons et contradictions mais marche dans la majorité des cas.
+    • V2 (compacte, ~2000 tokens) — tentative de refonte 13/05/2026.
+        Hypothèse : moins de dilution = signal critique plus pur. En pratique :
+        bord piscine inventé, échelles humaines incohérentes, sport non-sense
+        sur tapis de course → V2 sacrifie trop de garde-fous. Rollback Martin.
+        Conservée en opt-in derrière flag env pour tests futurs.
+
+    🔁 BASCULER VERS V2 (compacte) — pour tests :
+        export USE_COMPACT_PROMPT_V2=1
+        # puis relance Flask
+
+    🔁 BASCULER VERS V1 (longue) — défaut, comportement actuel :
+        # rien à faire (= unset USE_COMPACT_PROMPT_V2)
     """
-    # ━━ Scenario déterministe (Martin 12/05/2026) ━━
-    # On choisit UN seul scenario en Python en fonction du persona + de la 1ère safe_zone Gemini.
-    # Le bloc texte renvoyé est ULTRA-précis (1 pose, 1 position, 1 outfit) — pas d'options.
-    scenario = pick_human_scenario(persona, category, safe_zones, capacity)
-    if scenario:
-        scenario_block = scenario["prompt_block"]
-        scenario_id_for_log = scenario["scenario_id"]
-    else:
-        # Aucun scenario valide → on instruira l'IA de ne pas ajouter
-        scenario_block = None
-        scenario_id_for_log = "no_scenario"
+    # ━━ Par défaut : V1 longue (Martin 13/05/2026 — V2 compacte trop permissive) ━━
+    # On délègue au snapshot V1 dans _legacy_prompts.py qui contient la version
+    # complète avec toutes les règles strictes (anatomy, scale lock, water depth, etc).
+    if os.getenv("USE_COMPACT_PROMPT_V2") != "1":
+        from _legacy_prompts import build_persona_prompt_v1_long
+        return build_persona_prompt_v1_long(
+            persona=persona, category=category, vibe=vibe,
+            safe_zones=safe_zones, unsafe_zones=unsafe_zones,
+            max_humans=max_humans, capacity=capacity,
+            pool_float_hint=pool_float_hint,
+            scenario_block_override=scenario_block_override,
+            _pick_human_scenario=pick_human_scenario,
+            _PERSONA_TEMPLATES=PERSONA_TEMPLATES,
+            _CATEGORY_ACTION_HINT=CATEGORY_ACTION_HINT,
+            _compute_target_humans=compute_target_humans,
+            _detect_barrier_risk=_detect_barrier_risk,
+            _coerce_scenario_count=_coerce_scenario_count,
+        )
+    # ━━ Sinon : V2 compacte (opt-in via env var) ━━
 
-    # Legacy : utilisé uniquement pour les valeurs par défaut si le scenario block est absent.
-    persona_desc = PERSONA_TEMPLATES.get(persona, PERSONA_TEMPLATES["couples"])
-    action_hint = CATEGORY_ACTION_HINT.get(category, "naturally placed in the scene, candid relaxed moment")
+    # ━━ Détection rooftop+barrière (impacte persona ET target_n) ━━
+    # (Martin 13/05/2026, Andaz V2 bug) : si la photo a une barrière en premier plan,
+    # on cap target_n à 1 ET on bascule persona vers "solos" pour que le scenario_block
+    # généré décrive UNE personne (et pas un couple). Sinon le prompt envoyé contient
+    # à la fois "EXACTLY 1" et "Place TWO subjects" → contradiction → Gemini suit le
+    # plus détaillé (le scenario) → 2 personnes placées dans une zone à risque.
+    barrier_risk = _detect_barrier_risk(unsafe_zones, category)
+    effective_persona = persona
+    if barrier_risk and persona in ("couples", "small_groups", "families", "groups"):
+        effective_persona = "solos"
 
-    # ━ Arbre humains × capacity : adapte le nombre cible selon la capacity de la scène ━
+    # ━━ Scenario déterministe (= description sujet + pose précise) ━━
+    scenario = pick_human_scenario(effective_persona, category, safe_zones, capacity)
+    scenario_block = scenario["prompt_block"] if scenario else None
+
+    # ━ target_n : nombre d'humains à placer (capé 1 si barrière) ━
     if capacity is not None and capacity > 0:
-        target_n = compute_target_humans(persona, capacity)
+        target_n = compute_target_humans(effective_persona, capacity)
     elif max_humans is not None:
         target_n = max_humans
     else:
-        # Fallback : 1 ou 2 selon persona
-        target_n = 2 if persona in ("couples", "small_groups", "families", "groups") else 1
-    target_n = max(1, min(target_n, 5))  # cap dur 1-5
+        target_n = 2 if effective_persona in ("couples", "small_groups", "families", "groups") else 1
+    target_n = max(1, min(target_n, 5))
+    if barrier_risk and target_n > 1:
+        target_n = 1  # rooftop+barrière → 1 humain bien placé > 2 humains à risque
 
     vibe_mood = {
         "Family-Friendly": "warm family vacation energy, playful but tasteful",
@@ -851,246 +1386,88 @@ def build_persona_prompt(persona: str, category: str, vibe: str | None = None,
         "Trendy":          "urban-leisure vibe, lifestyle editorial mood",
     }.get(vibe or "", "warm relaxed daytime moment, premium-accessible feel")
 
-    # ━━ SAFE ZONES = SOURCE DE VÉRITÉ ABSOLUE pour le placement ━━
-    # Si Gemini a identifié des zones précises, l'IA DOIT les utiliser strictement.
-    # Sinon (zones vides) → on instruit l'IA de NE PAS ajouter d'humain.
-    has_safe_zones = bool(safe_zones)
-    safe_zones_block = ""
-    if has_safe_zones:
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # BLOC A — WHERE : zones autorisées / interdites + règle "no invention"
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    if safe_zones:
         safe_list = "\n".join(f"  ZONE {i+1}: {z}" for i, z in enumerate(safe_zones))
-        unsafe_list = "\n".join(f"  - {z}" for z in (unsafe_zones or []))
-        max_h = max_humans or 1
-        safe_zones_block = f"""
-
-🎯 ABSOLUTE PLACEMENT RULE — THE SCENE-SPECIFIC SAFE ZONES (analyzed by Gemini Vision on THIS exact photo):
-
-The subject(s) MUST be placed in ONE of these specific zones (and ONLY these zones). These are the ONLY locations identified as physically/visually possible WITHOUT inventing decor:
-{safe_list or "  - (no specific safe zones identified — apply generic physical rules)"}
-
+        unsafe_list = "\n".join(f"  ✘ {z}" for z in (unsafe_zones or [])) or "  (no specific forbidden zones)"
+        where_block = f"""
+🎯 WHERE — ALLOWED placement zones (Gemini Vision identified these as the ONLY natural spots, in priority order) :
 {safe_list}
 
-📌 STRICT RULES on these zones :
-- Pick exactly ONE zone (zone 1 has highest priority, then zone 2, etc.)
-- Place the subject EXACTLY where described — same location, same pose. Do NOT slide them somewhere "more aspirational" if it's not in the zones list.
-- Do NOT create a new edge, new step, new ledge, new platform, new lounger to make a different placement work.
-- If you cannot place the subject naturally in ANY of these zones → DO NOT ADD anyone. Return the image unchanged.
+🚫 FORBIDDEN placement zones (DO NOT place any subject here, ever) :
+{unsafe_list}
 
-FORBIDDEN placements in this scene (do NOT place subjects here under any circumstance):
-{unsafe_list or "  - (none specific)"}
-
-Maximum subjects to add for this scene: {max_h} (less is better).
+ABSOLUTE LAW : place the subject(s) in ONE of the ALLOWED zones above, EXACTLY as described. If the scene does not allow it without inventing or modifying anything, return the image UNCHANGED.
 """
     else:
-        # Aucune safe_zone identifiée par Gemini → on instruit l'IA de NE PAS ajouter
-        safe_zones_block = """
-
-🛑 NO SAFE ZONES IDENTIFIED for this photo — Gemini Vision concluded that there is no natural place to add a human subject without modifying the decor.
-
-ABSOLUTE INSTRUCTION : DO NOT ADD any human subject to this image. Return the image unchanged.
+        where_block = """
+🛑 NO SAFE PLACEMENT ZONE in this photo. Return the image UNCHANGED. Do NOT add any subject.
 """
 
-    # ━━ Pool float (optionnel, déclenché ~35% sur piscine ; voir pick_pool_float_hint) ━━
-    # Si pool_float_hint est set → on autorise UN float décrit, on l'enlève de la
-    # forbidden list, et on précise les règles d'intégration. Sinon : règle stricte
-    # actuelle (aucun float, pas de pool noodle).
+    # Bloc rooftop+barrière (conditionnel) — placé en HAUT pour primauté
+    barrier_lock_block = ""
+    if barrier_risk:
+        barrier_lock_block = """🚨 SAFETY BARRIER LOCK (rooftop / elevated scene) :
+A safety barrier (glass / metal / parapet) separates the SAFE INTERIOR (existing furniture, pool, deck) from the VOID OUTSIDE (sky, city view, drop). Place all subject(s) STRICTLY on the INTERIOR side, using EXISTING furniture only. Do NOT invent any lounger / daybed / platform / deck extension beyond the barrier — there is NOTHING there. If you cannot honor this, return the image UNCHANGED.
+
+"""
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # BLOC B — WHO : description du sujet (scenario block) + count
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    who_block = f"""
+🎬 WHO — Subject(s) to add — EXACTLY {target_n}, no more, no less :
+{scenario_block if scenario_block else "(no scenario selected — return image unchanged)"}
+
+Count check before output : if you placed more than {target_n}, remove the extra(s). If you cannot fit {target_n} on existing furniture / in water without inventing, place FEWER (down to 1, or zero — return unchanged is always acceptable).
+"""
+
+    # Pool float (conditionnel, ~35% des piscines) — bloc compact
+    pool_float_block = ""
     if pool_float_hint:
-        subject_only_intro = f"""You are ONLY allowed to add human subject(s), the items they personally hold or wear (swimwear, dress, sunglasses, hat, drink in hand, sarong, towel held by them), AND optionally a single pool float that the subject is using (see "POOL FLOAT" block below).
-
-You MUST NEVER add ANY of the following — NO EXCEPTIONS:
-- A lounger, daybed, sofa, sun lounger, beach chair, bench, table, ottoman, bed
-- A pool ladder, pool steps, pool rail, handrail, ladder of any kind (if there is no ladder visible in the input, DO NOT add one)
-- More than ONE pool float — exactly one or zero
-- A pool noodle, separate floating drink tray, foam mat, raft other than the requested float
-- A pillow, towel placed on the ground/lounger, blanket, rug
-- A plant, vase, decoration, lamp, candle, sign, board
-- Any new equipment, drinkware (a drink in their HAND is OK; a tray, additional glasses on a fictional table are NOT OK)
-- Any modification to existing pool water shape, decking size, walls, doors, windows, pillars, plants, fences, railings"""
         pool_float_block = f"""
-
-🍩 POOL FLOAT (MANDATORY — must appear in the final image) :
-You MUST add ONE pool float in the water — specifically : {pool_float_hint}.
-
-This pool float is a CRITICAL element of the final composition — its absence breaks the brand intent. The float MUST be visible and identifiable in the output image. Do NOT skip it.
-
-Strict rules for the float:
-- Place it IN the water of the existing pool, in a zone that is ALREADY empty water (not over the existing decking, not blocking existing furniture).
-- The float must be ENGAGED with a subject : either the subject is lounging on/in it, holding it, sitting next to it, OR pushing it gently. A solo decorative float floating empty is acceptable ONLY if the pool would otherwise look completely empty and lifeless.
-- Realistic scale : the float must be in proportion with the pool size. NEVER make it bigger than the pool or covering more than ~25% of the visible water surface.
-- Realistic interaction with water : water displacement around the float, subtle wake if motion implied, partial reflection on water surface.
-- Color/style must remain photorealistic — no over-saturated CGI candy palette. Slight wear/use is fine.
-- The float counts AS the subject's support : if the subject is ON the float, the water-depth rules above are relaxed (they can be at the surface, lying on the float). But the float must look stable, not tipping.
-- The float CANNOT replace any existing furniture or decor.
-
-ONLY EXCEPTION where the float may be omitted : the visible water surface is < 2m × 2m (= float would be impossible to place at realistic scale). In that ONE case, return the image without the float. In ALL other cases, the float MUST be present in the output.
-
-If you cannot place this float naturally according to ALL the rules above → DO NOT add it. The photo without a float is always acceptable.
+🍩 POOL FLOAT (additional element, MUST appear) : add one {pool_float_hint} floating in the existing pool water — engaged with a subject (lounging on it / holding it / next to it). Realistic scale, water displacement, no CGI candy palette. The float CANNOT replace any existing furniture. If realistically impossible, omit it (acceptable).
 """
-    else:
-        subject_only_intro = """You are ONLY allowed to add human subject(s) — and only the items they personally hold or wear (swimwear, dress, sunglasses, hat, drink in hand, sarong, towel held by them).
 
-You MUST NEVER add ANY of the following — NO EXCEPTIONS:
-- A lounger, daybed, sofa, sun lounger, beach chair, raft, float, pool noodle, bench, table, ottoman, bed
-- A pool ladder, pool steps, pool rail, handrail, ladder of any kind (if there is no ladder visible in the input, DO NOT add one)
-- A pillow, towel placed on the ground/lounger, blanket, rug
-- A plant, vase, decoration, lamp, candle, sign, board
-- Any new equipment, drinkware (a drink in their HAND is OK; a tray, additional glasses on a fictional table are NOT OK)
-- Any modification to existing pool water shape, decking size, walls, doors, windows, pillars, plants, fences, railings"""
-        pool_float_block = ""
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # BLOC C — HOW : scene preservation + physics + style + negatives
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    how_block = f"""
+🛡️ PRESERVE SCENE — everything outside the subject must be PIXEL-IDENTICAL to input :
+- DO NOT invent or add furniture, decor, plants, props, drinks, signs, towels, ladders, steps, platforms, decking extensions, walls, windows. The ONLY allowed addition is the subject(s) themselves + their worn/held items (swimwear, hat, sunglasses, drink in hand).
+- DO NOT remove, shrink, move, resize, or "beautify" any existing element — including TVs / screens (even black), railings, balustrades, AC units, drainage covers, fire escapes, cables, antennas. Ugly stays. The pool keeps its EXACT shape and size.
+- DO NOT zoom, crop, or change camera angle / framing / focal length.
+- DO NOT change lighting time-of-day or color grading.
 
-    return f"""🛑 RULE #1 — SUBJECT-ONLY ADDITION (THE MOST IMPORTANT RULE OF ALL):
+⚖️ PHYSICS — subjects must be physically plausible :
+- Sit / recline / stand ONLY on EXISTING visible surfaces (lounger, daybed, chair, sofa, solid deck, pool edge, OR submerged in water).
+- In water : water level reaches CHEST / sternum / shoulders on standing adults (NEVER knees / thighs / hips — pool looks bottomless). If chest-deep impossible, sit at the pool EDGE with feet dangling instead.
+- Multiple subjects in same pool = same water level (geometric coherence).
+- Consistent scale between subjects ; correct perspective vs existing furniture (adult ≈ 2× lounger height).
+- Match existing lighting direction & color temperature on faces / clothing / shadows.
 
-{subject_only_intro}
+🎨 STYLE — California-influencer travel aesthetic :
+Premium lifestyle photo, warm saturated tones, golden hour ambient, Kodak Portra 800 grain feel, candid travel-magazine moment (never staged catalog). {vibe_mood}.
 
-You MUST NEVER reduce / resize / move / shrink ANY existing element of the scene to "make room" for the subject.
-For example: shrinking the pool to add a lounger, or moving real loungers to add a fictional one — STRICTLY FORBIDDEN.
+👤 FACE QUALITY (Nano Banana common failure) :
+Photorealistic faces — clear eyes / nose / mouth, natural skin texture, no smudge / no melted features. For small/medium-distance subjects, prefer 3/4 angle, sunglasses, or hat brim shadow to mask details.
 
-If the scene does not have a natural place for a human subject (no empty existing seat clearly visible AND no water to enter AND no solid ground to stand on), then DO NOT ADD anyone. Return the image unchanged. A scene without a subject is INFINITELY better than a scene with invented furniture.
+⛔ NEGATIVE — these break the photo, avoid absolutely :
+- Inventing furniture / decor / platforms / steps / extra deck → BIGGEST failure mode
+- Subjects in physically impossible positions : walking on water, floating dry, standing on a daybed top, leaning over rooftop edge, on the wrong side of a railing / barrier / glass panel
+- Distorted faces, blurry / faceless / melted / mannequin-like, eyeless, plastic CGI skin
+- Lingerie / sheer / micro-bikini / nipple visible / staged sultry pose / heavy contoured makeup. Swimwear stays tasteful (Reformation / Solid&Striped aesthetic).
+- Smartphones in subject's hand, flashy jewelry, business attire on a pool scene
+- Cartoon / oversaturated CGI palette, harsh HDR, blown highlights, studio strobe flat lighting
+"""
 
-ABSOLUTE FRAMING LOCK (RULE #2):
-- DO NOT zoom in or out. DO NOT crop. DO NOT change the camera angle, height, or focal length.
-- Preserve the EXACT same field of view and image dimensions as the input.
-- If you cannot honor this constraint, return the image unchanged.
-- The output MUST look like the SAME photograph, just with a human subject added.
-
-🚨 STRUCTURAL PRESERVATION (CRITICAL — VIOLATION CAUSES IMMEDIATE REJECTION):
-
-The ONLY thing you are allowed to add to this image is the requested human subject(s).
-EVERYTHING ELSE in the original must remain PIXEL-IDENTICAL.
-
-You MAY NOT, under any circumstance:
-- Remove, hide, or modify ANY object visible in the original — including: TVs and screens (even if turned off / black), signs, panels, posters, balustrades, railings, drainage grilles, manholes, electrical boxes, AC units, fire-escape staircases, surveillance cameras, antennas, cables, columns, walls, floors.
-- Change the architecture or any building visible in the background (windows, balconies, fire escapes, neighbouring buildings, skyline, vegetation).
-- Replace existing furniture, decor, or scenic elements with "prettier" ones (a black TV stays a black TV — not artwork ; an industrial railing stays as is).
-- Alter the scene composition, perspective, lighting direction, or color grading.
-- Add ANY plant, vase, prop, decoration, drink, or accessory that is not requested for the subject(s).
-- "Improve" or "clean up" perceived eyesores. THAT IS NOT YOUR JOB. The cleanup is handled by a separate dedicated step.
-
-Concretely : if the original has an ugly screen on a wall and an industrial drainage grille on the floor, both MUST appear UNCHANGED in your output. The only difference between input and output should be a human-shaped region where the subject is placed (and the immediate shadow/reflection of that subject).
-
-If you cannot follow the SCENARIO described below without modifying the surrounding scene, return the image UNCHANGED. Do not improvise an alternative pose.
-
-🎬 THE ONLY SCENARIO YOU MUST EXECUTE (no alternatives, no creative variations) :
-{scenario_block if scenario_block else "(no human scenario was selected for this photo — DO NOT add anyone; return the image unchanged.)"}
-
-{safe_zones_block}
+    # ━━ Assemble final ━━
+    return f"""{barrier_lock_block}{where_block}
+{who_block}
 {pool_float_block}
-
-🎨 GLOBAL MOOD & STYLE:
-{vibe_mood}. Mid-action, candid moment, slight asymmetry — feels like a real captured moment, not staged. Premium-accessible editorial travel-magazine feel.
-
-🔢 QUANTITY HARD LOCK — EXACTLY {target_n} HUMANS, NO MORE NO LESS:
-- 🎯 TARGET = **{target_n}** subjects (computed from persona × scene capacity).
-- This is a HARD MAX. You MUST count the humans you place and STOP at {target_n}. NEVER add a {target_n}+1th person under any pretext. {target_n} = {target_n}, period.
-- If for "compositional balance" you feel like adding one more, DON'T. The instruction is {target_n} exactly.
-- NEVER exceed the visible EMPTY capacity of the scene either. If there's only 1 empty lounger + 1 water zone → max 2 people total, even if target_n says more.
-- TRADE-OFF RULE: if you cannot place {target_n} subjects on EXISTING furniture/water WITHOUT inventing → PLACE FEWER (target_n − 1, target_n − 2, or even just 1). Better fewer than fabricated.
-- ALL added subjects share the SAME camera-relative scale (perspective). One person at 10m is half the size of one at 5m.
-- Place subjects in ONE coherent group (or 2 max if persona = families/groups). Do not scatter in 3+ disconnected zones.
-
-🔢 COUNTING DOUBLE-CHECK (before finalizing):
-Before submitting your output, count the visible humans you've added. If count > {target_n}, REMOVE the extra people. The output must have EXACTLY {target_n} ADDED humans (in addition to any humans that were already in the original photo, which you must preserve).
-
-📏 SCALE LOCK — match the subject size to existing visible furniture (CRITICAL — non-negotiable) :
-The HUMAN HEIGHT in the output is fully constrained by the size of the existing furniture/architecture visible in the input. Use these references :
-- A STANDING ADULT is ≈ 2× the height of an empty pool lounger / daybed (lounger ≈ 80cm tall, adult ≈ 170cm). If the lounger in the photo appears N pixels tall, the standing adult should be ≈ 2N pixels tall.
-- An ADULT SITTING UPRIGHT on a lounger / chair is ≈ 1.3× the height of the seat (head sticking up).
-- An ADULT LYING / RECLINING on a lounger occupies ≈ 1× the lounger length.
-- An ADULT'S HEAD in the water (pool swimming) is ≈ ½ the width of a typical pool lane (≈ 1m).
-
-⚠️ If you cannot find a visible chair/lounger/parasol/window in the frame to anchor the scale, the photo is likely a wide shot or aerial — DO NOT add a full human, instead OMIT the addition (return the image WITHOUT a human) rather than guessing scale. A wrong-scale human (giant or tiny) is much worse than no human.
-
-Common failure mode to avoid : in a "panoramic" frame where the pool is small (e.g. drone-style shot of the whole hotel), do NOT place a person standing next to the pool sized like a regular ground-level photo — they would appear as 2-3× the pool width, completely breaking realism.
-
-PHYSICAL SAFETY & PLAUSIBILITY (CRITICAL — non-negotiable):
-
-🔥 PRIORITY RULE FOR POOL/WATER SCENES — the most common failure mode:
-If the photo features a swimming pool and there is NO clearly visible empty lounger/daybed in the foreground, place the subject IN the water:
-  - Swimming gently breaststroke (head above water, calm wake)
-  - Emerging from the pool at the edge (water dripping, hair wet, elbows leaning on rim)
-  - OR sitting at the pool edge with legs/calves submerged in water
-This is FAR BETTER than inventing a lounger/raft/daybed. Body must be partially submerged, hair wet if in water, water displacement visible, splashes acceptable.
-
-🌊🚨 WATER DEPTH PHYSICS — THE #1 FAILURE MODE ON POOL PHOTOS — READ THIS TWICE :
-
-For ANY subject standing in pool water, the water level MUST hide AT LEAST the belly button — preferably reaching the chest/sternum (CHEST-DEEP is the DEFAULT and CORRECT level). A pool with shallow water visible at knee or thigh level on standing adults looks LIKE THE POOL HAS NO BOTTOM — it ruins the photo immediately and makes the hotel look fake.
-
-VISUAL TEST you MUST apply before finalizing : look at the subject's body in the water :
-  ✅ ACCEPTABLE : water at chest / sternum / shoulders / armpits (only upper torso + head visible)
-  ✅ ACCEPTABLE : water at upper waist (just above belly button) — if subject is clearly mid-stride walking into deeper water
-  ✅ ACCEPTABLE : subject SITTING on the pool edge with only feet/calves in water (NOT standing)
-  ✅ ACCEPTABLE : subject swimming horizontal, head + upper-back above water
-  ❌ FORBIDDEN : water below the belly button on a standing subject (hips visible, swimsuit waistband visible, shorts waistband visible)
-  ❌ FORBIDDEN : water at the thighs / mid-thigh on a standing subject — this makes the pool look depthless
-  ❌ FORBIDDEN : water at the knees on a standing subject — IMMEDIATE photo failure
-  ❌ FORBIDDEN : subject standing on what looks like the pool floor when there's no visible Baja shelf / step in the input
-
-RULES :
-  1. Default position : CHEST-DEEP for standing adults. If unsure, go DEEPER not shallower.
-  2. If you cannot achieve chest-deep (e.g. you put the subject too close to the camera) → put them at the pool EDGE sitting on the dry deck, calves dangling in water.
-  3. Multiple subjects in the same pool → ALL the same water level. Geometric impossibility otherwise.
-  4. NEVER show a step/shelf that is not in the original input. If the input pool has no visible Baja shelf, the floor is at swimming depth (1.2m+) everywhere.
-  5. If you fail rules 1-4, the photo will be REJECTED and we'll fall back to the original. So if you can't honor them, DON'T add the subject.
-
-⚠️ FINAL CHECK BEFORE OUTPUT : for each standing subject in water, does the water hide the belly button? If NO → re-pose them deeper or put them at the edge. If you're still not sure → don't add them.
-
-- Subjects MUST be placed on plausible, safe supports: seated on chairs / loungers / sofas / daybeds **THAT ALREADY EXIST IN THE PHOTO**, OR standing on solid floor/ground/decking, OR realistically immersed IN water (swimming, floating, wading waist-deep, sitting at pool edge).
-- **DO NOT INVENT OR ADD any furniture, daybed, lounger, raft, platform, float, or any object that is not visibly present in the original input image.** If there is no plausible existing seat for a subject AND the scene has water → place them IN the water (priority rule above). Otherwise, place them standing on solid ground, OR DO NOT add the subject at all.
-- NEVER ON the water surface as if standing on it. NEVER walking on water. NEVER floating dry without realistic immersion. NEVER on a fabricated raft/float that isn't in the original.
-- If a subject is IN the pool, ensure realistic immersion: body partially submerged (waist-deep, or fully reclining for floating pose), water displacement around them, wet hair/skin if relevant, splashes acceptable. The water surface MUST react to their presence.
-- NEVER standing or sitting ON TOP of furniture meant for lying (no standing on daybeds, sun loungers, or sofas).
-- NEVER on the wrong side of any safety barrier, railing, glass panel, or balustrade. Subjects must always be on the safe interior side of any rooftop/balcony/pool railing.
-- NEVER in physically dangerous, awkward, or improbable positions (no climbing, no leaning over edges, no unsupported balancing).
-- Respect human-scale physics: feet touch ground or seat, hands rest on plausible surfaces, weight is correctly supported.
-- If the scene has a railing/barrier (rooftop, balcony, pool edge, terrace), keep ALL subjects on the SAME safe side as the existing furniture.
-
-FACE QUALITY (CRITICAL — most common Nano Banana failure mode):
-- If the subject(s) occupy LESS than 25% of the frame height (= small/medium-distance figure), prefer 3/4 angle or PROFILE pose. Frontal small faces tend to come out distorted/blurred ("AI-old-school" look).
-- For ALL subjects regardless of size : faces must be PHOTOREALISTIC with clearly drawn eyes, nose, mouth, and natural skin texture — NOT smudged, NOT eyeless, NOT mannequin-like, NOT plastic.
-- For subjects at medium distance, eyes can be lightly closed (sunbathing, wearing sunglasses, looking down) to avoid eye-rendering issues.
-- Sunglasses are GOOD on small/medium-distance subjects (hides eye detail issues).
-- If you cannot render a clean photorealistic face at the required scale, use a hat brim casting shadow on the face, OR a side-profile with hair partially covering, OR sunglasses — anything that masks the precise face details while keeping the figure recognizable as human.
-
-LIGHTING & REALISM:
-Strong natural daytime sunlight, consistent with the existing scene direction.
-Natural highlights on skin and clothing, crisp shadows that match the rest of the image.
-Skin tones warm, consistent with sunlight, photorealistic textures (not over-sharpened).
-
-INTEGRATION RULES:
-- Match exact perspective, scale, and angle of the existing furniture
-- Bodies interact correctly with chairs/loungers/tables: natural weight, correct contact, no floating
-- Cast shadows MUST match the existing lighting direction
-- Do not add or remove any object from the scene; do not alter the architecture or decor
-- Preserve original composition and framing exactly
-
-STYLE:
-Editorial luxury lifestyle photography. Kodak Vision3 500T look: warm highlights, neutral skin tones,
-subtle film grain, soft contrast, slight natural lens flare if relevant. Sony A7R IV / Canon R5
-aesthetic: 35mm, f/4, ISO 100, crisp natural detail, candid "caught moment" feel.
-Premium-accessible, never catalog-style, never stock-photo-style.
-
-NEGATIVE PROMPT (HARD avoid):
-- ANY zoom-in, ANY crop, ANY camera angle change vs input
-- removing, hiding, or modifying ANY existing element of the scene : TVs, screens (even off/black), signs, panels, posters, drainage grilles, manholes, AC units, fire escapes, surveillance cameras, antennas, balustrades, industrial railings, electrical boxes, cables. Black screens stay black. Ugly stuff stays ugly.
-- altering, replacing, or "beautifying" any architecture, window, balcony, fire escape, neighbouring building, or skyline visible in background
-- 🚨 SHRINKING / RESIZING / MOVING any existing element (pool, deck, plants, furniture, walls) to "make space" for the subject — the existing scene must remain pixel-identical in size and position
-- adding any new plant, vase, prop, decor, lamp, food/drink, or accessory not requested for the subject(s)
-- inventing, adding, or hallucinating new furniture — ESPECIALLY a new lounger, daybed, beach chair, sofa, raft, towel-on-the-ground, ottoman, table, pool ladder, pool steps, handrail, ladder of any kind — that is not 100% clearly visible in the input{(" (NOTE: ONE pool float is conditionally allowed per the POOL FLOAT block above — but ONLY that one and ONLY following its rules)" if pool_float_hint else " ; floats / pool noodles also forbidden")}
-- subject wearing street clothes / long dress / robe / business attire on a pool scene — the subject MUST be in proper SWIMWEAR (bikini / one-piece swimsuit / monokini) on pool scenes
-- subjects standing on top of water as if walking on it, or floating dry without a flotation device
-- subjects standing in pool with knees / thighs / hips / belly button / swimsuit waistband / shorts waistband visible ABOVE the water (impossible without a step/shelf — water must reach CHEST level for standing adults)
-- inconsistent water levels between multiple subjects in the same pool
-- standing on daybeds / sun loungers / sofas / tables / any furniture meant for sitting or lying
-- subjects on the wrong side of railings, barriers, glass panels, balustrades
-- leaning over rooftop edges, climbing structures, unsupported balancing
-- impossible / dangerous / acrobatic poses, levitation, floating bodies
-- inconsistent scale between subjects (one person twice the size of another at the same distance)
-- more than 3 people total, scattered groups in 3+ disconnected zones
-- doubled limbs, distorted anatomy, extra fingers, mismatched shadows
-- 🚨 BLURRY / SMUDGED / DISTORTED faces, faceless figures, melted faces, mannequin-like skin, eyeless figures, missing nose/mouth, plastic CGI face
-- posed models, looking at camera, fake smiles, stiff postures, crowded scene
-- business attire, drunk/loud party, recognizable faces
-- harsh HDR, over-saturation, CGI look, over-sharpened plastic skin, glowing edges
-"""
+{how_block}"""
 
 
 # --- Stratégie : router selon l'analyse Gemini ---
@@ -1103,6 +1480,7 @@ def _pick_main_action(
     add_character: bool = False,
     persona_override: str | None = None,
     photo_filename: str | None = None,
+    image_path: Path | None = None,
 ) -> dict:
     """Choisit l'action principale (hors crop) à appliquer à la photo."""
     if not analysis:
@@ -1223,6 +1601,47 @@ def _pick_main_action(
         # ━ Pool float occasionnel (déterministe par filename, voir pick_pool_float_hint) ━
         pool_float = pick_pool_float_hint(cat, vibe, photo_filename)
         fallback_tag = " [fallback safe_zones]" if used_fallback else ""
+
+        # ━━ V5 Vision-Generated Scenario (Martin 13/05/2026) ━━━━━━━━━━━━━━━━━━━
+        # Au lieu d'utiliser le catalogue Python hardcoded (qui est aveugle à la
+        # photo réelle), on demande à Gemini Vision de RÉDIGER le scenario
+        # spécifiquement adapté à CETTE photo. Coût : +$0.001/photo.
+        #
+        # Activé par défaut. Pour rollback : export USE_LEGACY_SCENARIO_CATALOG=1
+        # Si scenario_writer échoue (image absente, API down, JSON malformé) →
+        # fallback automatique vers l'ancien catalogue (pas de break pipeline).
+        scenario_block_override = None
+        scenario_writer_meta = None
+        if os.getenv("USE_LEGACY_SCENARIO_CATALOG") != "1" and image_path is not None:
+            try:
+                from scenario_writer import write_scenario
+                sw_result = write_scenario(
+                    image_path=image_path,
+                    category=cat,
+                    vibe=vibe,
+                    persona=persona,
+                )
+                if sw_result.get("feasibility") == "ok" and sw_result.get("scenario_block"):
+                    scenario_block_override = sw_result["scenario_block"]
+                    # Optionnel : si Vision dit max_subjects < ce que Python calcule,
+                    # on respecte Vision (= sa lecture de la photo, plus fiable)
+                    sw_max = sw_result.get("max_subjects_realistic")
+                    if sw_max and sw_max < (max_h or 99):
+                        max_h = sw_max
+                scenario_writer_meta = {
+                    "used": scenario_block_override is not None,
+                    "feasibility": sw_result.get("feasibility"),
+                    "skip_reason": sw_result.get("skip_reason"),
+                    "max_subjects_realistic": sw_result.get("max_subjects_realistic"),
+                    "primary_anchor": sw_result.get("primary_anchor"),
+                    "pitfalls": sw_result.get("pitfalls_specific_to_this_photo"),
+                    "cost_usd": (sw_result.get("_meta") or {}).get("cost_usd", 0),
+                    "duration_ms": (sw_result.get("_meta") or {}).get("duration_ms", 0),
+                }
+            except Exception as e:
+                print(f"[scenario_writer] failed for {photo_filename}: {e} — fallback catalogue")
+                scenario_writer_meta = {"used": False, "error": str(e)[:200]}
+
         return {
             "action": "ai_add_character",
             "prompt": build_persona_prompt(
@@ -1230,8 +1649,10 @@ def _pick_main_action(
                 safe_zones=safe_zones, unsafe_zones=unsafe_zones,
                 max_humans=max_h, capacity=capacity_total,
                 pool_float_hint=pool_float,
+                scenario_block_override=scenario_block_override,
             ),
-            "reason": f"ajout personnage IA ({persona}, target={compute_target_humans(persona, capacity_total or 2)}) sur {cat or 'scène vide'}{fallback_tag}" + (f" + bouée 🍩 {pool_float[:30]}…" if pool_float else ""),
+            "reason": f"ajout personnage IA ({persona}, target={compute_target_humans(persona, capacity_total or 2)}) sur {cat or 'scène vide'}{fallback_tag}" + (f" + bouée 🍩 {pool_float[:30]}…" if pool_float else "") + (" [Vision scenario]" if scenario_block_override else ""),
+            "scenario_writer": scenario_writer_meta,
             "persona_used": persona,
             "capacity_used": capacity_total,
             "pool_float_used": pool_float,
@@ -1464,6 +1885,7 @@ def pick_strategy(
     add_character: bool = False,
     persona_override: str | None = None,
     photo_filename: str | None = None,
+    image_path: Path | None = None,
 ) -> dict:
     """Construit la séquence d'actions à appliquer à une photo (chaînage possible, max 2 IA).
 
@@ -1483,7 +1905,7 @@ def pick_strategy(
     - Sinon : step principale unique
     """
     crop_step = _maybe_crop_step(analysis)
-    main_step = _pick_main_action(analysis, category, personas_allowed, vibe, add_character, persona_override, photo_filename)
+    main_step = _pick_main_action(analysis, category, personas_allowed, vibe, add_character, persona_override, photo_filename, image_path=image_path)
 
     # ━ Si on a déjà un step IA (clutter / lighting / add_character), on évite le crop additionnel ━
     # Le crop modifie le cadrage, l'IA ensuite peut amplifier la dérive (régénération sur image cropée).
@@ -1527,11 +1949,34 @@ def pick_strategy(
             "prompt": PROMPT_ENSOLEILLEMENT,
             "reason": "transformation nuit→jour avant ajout perso (étape 1/2)",
         })
+        # V5 : utilise scenario_writer également pour le chaînage lighting→character
+        chained_scenario_override = None
+        chained_sw_meta = None
+        if os.getenv("USE_LEGACY_SCENARIO_CATALOG") != "1" and image_path is not None:
+            try:
+                from scenario_writer import write_scenario
+                sw_result = write_scenario(image_path=image_path, category=cat, vibe=vibe, persona=persona)
+                if sw_result.get("feasibility") == "ok" and sw_result.get("scenario_block"):
+                    chained_scenario_override = sw_result["scenario_block"]
+                    sw_max = sw_result.get("max_subjects_realistic")
+                    if sw_max and (max_h is None or sw_max < max_h):
+                        max_h = sw_max
+                chained_sw_meta = {
+                    "used": chained_scenario_override is not None,
+                    "feasibility": sw_result.get("feasibility"),
+                    "cost_usd": (sw_result.get("_meta") or {}).get("cost_usd", 0),
+                }
+            except Exception as e:
+                print(f"[scenario_writer chain] failed for {photo_filename}: {e}")
+                chained_sw_meta = {"used": False, "error": str(e)[:200]}
+
         steps.append({
             "action": "ai_add_character",
             "prompt": build_persona_prompt(persona, cat, vibe, safe_zones=safe_zones,
-                                           unsafe_zones=unsafe_zones, max_humans=max_h),
-            "reason": f"ajout personnage IA ({persona}) sur scène ensoleillée (étape 2/2)",
+                                           unsafe_zones=unsafe_zones, max_humans=max_h,
+                                           scenario_block_override=chained_scenario_override),
+            "reason": f"ajout personnage IA ({persona}) sur scène ensoleillée (étape 2/2)" + (" [Vision scenario]" if chained_scenario_override else ""),
+            "scenario_writer": chained_sw_meta,
         })
     else:
         # Cas spécial : ajout perso ET clutter détecté → on chaîne clutter avant add_character
@@ -1710,6 +2155,42 @@ def is_add_character_candidate(analysis: dict) -> bool:
 
 
 # --- Implémentation : retouches locales (Pillow) ---
+
+def upscale_lanczos_inplace(path: Path, factor: float = FINAL_UPSCALE_FACTOR) -> dict | None:
+    """Upscale Lanczos en place. Retourne metadata ou None si factor ≤ 1.0.
+
+    Pourquoi inplace : on remplace le fichier final pour que le pipeline aval
+    (multi_format_cropper, PDF export, ZIP) travaille directement sur la HD.
+
+    Lanczos = interpolation classique :
+    - N'ajoute PAS de détail réel (vs Real-ESRGAN qui hallucinerait des textures)
+    - Préserve les arêtes nettes (mieux que Bicubic / Bilinear)
+    - Coût zéro, ~0.2-0.5s par photo
+    """
+    if factor <= 1.0:
+        return None
+    try:
+        with Image.open(path) as im:
+            w, h = im.size
+            new_w, new_h = int(w * factor), int(h * factor)
+            upscaled = im.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            # Préserve le format source : JPEG quality 92 (sweet spot poids/qualité)
+            fmt = (im.format or "JPEG").upper()
+            save_kwargs = {"quality": 92, "optimize": True} if fmt in ("JPEG", "JPG") else {}
+            # Garde le format d'origine (JPEG/PNG/WEBP). PIL infère depuis l'extension.
+            upscaled.save(path, **save_kwargs)
+        return {
+            "method": f"lanczos_x{factor:g}",
+            "source_size": [w, h],
+            "final_size": [new_w, new_h],
+            "duration_ms": 0,  # négligeable, pas mesuré
+            "cost_usd": 0.0,
+        }
+    except Exception as e:
+        # Si l'upscale plante on garde la photo originale plutôt que de tout casser
+        print(f"  [upscale] échec sur {path.name} : {e}", file=__import__('sys').stderr)
+        return {"method": "lanczos_failed", "error": str(e)[:120]}
+
 
 def enhance_local_crop(input_path: Path, output_path: Path, crop_box_pct: dict) -> dict:
     """Recadrage local via Pillow à partir d'une box recommandée par Gemini (en %).
@@ -1969,6 +2450,18 @@ VIOLATION_REINFORCEMENT = {
     "inconsistent_scale": (
         "MAINTAIN CONSISTENT SCALE: any subjects added must share the same camera-relative scale. A person at 10m from camera is roughly half the apparent size of a person at 5m. Verify perspective rigorously. If unsure, add fewer subjects."
     ),
+    "subject_oversized": (
+        "🚨 CRITICAL VIOLATION — SUBJECT(S) TOO LARGE : in your previous output, the subject(s) "
+        "occupied too much of the frame (head > 15% of frame height on a wide shot, or full "
+        "body > 30% of frame width). Real travel photography places subjects as ONE element "
+        "AMONG MANY in the scene, NOT as the focal point. "
+        "Re-do : place the subject(s) FURTHER BACK / DEEPER in the scene (mid-ground or "
+        "background), at a size where their full body occupies AT MOST 20% of the frame width "
+        "and their head AT MOST 8% of the frame height. Reference : the subject should be "
+        "comparable in scale to existing furniture (a standing person ≈ 2× lounger height — "
+        "NOT 4× or 5×). If you cannot fit them that small while keeping them recognizable, "
+        "OMIT them entirely (return image with no subject)."
+    ),
     "architecture_changed": (
         "DO NOT ALTER THE ARCHITECTURE: walls, structures, decor, plants, water shape, sky, and overall composition must remain identical to the input. Only requested transformations apply."
     ),
@@ -1988,39 +2481,147 @@ VIOLATION_REINFORCEMENT = {
     "lighting_break": (
         "MATCH EXISTING LIGHTING: shadows on added subjects must follow the same direction and softness as the existing shadows in the photo. No mismatched key light, no different time of day on the subject vs the scene."
     ),
+    "decor_elements_lost": (
+        "🚨 CRITICAL VIOLATION — DECORATIVE ELEMENTS REMOVED : in your previous output, you "
+        "DELETED decorative elements that were present in the input (planters with plants, "
+        "vases, decorative objects, cushions, art pieces, lamps). These elements are PART "
+        "of the venue identity and MUST be preserved EXACTLY as in the input. "
+        "Re-do : keep ALL plants, planters, vases, decorations, cushions, objects on tables, "
+        "art pieces, lamps, and any decorative item visible in the input photo. Only change "
+        "the lighting QUALITY (color temperature, intensity, direction) on the existing pixels — "
+        "NEVER remove a planter even if it 'doesn't fit a sunlit aesthetic'. The plants stay. "
+        "The vases stay. The art stays. EVERYTHING stays."
+    ),
 }
 
 
-def _reinforced_prompt(original_prompt: str, violations: list[str]) -> str:
-    """Construit un prompt 'durci' en concaténant les renforcements ciblés sur les violations détectées."""
+def _swap_scenario(prompt: str, from_zones: list[str], to_zone: str) -> tuple[str, bool, str | None]:
+    """Remplace le bloc scenario du prompt par un scenario `to_zone` plus safe.
+
+    Cherche d'abord lequel des `from_zones` est présent dans le prompt (pour tous les
+    personas connus), puis swap par le scenario `to_zone` du même persona.
+
+    Returns: (new_prompt, was_swapped, swapped_from_zone)
+    """
+    for persona in ("couples", "solos", "families", "small_groups", "groups"):
+        for from_zone in from_zones:
+            src = _SCENARIO_CATALOG.get((persona, from_zone))
+            dst = _SCENARIO_CATALOG.get((persona, to_zone))
+            if src and dst and src in prompt:
+                return prompt.replace(src, dst), True, f"{persona}/{from_zone}"
+    return prompt, False, None
+
+
+# Violations pour lesquelles on bascule vers un scenario "safe haven" au retry.
+# Logique : si la 1ère tentative a inventé du mobilier OU remodelé la scène,
+# c'est que le scenario demandé était trop spécifique vs le décor réel. Au lieu
+# de répéter, on bascule vers POOL_EDGE (assis au bord, pieds dans l'eau) qui
+# ne nécessite AUCUN mobilier inventable — la photo doit juste avoir une piscine.
+# Fallback secondaire OUTDOOR_DECK (debout sur le sol) si pas de piscine.
+_SCENARIO_SWAP_TARGETS = {
+    "invented_furniture": ("pool_edge", "outdoor_deck"),
+    "architecture_changed": ("pool_edge", "outdoor_deck"),
+    "scene_regenerated": ("pool_edge", "outdoor_deck"),
+    "shallow_water_illusion": ("pool_edge", None),  # already covered
+    "subject_on_water": ("pool_edge", "outdoor_deck"),
+    # subject_wrong_side_barrier : swap vers pool_edge (sujet ASSIS sur le rebord
+    # piscine, pieds dans l'eau, du bon côté) — c'est la position la plus safe
+    # qui ne nécessite aucun mobilier inventé et garde le sujet visible côté safe.
+    "subject_wrong_side_barrier": ("pool_edge", "outdoor_deck"),
+}
+
+# Liste des zone_types qu'on peut swap (= scenarios "complexes" qui risquent l'invention)
+_SWAPPABLE_FROM_ZONES = ["in_water", "lounger", "cabana_daybed", "rooftop_deck",
+                          "indoor_seating", "gym_mat", "dining_table"]
+
+
+def _reinforced_prompt(original_prompt: str, violations: list[str]) -> tuple[str, list[str]]:
+    """Construit un prompt 'durci' en concaténant les renforcements ciblés + swap scenario.
+
+    Stratégie de retry (Martin 12/05/2026) : un simple header de renforcement ne suffit pas
+    quand Gemini Image a inventé du mobilier ou remodelé la scène — l'instruction du scenario
+    original (« cabana daybed », « 3 adjacent loungers », etc.) reste plus forte que le
+    renforcement et le bug se reproduit.
+
+    Solution : on SWAP entièrement le bloc scenario vers un scenario "safe haven" :
+      - `pool_edge` : assis au bord de la piscine, pieds dans l'eau. Ne nécessite AUCUN
+        mobilier inventable — il faut juste une piscine et un bord visible.
+      - `outdoor_deck` : debout sur le sol existant. Fallback si pas de piscine.
+
+    Returns: (prompt_durci, applied_strategies)
+    """
     if not original_prompt or not violations:
-        return original_prompt
+        return original_prompt, []
+
+    applied: list[str] = []
+    prompt = original_prompt
+
+    # ━ Stratégie 1 : swap scenario vers safe haven ━
+    # On regarde la 1ère violation actionnable qui demande un swap.
+    for v in violations:
+        targets = _SCENARIO_SWAP_TARGETS.get(v)
+        if not targets:
+            continue
+        primary_target, secondary_target = targets
+
+        # Tente swap vers le primary (pool_edge)
+        new_prompt, swapped, swapped_from = _swap_scenario(prompt, _SWAPPABLE_FROM_ZONES, primary_target)
+        if swapped:
+            prompt = new_prompt
+            applied.append(f"scenario_swap_{swapped_from.split('/')[1]}_to_{primary_target}")
+            break
+
+        # Si pas de match (scenario actuel n'est pas swappable, ex: pool_edge déjà), tente secondary
+        if secondary_target:
+            new_prompt, swapped, swapped_from = _swap_scenario(prompt, _SWAPPABLE_FROM_ZONES, secondary_target)
+            if swapped:
+                prompt = new_prompt
+                applied.append(f"scenario_swap_{swapped_from.split('/')[1]}_to_{secondary_target}")
+                break
+
+    # ━ Stratégie 2 : header de renforcement classique ━
     blocks = []
     for v in violations:
         text = VIOLATION_REINFORCEMENT.get(v)
         if text:
             blocks.append(f"[CRITICAL — RETRY AFTER VIOLATION '{v}']\n{text}")
-    if not blocks:
-        return original_prompt
-    header = (
-        "PREVIOUS ATTEMPT FAILED automated quality check. The output had violations listed below. "
-        "You MUST avoid repeating these mistakes in this new attempt.\n\n"
-        + "\n\n".join(blocks)
-        + "\n\n[ORIGINAL TASK INSTRUCTION FOLLOWS]\n\n"
-    )
-    return header + original_prompt
+    if blocks:
+        header = (
+            "PREVIOUS ATTEMPT FAILED automated quality check. The output had violations listed below. "
+            "You MUST avoid repeating these mistakes in this new attempt.\n\n"
+            + "\n\n".join(blocks)
+            + "\n\n[ORIGINAL TASK INSTRUCTION FOLLOWS]\n\n"
+        )
+        prompt = header + prompt
+        applied.append("reinforcement_header")
+
+    return prompt, applied
 
 
 # Violations qu'on tente de corriger via retry. Les autres (lighting_break, etc. en contexte ai_lighting)
 # sont déjà filtrées plus tôt dans ai_validator.
+# ⚠️ INVARIANT : toute violation présente dans VIOLATION_REINFORCEMENT (= prompt durci défini)
+# DOIT figurer ici, sinon le pipeline détecte mais ne corrige pas. Exception : `lighting_break`
+# qui est whitelisté pour ai_lighting (effet voulu nuit→jour modifie inévitablement les ombres).
 ACTIONABLE_VIOLATIONS = {
     "invented_furniture",
     "subject_on_water",
+    "shallow_water_illusion",       # Bug Martin 12/05/2026 yotel-miami_pool_01 :
+                                     # validator détectait "Piscine sans fond" mais retry pas
+                                     # déclenché → output IA bugué publié tel quel.
     "subject_on_furniture_top",
     "subject_wrong_side_barrier",
+    "subject_oversized",            # Martin 13/05/2026 : Moxy rooftop trio géant
+                                     # → retry avec contrainte distance/scale supplémentaire.
     "scene_regenerated",
     "inconsistent_scale",
     "architecture_changed",
+    "architecture_invented",         # Critique : fenêtres inventées sur ai_lighting
+                                     # (cf. règle métier validator) — retry obligatoire.
+    "decor_elements_lost",          # Martin 13/05/2026 : Moxy rooftop trio — plantes/bacs
+                                     # disparus après ai_lighting. Pas whitelisté pour lighting
+                                     # car la disparition d'éléments décoratifs n'est JAMAIS
+                                     # justifiée par un changement de luminosité.
 }
 
 
@@ -2125,12 +2726,16 @@ def enhance_one(input_path: Path, strategy: dict, output_dir: Path) -> dict:
             if actionable_violations and last_ai_step_input and last_ai_step_index is not None:
                 retry_attempted = True
                 last_step = steps[last_ai_step_index]
-                reinforced = _reinforced_prompt(last_step.get("prompt", ""), actionable_violations)
+                reinforced, retry_strategies = _reinforced_prompt(last_step.get("prompt", ""), actionable_violations)
+                # Trace les stratégies appliquées sur le step (visible dans ai_validation pour debug UI)
+                if retry_strategies:
+                    last_step["retry_strategies"] = retry_strategies
                 try:
                     res2 = enhance_ai(last_ai_step_input, output_path, reinforced)
                     total_cost_usd += res2.get("cost_usd", 0)
                     total_duration_ms += res2.get("duration_ms", 0)
-                    methods.append(f"retry_after_{','.join(actionable_violations[:2])}")
+                    suffix = ",".join(retry_strategies) if retry_strategies else ",".join(actionable_violations[:2])
+                    methods.append(f"retry_after_{suffix}")
                     # Re-validation
                     ai_validation2 = ai_validator.validate_ai_output(
                         input_path, output_path,
@@ -2150,25 +2755,59 @@ def enhance_one(input_path: Path, strategy: dict, output_dir: Path) -> dict:
                     ai_validation = ai_validation2
 
                     if still_bad:
-                        # ━ FALLBACK : on remplace l'output par l'ORIGINAL non retouché ━
-                        # Mieux vaut une photo non retouchée mais propre, qu'une photo IA pétée.
+                        # ━ FALLBACK INTELLIGENT (Martin 13/05/2026) ━
+                        # Si chaînage type [ai_lighting → ai_add_character] et que add_character
+                        # foire, on fallback sur le RÉSULTAT INTERMÉDIAIRE (= la photo jour après
+                        # lighting, sans humain). Pas sur l'input brut (= scène nuit).
+                        # `last_ai_step_input` pointe sur l'input de la dernière étape IA :
+                        #   - Si chaînage : c'est l'output de l'étape précédente (déjà retouchée)
+                        #   - Si étape IA unique : c'est l'input brut = même chose qu'input_path
                         try:
-                            shutil.copy(input_path, output_path)
-                            fallback_to_original = True
-                            methods.append("fallback_original")
-                            ai_validation["fallback_to_original"] = True
+                            had_chain = last_ai_step_input != input_path and last_ai_step_input.exists()
+                            if had_chain:
+                                # On garde la version "après lighting" — la transformation nuit→jour
+                                # est conservée, juste l'ajout perso est annulé.
+                                shutil.copy(last_ai_step_input, output_path)
+                                fallback_to_original = True
+                                methods.append("fallback_to_intermediate")
+                                ai_validation["fallback_to_original"] = True
+                                ai_validation["fallback_kind"] = "intermediate_step"
+                                ai_validation["fallback_kept_step"] = steps[last_ai_step_index - 1]["action"] if last_ai_step_index > 0 else "unknown"
+                            else:
+                                # Pas de chaînage utile : on tombe sur l'input brut (cas par défaut)
+                                shutil.copy(input_path, output_path)
+                                fallback_to_original = True
+                                methods.append("fallback_original")
+                                ai_validation["fallback_to_original"] = True
+                                ai_validation["fallback_kind"] = "input_raw"
                         except Exception:
                             pass
                 except Exception as e:
                     # Retry IA crashe → on garde l'output original IA (pas de fallback automatique)
                     ai_validation["retry_error"] = str(e)[:200]
 
-        # Cleanup des intermediaires (APRÈS les retries éventuels qui pouvaient s'en servir)
-        for p in intermediate_paths:
-            try:
-                p.unlink()
-            except Exception:
-                pass
+        # ━━ Sauvegarde des intermédiaires pour debug (Martin 13/05/2026) ━━━━━━━
+        # Sur chaînage (ai_lighting → ai_add_character), on conserve l'output de
+        # chaque step intermédiaire dans `<enhanced_dir>/_intermediates/` pour
+        # pouvoir inspecter visuellement OÙ un bug s'est produit (ex: les plantes
+        # ont-elles disparu après step 1 ou step 2 ?). Coût disque négligeable.
+        # Désactivable via env : KEEP_AI_INTERMEDIATES=0
+        if os.getenv("KEEP_AI_INTERMEDIATES", "1") == "1" and intermediate_paths:
+            interm_dir = output_path.parent / "_intermediates"
+            interm_dir.mkdir(parents=True, exist_ok=True)
+            for p in intermediate_paths:
+                try:
+                    final_path = interm_dir / p.name
+                    if p.exists():
+                        p.rename(final_path)
+                except Exception:
+                    pass
+        else:
+            for p in intermediate_paths:
+                try:
+                    p.unlink()
+                except Exception:
+                    pass
 
         # ━━━ Post-traitement obligatoire : LUT brand Dayuse (profil adaptatif) ━━━
         # Toutes les photos finales passent par la LUT pour cohérence inter-photos/inter-hôtels.
@@ -2184,6 +2823,14 @@ def enhance_one(input_path: Path, strategy: dict, output_dir: Path) -> dict:
             except Exception:
                 # Si la LUT échoue (rare), on garde l'output sans LUT
                 pass
+
+        # ━━━ Upscale Lanczos final ━━━
+        # Toutes les photos finales sont upscalées (par défaut ×2 → 1264→2528)
+        # pour servir une vraie HD aux UIs Dayuse desktop/Retina. On le fait
+        # APRÈS la LUT pour éviter de retraiter 4× plus de pixels en colorimétrie.
+        upscale_meta = upscale_lanczos_inplace(output_path)
+        if upscale_meta and not upscale_meta.get("error"):
+            methods.append(upscale_meta["method"])
 
         return {
             "input_path": str(input_path),
@@ -2206,6 +2853,7 @@ def enhance_one(input_path: Path, strategy: dict, output_dir: Path) -> dict:
             "framing_changed": framing_changed,
             "framing_warning": framing_warning,
             "brand_lut_applied": brand_lut_applied or last_action == "local_warm_boost",
+            "upscale": upscale_meta,
             "ai_validation": ai_validation,
             "retry_attempted": retry_attempted,
             "fallback_to_original": fallback_to_original,

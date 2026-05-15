@@ -1,8 +1,9 @@
 # Slow-motion Loop (Cinemagraph) — Spécification
 
-**Version** : 0.1
+**Version** : 0.3
 **Auteurs** : Martin × Claude
-**Statut** : 🔧 V1 implémenté — Higgsfield Kling 2.1 Pro + post-process ping-pong ffmpeg
+**Statut** : 🔧 V1.3 — Higgsfield Kling 2.1 Pro + ping-pong/crossfade auto + variantes format (9:16/1:1/16:9)
+**Historique** : V0.1 (ping-pong basique), V0.2 (cascade auto), V0.3 (pool_float subject + crossfade + variantes format)
 
 ---
 
@@ -167,15 +168,21 @@ Step 4 (avant lancement pipeline) → checkbox `🎬 Générer un slow-motion lo
 
 Tous les prompts forcent **"no camera movement, locked-off shot, static composition"** pour neutraliser la tendance de Kling/DoP à pousser des camera moves cinématiques par défaut. On veut UNIQUEMENT le mouvement du sujet.
 
-| Sujet | Prompt résumé |
-|---|---|
-| `water` | Subtle gentle ripples, slow ambient surface motion, reflection shimmer |
-| `curtains` | Soft gentle breeze, slow fabric sway |
-| `foliage` | Gentle wind on leaves and plants, ambient natural sway |
-| `fire` | Gentle dancing flames, soft flicker, ember glow |
-| `steam` | Slow rising steam and mist, gentle drift |
-| `fountain` | Gentle water flow, soft continuous splashing |
-| `ambient` (fallback) | Very gentle natural motion, photorealistic |
+| Sujet | Prompt résumé | Mode loop auto |
+|---|---|---|
+| `pool_float` | Bouée gonflable dérive lentement, rotation douce, ripples concentriques autour | ping_pong |
+| `water` | Subtle gentle ripples, slow ambient surface motion, reflection shimmer | ping_pong |
+| `curtains` | Soft gentle breeze, slow fabric sway | ping_pong |
+| `foliage` | Gentle wind on leaves and plants, ambient natural sway | ping_pong |
+| `fire` | Gentle dancing flames, soft flicker, ember glow | **crossfade** (directionnel) |
+| `steam` | Slow rising steam and mist, gentle drift | ping_pong |
+| `fountain` | Gentle water flow, soft continuous splashing | **crossfade** (directionnel) |
+| `ambient` (fallback) | Very gentle natural motion, photorealistic | ping_pong |
+
+**Priorité pool_float** : si Gemini Vision détecte une bouée gonflable dans une piscine,
+`motion_subject = "pool_float"` est privilégié sur `"water"` (motion_strength ≥ 70).
+Le cinemagraph d'une bouée flamingo qui dérive est plus identifiable visuellement
+qu'un simple ripple.
 
 ---
 
@@ -204,8 +211,24 @@ Tous les prompts forcent **"no camera movement, locked-off shot, static composit
 
 ## 🗺 Roadmap
 
-- **V1.1** — Mode crossfade en option (`SLOWMO_LOOP_MODE=crossfade`)
-- **V1.2** — Génération de plusieurs candidates (top 3 motion_strength) + UI pour choisir
-- **V1.3** — Variantes de format pour le slowmo (16:9 desktop / 9:16 story / 1:1 feed) via ffmpeg crop
-- **V2** — Si Higgsfield ouvre FLF sur l'API officielle → bascule pour les sujets directionnels
-- **V2.1** — Évaluation Luma Ray2 / Runway Gen-3 en alternative pour comparer la qualité
+### ✅ Livré
+
+- **V0.1** — Pipeline de base (Kling 2.1 Pro + ping-pong ffmpeg)
+- **V0.2** — Sélection cible via Gemini Vision `slowmo_potential`
+- **V0.3** — `pool_float` comme motion_subject prioritaire
+- **V1.1** — Mode crossfade (auto sur sujets directionnels `fire`/`fountain`).
+  Override possible via env `SLOWMO_LOOP_MODE=crossfade|ping_pong|auto`.
+  Durée du fondu : `SLOWMO_CROSSFADE_DURATION=0.5` (secondes).
+- **V1.3** — Variantes de format via `generate_format_variants()` :
+  - `story_9x16` (1080×1920 — Insta story / Reels)
+  - `feed_1x1` (1080×1080 — Insta feed)
+  - `youtube_16x9` (1920×1080 — desktop)
+  - Crop centré + resize Lanczos via ffmpeg. Pas de letterbox. Coût zéro, ~1-2s/variante.
+  - Activé via payload `slowmo_format_variants: ["story_9x16", ...]` sur `/api/run`.
+
+### ⏳ À faire
+
+- **V1.2** — Génération de plusieurs candidates (top 3 motion_strength) + UI pour choisir.
+  Aujourd'hui 1 seul slowmo / hôtel = pas de plan B si la cible foire. Effort estimé ~4h.
+- **V2** — Si Higgsfield ouvre FLF sur l'API officielle → bascule pour sujets directionnels (loop sans crossfade visible).
+- **V2.1** — Évaluation Luma Ray2 / Runway Gen-3 en alternative pour comparer la qualité ambient de Kling 2.1 Pro.

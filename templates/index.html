@@ -213,17 +213,7 @@
     .subtab-btn.active { background: linear-gradient(62deg, #FFAF36 0%, #FFC536 100%); color: #292935; border-color: transparent; box-shadow: 0 2px 8px rgba(255, 175, 54, 0.25); }
     .subtab-panel { display: none; }
     .subtab-panel.active { display: block; }
-    /* ━━ Final pack layout : photos finales empilées (gauche) + rail ResortPass sticky (droite) ━━ */
-    .final-pack-layout { display: grid; grid-template-columns: 1fr; gap: 1rem; align-items: start; }
-    @media (min-width: 1024px) {
-      .final-pack-layout { grid-template-columns: minmax(0, 1fr) 280px; }
-    }
-    .final-pack-main { min-width: 0; }
-    .rp-rail { border: 1px solid #EAEAEB; border-radius: 12px; background: white; overflow: hidden; }
-    @media (min-width: 1024px) {
-      .rp-rail { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow-y: auto; }
-    }
-    .rp-rail-header { padding: 0.5rem 0.75rem; border-bottom: 1px solid #EAEAEB; background: linear-gradient(135deg, #FFF7ED 0%, #FFEDD5 100%); position: sticky; top: 0; z-index: 10; }
+    /* Final pack layout legacy supprimé (Martin 14/05/2026) — remplacé par grille 2 colonnes ligne-par-ligne (Tailwind grid-cols-1/lg:grid-cols-2) qui pair card Dayuse avec photo RP correspondante par index. Le rail sticky à droite n'est plus utilisé. */
     /* Mermaid container */
     .mermaid { font-size: 13px; }
     .mermaid svg { max-width: 100%; height: auto; }
@@ -325,7 +315,7 @@
         </div>
         <div class="mt-2 text-[11px] text-dayuse-ink2 italic">
           Booking sert de clé d'entrée. On extrait les amenities + le nom/ville,
-          et on cherche en parallèle les URLs RP, Expedia, Site officiel, Instagram
+          et on cherche en parallèle les URLs RP, Expedia, Site officiel
           (DuckDuckGo + Gemini). Tu pourras les éditer ou compléter à l'étape 2.
         </div>
       </div>
@@ -355,7 +345,7 @@
           <input type="checkbox" id="src-booking" checked class="mt-0.5 w-4 h-4 accent-dayuse-primary">
           <div class="flex-1">
             <div class="text-sm font-semibold">Booking.com (galerie complète HD)</div>
-            <div class="text-xs text-gray-500 mb-2">Headless browser + scraping galerie modale. 50-150 photos en max1024.</div>
+            <div class="text-xs text-gray-500 mb-2">Headless browser + scraping galerie modale. 50-150 photos en <strong>3000×2000 natif</strong> (signature <code>k=</code> universelle → on upgrade <code>max1024x768</code> → <code>max3000</code>).</div>
             <input id="booking-url" type="url" placeholder="URL fiche hôtel Booking — colle l'URL même longue, on nettoie"
                    class="input-dayuse w-full text-xs" style="padding: 8px 16px;">
           </div>
@@ -383,16 +373,6 @@
           </div>
         </label>
 
-        <!-- Source : Instagram -->
-        <label class="flex items-start gap-3 border border-amber-200 bg-amber-50/40 rounded-lg p-3 cursor-pointer hover:bg-amber-50">
-          <input type="checkbox" id="src-instagram" class="mt-0.5 w-4 h-4 accent-dayuse-primary">
-          <div class="flex-1">
-            <div class="text-sm font-semibold">📷 Instagram <span class="text-amber-700 text-[10px] font-normal">(expérimental — bloqué par Instagram en 2026)</span></div>
-            <div class="text-xs text-gray-500 mb-2">URL pré-saisie depuis l'Étape 1. ⚠️ Instagram bloque le scraping anonyme — cette case ne ramènera presque jamais de photos (auto-discovery conservé pour quand on aura une API).</div>
-            <input id="step2-instagram-url" type="url" placeholder="https://www.instagram.com/handle (auto-rempli)"
-                   class="input-dayuse w-full text-xs" style="padding: 8px 16px;">
-          </div>
-        </label>
       </div>
 
       <button id="btn-fetch-all" class="btn-dayuse-primary w-full disabled:opacity-50">
@@ -542,7 +522,7 @@
           <div class="flex-1">
             <h2 class="text-base font-semibold mb-1">🌳 Visualisation du workflow photo</h2>
             <p class="text-sm text-dayuse-ink2">
-              Trajet de chaque photo à travers les <strong>14 nœuds</strong> du pipeline. Click sur une photo
+              Trajet de chaque photo à travers les <strong>15 nœuds</strong> du pipeline. Click sur une photo
               pour voir son chemin complet. Click sur un nœud pour filtrer.
             </p>
           </div>
@@ -612,6 +592,7 @@
         <button class="subtab-btn" data-subtab="laws-audit">🧮 Audit matriciel</button>
         <button class="subtab-btn" data-subtab="mcscla">🪣 Champs MCSCLA</button>
         <button class="subtab-btn" data-subtab="slowmo">🎬 Slow-motion</button>
+        <button class="subtab-btn" data-subtab="prompt-anatomy">🧩 Anatomie prompts</button>
       </nav>
 
       <!-- ━━━ Sous-onglet Workflow ━━━ -->
@@ -624,13 +605,15 @@
         <!-- Diagramme stocké en text/plain pour éviter tout parsing HTML, injecté via JS -->
         <script type="text/plain" id="mermaid-source">
 flowchart TD
-    A[Sources photos]
-    A --> A1[RP scraper]
-    A --> A2[Booking scraper Playwright]
-    A --> A3[Site officiel Gemini + Playwright]
+    A[Sources photos HD]
+    A --> A1[RP scraper natif]
+    A --> A2[Booking scraper max3000 = 3000x2000]
+    A --> A3[Expedia scraper raw URL = 3840x2560]
+    A --> A4[Site officiel Playwright stealth + patchright si chaine]
     A1 --> B
     A2 --> B
     A3 --> B
+    A4 --> B
     B[Dedup pHash inter-sources seuil 16]
     B --> C[Photos uniques 30 a 100]
     C --> D[Analyse Gemini Flash 3 workers parallel]
@@ -670,7 +653,8 @@ flowchart TD
     L2 --> M
     L3 --> M
     M --> N[LUT brand Dayuse]
-    N --> O[Pack final ZIP 12 a 18 photos]
+    N --> P[Upscale Lanczos x2 1264 vers 2528]
+    P --> O[Pack final ZIP 12 a 18 photos]
 
     style A fill:#fed7aa,stroke:#f97316
     style C fill:#fef3c7,stroke:#f59e0b
@@ -680,6 +664,7 @@ flowchart TD
     style D fill:#dbeafe,stroke:#2563eb
     style K fill:#e9d5ff,stroke:#9333ea
     style L fill:#fee2e2,stroke:#dc2626
+    style P fill:#cffafe,stroke:#0891b2
         </script>
         <div id="mermaid-target" class="bg-slate-50 rounded-lg p-4 border border-slate-200 overflow-x-auto min-h-[200px]">
           <div class="text-xs text-gray-400 italic">Chargement du diagramme…</div>
@@ -972,6 +957,18 @@ flowchart TD
             </ul>
           </div>
 
+          <!-- Règle 12 : Upscale Lanczos x2 -->
+          <div class="border-l-4 border-cyan-500 pl-3 py-1 bg-cyan-50/50 rounded-r">
+            <div class="text-sm font-semibold text-cyan-900">🔍 Upscale Lanczos x2 (HD finale)</div>
+            <ul class="text-xs text-gray-700 mt-1 ml-4 list-disc space-y-0.5">
+              <li><strong>Pourquoi</strong> : Nano Banana sort à 1264×843 fixe (testé empiriquement, indépendant de la source). Les UIs Dayuse desktop sur Retina/4K affichent les photos en 1500-1800px CSS = effectivement 3000-3600px physiques → pixelisation visible sans upscale.</li>
+              <li><strong>Quoi</strong> : Lanczos x2 (1264×843 → <strong>2528×1686</strong>) appliqué APRÈS la LUT brand, sur TOUTES les photos finales sans exception.</li>
+              <li><strong>Pas une vraie amélioration optique</strong> : Lanczos est de l'interpolation classique, n'ajoute pas de détail réel (vs Real-ESRGAN). Évite la pixelisation, préserve les arêtes, ne « hallucine » rien.</li>
+              <li><strong>Coût</strong> : zéro ($0 + ~0.3s/photo via PIL). Configurable via env var <code>FINAL_UPSCALE_FACTOR</code> (défaut 2.0, mettre 1.0 pour désactiver).</li>
+              <li><strong>Bénéfice aval</strong> : tous les crops multi-format (insta_story 1080×1920, LinkedIn banner 1584×396) partent maintenant d'une base 2528 au lieu de 1264 → moins d'upscale Lanczos cumulé sur les variantes.</li>
+            </ul>
+          </div>
+
         </div>
       </section>
 
@@ -1166,8 +1163,11 @@ flowchart TD
             <tr><td class="px-3 py-2">Catégorisation hôtel sans RP (via Booking)</td><td class="px-3 py-2"><span class="text-amber-700 font-semibold">🚧 En cours</span></td><td class="px-3 py-2 text-gray-600">Scraping page Booking pour extraire amenities → mapping vers taxo interne</td></tr>
             <tr><td class="px-3 py-2">Suppression du concept « vibe RP »</td><td class="px-3 py-2"><span class="text-amber-700 font-semibold">🚧 En cours</span></td><td class="px-3 py-2 text-gray-600">Remplacé par détection contextuelle Gemini sur les photos (kids amenities → families)</td></tr>
             <tr><td class="px-3 py-2">Arbre humains × capacity de la photo</td><td class="px-3 py-2"><span class="text-amber-700 font-semibold">🚧 Validé</span></td><td class="px-3 py-2 text-gray-600">Persona × seats détectés → nombre de personnes adapté (1 à 5 max)</td></tr>
-            <tr><td class="px-3 py-2">Instagram via API tierce</td><td class="px-3 py-2"><span class="text-gray-500 font-semibold">⏸ Backlog</span></td><td class="px-3 py-2 text-gray-600">RapidAPI Instagram Scraper $10-30/mo, ou ScrapingBee Insta endpoint</td></tr>
-            <tr><td class="px-3 py-2">Cloudflare bypass (chaînes hôtelières)</td><td class="px-3 py-2"><span class="text-gray-500 font-semibold">⏸ Backlog</span></td><td class="px-3 py-2 text-gray-600">Patchright (gratuit, 50%) ou ScrapingBee (95%)</td></tr>
+            <tr><td class="px-3 py-2">Expedia bot bypass (page « Bot or Not? »)</td><td class="px-3 py-2"><span class="text-emerald-700 font-semibold">✅ Résolu</span></td><td class="px-3 py-2 text-gray-600">Patchright + Chrome réel + headless=False — fenêtre Chrome brièvement visible (~30s) pendant le scrape</td></tr>
+            <tr><td class="px-3 py-2">Akamai/Imperva bypass (Marriott, Hilton, Hyatt, IHG)</td><td class="px-3 py-2"><span class="text-emerald-700 font-semibold">✅ Résolu</span></td><td class="px-3 py-2 text-gray-600">Cascade : Playwright stealth headless → auto-fallback patchright si « Access Denied » détecté</td></tr>
+            <tr><td class="px-3 py-2">Sources HD (Booking 3000×2000, Expedia 3840×2560)</td><td class="px-3 py-2"><span class="text-emerald-700 font-semibold">✅ Résolu</span></td><td class="px-3 py-2 text-gray-600">Booking : signature <code>k=</code> universelle → on remplace <code>max1024x768</code> → <code>max3000</code> en path. Expedia : URL nue sans <code>?impolicy=...</code> → 4K natif.</td></tr>
+            <tr><td class="px-3 py-2">Upscale Lanczos x2 sur photos finales</td><td class="px-3 py-2"><span class="text-emerald-700 font-semibold">✅ Résolu</span></td><td class="px-3 py-2 text-gray-600">1264×843 (output Nano Banana) → 2528×1686 systématique. Gratuit, ~0.3s/photo. Désactivable via env <code>FINAL_UPSCALE_FACTOR=1.0</code>.</td></tr>
+            <tr><td class="px-3 py-2">Real-ESRGAN (vraie super-résolution IA)</td><td class="px-3 py-2"><span class="text-gray-500 font-semibold">⏸ Backlog</span></td><td class="px-3 py-2 text-gray-600">Replicate Real-ESRGAN x4 (~$0.001/img, +5-10s) — ajoute du détail IA vs Lanczos qui interpole. À activer si Lanczos x2 jugé insuffisant.</td></tr>
             <tr><td class="px-3 py-2">Filtre user → priorité slot 1 dynamique</td><td class="px-3 py-2"><span class="text-gray-500 font-semibold">⏸ Backlog</span></td><td class="px-3 py-2 text-gray-600">Si user filtre « cabana » → cabana en slot 1 au lieu de pool</td></tr>
             <tr><td class="px-3 py-2">A/B testing taux conversion par variante</td><td class="px-3 py-2"><span class="text-gray-500 font-semibold">⏸ Backlog</span></td><td class="px-3 py-2 text-gray-600">2 packs alternatifs par hôtel, mesurer le winner</td></tr>
           </tbody>
@@ -1180,62 +1180,50 @@ flowchart TD
       <div id="subtab-discovery" class="subtab-panel">
 
       <section class="card-dayuse p-6 mb-6">
-        <h2 class="text-base font-semibold mb-2">🌐 Comment l'outil trouve l'URL site officiel / Insta / Booking</h2>
+        <h2 class="text-base font-semibold mb-2">🌐 Auto-discovery des URLs sources (workflow Booking-first)</h2>
         <p class="text-sm text-dayuse-ink2 mb-4">
-          Trois mécanismes auto-discovery pilotés par Gemini, pour ne demander à l'utilisateur que le strict minimum.
+          L'utilisateur saisit <strong>une seule URL Booking</strong> à l'Étape 1. L'outil identifie l'hôtel
+          (nom + ville + amenities) et lance en parallèle 3 recherches via cascade
+          <strong>DuckDuckGo HTML → Gemini fallback</strong> pour pré-remplir Étape 2.
+          L'utilisateur peut éditer/corriger chaque URL avant lancement.
         </p>
 
         <div class="space-y-4">
-          <!-- Site officiel -->
-          <div class="border border-dayuse-border rounded-lg p-4">
+          <!-- Étape 1 : Booking comme clé d'entrée -->
+          <div class="border border-dayuse-border rounded-lg p-4 bg-emerald-50/30">
             <div class="flex items-center gap-2 mb-2">
-              <span class="text-2xl">🌐</span>
-              <h3 class="text-sm font-bold text-dayuse-ink">Site officiel de l'hôtel</h3>
+              <span class="text-2xl">🔑</span>
+              <h3 class="text-sm font-bold text-dayuse-ink">Étape 1 — Booking = clé d'entrée</h3>
               <span class="bg-emerald-100 text-emerald-800 text-[10px] px-2 py-0.5 rounded-full font-semibold">Implémenté</span>
             </div>
             <ol class="text-xs text-dayuse-ink2 space-y-1.5 ml-5 list-decimal">
-              <li><strong>Input minimal</strong> : nom de l'hôtel + ville + pays (récupérés depuis RP ou saisis manuellement)</li>
-              <li><strong>Gemini 2.5 Flash</strong> reçoit un prompt strict : « Quel est le site web officiel de cet hôtel ? Pas de plateforme de réservation. Format JSON. »</li>
-              <li><strong>Validation Playwright stealth</strong> : on visite l'URL, vérifie HTTP 200, vérifie que le titre contient un mot du nom de l'hôtel</li>
-              <li><strong>Whitelist chaînes</strong> : pour Hyatt / Marriott / Hilton (Cloudflare bloque le check), on fait confiance à Gemini sans valider</li>
-              <li><strong>Blacklist plateformes</strong> : booking.com, expedia, tripadvisor, hotels.com, etc. exclus</li>
+              <li><strong>Scrape Booking</strong> : Playwright stealth extrait nom + ville + pays + amenities depuis la page hôtel</li>
+              <li><strong>Mapping amenities</strong> : `booking_amenities_extractor.py` traduit les facilities Booking vers la taxonomie interne (pool, cabana, rooftop, spa, beach, food, bar, gym)</li>
+              <li><strong>Slug interne</strong> : <code>booking-&lt;slug-booking&gt;</code> sert d'identifiant unique pour tous les fichiers (uploads, analyses, output)</li>
+              <li>L'outil est <strong>indépendant de ResortPass</strong> — l'amenity list Booking suffit pour décider quels buckets de photos chercher</li>
             </ol>
-            <p class="mt-2 text-[11px] text-dayuse-ink3 italic">Module : <code>hotel_site_finder.py</code></p>
+            <p class="mt-2 text-[11px] text-dayuse-ink3 italic">Modules : <code>booking_scraper.py</code> + <code>booking_amenities_extractor.py</code></p>
           </div>
 
-          <!-- Booking page -->
+          <!-- Recherche parallèle des 3 sources annexes -->
           <div class="border border-dayuse-border rounded-lg p-4">
             <div class="flex items-center gap-2 mb-2">
-              <span class="text-2xl">🛏</span>
-              <h3 class="text-sm font-bold text-dayuse-ink">Page Booking.com</h3>
-              <span class="bg-amber-100 text-amber-800 text-[10px] px-2 py-0.5 rounded-full font-semibold">Implémenté (URL manuelle)</span>
+              <span class="text-2xl">⚡</span>
+              <h3 class="text-sm font-bold text-dayuse-ink">Recherche parallèle des 3 autres sources</h3>
+              <span class="bg-emerald-100 text-emerald-800 text-[10px] px-2 py-0.5 rounded-full font-semibold">Implémenté</span>
             </div>
             <p class="text-xs text-dayuse-ink2 mb-2">
-              L'URL Booking est aujourd'hui collée manuellement par l'utilisateur. À court terme, on va aussi automatiser :
+              Endpoint <code>/api/identify-hotel</code> lance 3 workers <code>ThreadPoolExecutor</code> simultanés :
             </p>
-            <ol class="text-xs text-dayuse-ink2 space-y-1.5 ml-5 list-decimal">
-              <li><strong>Gemini search</strong> : « URL Booking.com de cet hôtel ? Format strict booking.com/hotel/&lt;country&gt;/&lt;slug&gt;.html »</li>
-              <li><strong>Validation</strong> : check HTTP 200 et que la page renvoie bien un hôtel (pas une page de recherche)</li>
-              <li><strong>Extraction amenities</strong> (à venir) : scrape la section « Most popular facilities » de Booking → mapping vers taxonomie interne (pool, cabana, rooftop, spa, beach, food, bar, gym)</li>
-              <li><strong>Remplacement RP</strong> : à terme, l'amenity list Booking remplace l'amenity_normalized RP. L'outil deviendra indépendant de RP.</li>
-            </ol>
-            <p class="mt-2 text-[11px] text-dayuse-ink3 italic">Module : <code>booking_scraper.py</code> (extension à venir : <code>booking_amenities_extractor.py</code>)</p>
-          </div>
-
-          <!-- Instagram -->
-          <div class="border border-dayuse-border rounded-lg p-4">
-            <div class="flex items-center gap-2 mb-2">
-              <span class="text-2xl">📷</span>
-              <h3 class="text-sm font-bold text-dayuse-ink">Compte Instagram</h3>
-              <span class="bg-rose-100 text-rose-800 text-[10px] px-2 py-0.5 rounded-full font-semibold">Bloqué (anti-bot Instagram 2024+)</span>
-            </div>
-            <ol class="text-xs text-dayuse-ink2 space-y-1.5 ml-5 list-decimal">
-              <li><strong>Gemini search</strong> : « Compte Instagram officiel de cet hôtel ? »</li>
-              <li><strong>Validation</strong> : impossible (Instagram bloque tous les bots anonymes — affiche « Profile isn't available » même pour les vrais profils)</li>
-              <li><strong>Solutions futures</strong> : RapidAPI Instagram Scraper (~$10-30/mo), ScrapingBee Insta endpoint, ou login Insta de service (risque ban)</li>
-              <li><strong>État actuel</strong> : la checkbox Instagram est désactivée par défaut, fonctionnalité expérimentale</li>
-            </ol>
-            <p class="mt-2 text-[11px] text-dayuse-ink3 italic">Module : <code>instagram_finder.py</code> + <code>instagram_scraper.py</code></p>
+            <ul class="text-xs text-dayuse-ink2 space-y-1 ml-5 list-disc">
+              <li><strong>Site officiel</strong> (<code>hotel_site_finder.py</code>) : DDG query <code>"{name} {city} official site"</code> → filtre blacklist (booking/expedia/tripadvisor) → fallback Gemini si rien trouvé → whitelist domaines de chaîne pour skip check d'aliveness (Cloudflare)</li>
+              <li><strong>Expedia</strong> (<code>expedia_finder.py</code>) : DDG query <code>"{name} {city} expedia hotel-information"</code> → pattern match <code>.h{ID}.Hotel-Information</code> → fallback Gemini + détecteur d'hallucination (4+ zéros consécutifs dans l'ID = ID inventé)</li>
+              <li><strong>ResortPass</strong> (<code>rp_finder.py</code>) : DDG query <code>"{name} {city} resortpass"</code> → pattern match <code>resortpass.com/hotels/{slug}</code> → fallback Gemini</li>
+            </ul>
+            <p class="text-xs text-dayuse-ink2 mt-2">
+              Latence totale : ~5-8s (DDG 3-6s avec retry sur rate-limit, Gemini 1-2s en fallback).
+              L'UI Étape 2 affiche les 3 URLs trouvées avec badge source (DDG = vert / Gemini = violet) — éditables.
+            </p>
           </div>
 
           <!-- Concurrents -->
@@ -1258,6 +1246,53 @@ flowchart TD
             <p class="mt-2 text-[11px] text-dayuse-ink3 italic">Pas dans la roadmap immédiate, mais discutable.</p>
           </div>
         </div>
+      </section>
+
+      <!-- Sources photos : tableau récap résolution -->
+      <section class="card-dayuse p-6 mb-6">
+        <h2 class="text-base font-semibold mb-2">📸 Sources photos & résolution native</h2>
+        <p class="text-sm text-dayuse-ink2 mb-4">
+          Chaque source a son CDN avec ses contraintes. On vise toujours la plus haute résolution dispo.
+        </p>
+        <table class="w-full text-xs">
+          <thead class="bg-slate-50 text-left text-slate-600 uppercase">
+            <tr>
+              <th class="px-3 py-2 font-semibold">Source</th>
+              <th class="px-3 py-2 font-semibold">CDN</th>
+              <th class="px-3 py-2 font-semibold">Résolution récupérée</th>
+              <th class="px-3 py-2 font-semibold">Trick</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            <tr>
+              <td class="px-3 py-2 font-semibold">Booking</td>
+              <td class="px-3 py-2 text-gray-600"><code>cf.bstatic.com</code></td>
+              <td class="px-3 py-2"><strong class="text-emerald-700">3000×2000</strong> natif</td>
+              <td class="px-3 py-2 text-gray-600">Signature <code>k=</code> universelle → on remplace <code>max1024x768</code> → <code>max3000</code> dans le path</td>
+            </tr>
+            <tr>
+              <td class="px-3 py-2 font-semibold">Expedia</td>
+              <td class="px-3 py-2 text-gray-600"><code>images.trvl-media.com</code></td>
+              <td class="px-3 py-2"><strong class="text-emerald-700">3840×2560</strong> (4K natif)</td>
+              <td class="px-3 py-2 text-gray-600">URL nue (strip <code>?impolicy=...&rw=1200</code>) → l'original 4K est servi sans params</td>
+            </tr>
+            <tr>
+              <td class="px-3 py-2 font-semibold">ResortPass</td>
+              <td class="px-3 py-2 text-gray-600"><code>assets.resortpass.com</code></td>
+              <td class="px-3 py-2"><strong>Natif</strong> (variable, souvent 2000+)</td>
+              <td class="px-3 py-2 text-gray-600">URL directe depuis le JSON <code>__NEXT_DATA__</code> de la fiche RP</td>
+            </tr>
+            <tr>
+              <td class="px-3 py-2 font-semibold">Site officiel</td>
+              <td class="px-3 py-2 text-gray-600">CDN propre (Marriott cache, Hilton, Drupal, etc.)</td>
+              <td class="px-3 py-2"><strong>2000-4000</strong> via <code>srcset</code></td>
+              <td class="px-3 py-2 text-gray-600">Parse <code>&lt;source srcset&gt;</code> dans <code>&lt;picture&gt;</code>, garde la variante <code>w=</code> max. Anti-bot Akamai contourné par <strong>patchright + Chrome réel</strong>.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="mt-3 text-[11px] text-dayuse-ink3 italic">
+          Dédup pHash inter-sources (seuil 16) après téléchargement → on garde la meilleure version (priorité officiel > booking > expedia > RP).
+        </p>
       </section>
 
       </div><!-- /subtab-discovery -->
@@ -1544,34 +1579,196 @@ flowchart TD
         </section>
 
         <section class="card-dayuse p-6 mb-6">
-          <h3 class="text-lg font-bold mb-3">🎯 Sélection de la photo cible</h3>
+          <h3 class="text-lg font-bold mb-3">🎯 Sélection de la photo cible — algorithme complet</h3>
           <p class="text-sm text-gray-700 mb-3">
-            Gemini ajoute un champ <code class="bg-gray-100 px-1.5 py-0.5 rounded">slowmo_potential</code> à chaque photo, identifiant les sujets de mouvement <strong>ambiant et non-directionnel</strong> (idéal pour ping-pong invisible).
+            Une seule photo du pack final est convertie en slowmo. La sélection est faite par <code class="bg-gray-100 px-1.5 py-0.5 rounded">pick_slowmo_target()</code> dans <code class="bg-gray-100 px-1.5 py-0.5 rounded">slowmo_higgsfield.py</code>. Voici l'algorithme exact appliqué.
           </p>
-          <div class="overflow-x-auto">
+
+          <!-- Bandeau règle pool-only -->
+          <div class="rounded-lg border-2 border-blue-300 bg-blue-50 p-3 mb-2 text-sm">
+            <strong class="text-blue-900">📌 Règle de scope (Martin 14/05/2026)</strong> — Seules les photos catégorisées <strong>piscine</strong> (catégorie principale OU secondaire) sont éligibles au slowmo. Les autres scènes (chambre, gym, F&B, intérieurs, façades) ne sont JAMAIS slowmotées. Mouvements autorisés : <code class="bg-white px-1 rounded">water</code> (ripples), <code class="bg-white px-1 rounded">pool_float</code> (bouée qui dérive), <code class="bg-white px-1 rounded">foliage</code> (plantes autour). Sujets exclus : fire, fountain, curtains, steam (pas "subtil pool").
+          </div>
+
+          <!-- Bandeau règle top-photo + intermédiaire (v2 du 14/05) -->
+          <div class="rounded-lg border-2 border-emerald-300 bg-emerald-50 p-3 mb-4 text-sm">
+            <strong class="text-emerald-900">📌 Règle "top photo + intermédiaire" (Martin 14/05/2026 v2)</strong> — On privilégie la <strong>top photo piscine du pack</strong> (slot ascendant, pas la motion_strength max) pour que le slowmo soit sur le hero le plus visible. Si la top photo a un humain ajouté IA → on utilise la version <strong>intermédiaire avant ajout perso</strong> (stockée dans <code class="bg-white px-1 rounded">enhanced/_intermediates/</code>) puis on lui applique la <strong>LUT brand</strong> pour cohérence visuelle avec le pack. Évite la déformation Kling sur les visages générés.
+          </div>
+
+          <!-- Étape 1 : analyse Gemini -->
+          <h4 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2 mt-4">Étape 1 — Annotation Gemini Vision par photo</h4>
+          <p class="text-sm text-gray-700 mb-3">
+            Pour chaque photo source, Gemini Vision (<code>analyze.py</code>) renseigne un champ <code class="bg-gray-100 px-1.5 py-0.5 rounded">slowmo_potential</code> :
+          </p>
+          <pre class="bg-gray-50 border rounded p-3 text-[11px] overflow-x-auto mb-3">{
+  "slowmo_potential": {
+    "has_motion_subject": true,
+    "motion_subject": "pool_float",
+    "motion_strength": 75
+  }
+}</pre>
+          <div class="overflow-x-auto mb-3">
             <table class="w-full text-sm">
               <thead>
-                <tr class="border-b text-left">
+                <tr class="border-b text-left text-xs uppercase text-gray-600">
                   <th class="py-2 pr-4">motion_subject</th>
-                  <th class="py-2 pr-4">Quand</th>
-                  <th class="py-2">Exemple visuel</th>
+                  <th class="py-2 pr-4">Quand Gemini le choisit</th>
+                  <th class="py-2">Loop mode auto</th>
                 </tr>
               </thead>
-              <tbody class="divide-y">
-                <tr><td class="py-2 pr-4 font-mono">water</td><td class="py-2 pr-4">surface d'eau dominante (piscine, jacuzzi, bassin)</td><td class="py-2 text-gray-500">ripples, reflets shimmer</td></tr>
-                <tr><td class="py-2 pr-4 font-mono">curtains</td><td class="py-2 pr-4">voilages / rideaux / tissus légers visibles</td><td class="py-2 text-gray-500">fabric drift léger</td></tr>
-                <tr><td class="py-2 pr-4 font-mono">foliage</td><td class="py-2 pr-4">palmiers / végétation extérieure</td><td class="py-2 text-gray-500">leaves swaying</td></tr>
-                <tr><td class="py-2 pr-4 font-mono">fire</td><td class="py-2 pr-4">cheminée / brasero / bougies allumées</td><td class="py-2 text-gray-500">⚠️ flammes = sujet directionnel, ping-pong moyen</td></tr>
-                <tr><td class="py-2 pr-4 font-mono">steam</td><td class="py-2 pr-4">jacuzzi fumant / hammam</td><td class="py-2 text-gray-500">⚠️ également directionnel</td></tr>
-                <tr><td class="py-2 pr-4 font-mono">fountain</td><td class="py-2 pr-4">fontaine / jet d'eau actif</td><td class="py-2 text-gray-500">⚠️ directionnel</td></tr>
-                <tr><td class="py-2 pr-4 font-mono">none</td><td class="py-2 pr-4">aucun sujet animable (intérieur sec, plat servi…)</td><td class="py-2 text-gray-500">photo exclue → fallback slot 1</td></tr>
+              <tbody class="divide-y text-[13px]">
+                <tr class="bg-emerald-50/50"><td class="py-2 pr-4 font-mono font-bold">pool_float</td><td class="py-2 pr-4">🥇 <strong>Priorité absolue</strong> — bouée gonflable visible (flamingo, licorne, donut, ananas, cygne…) flottant sur la piscine. <code>motion_strength ≥ 70</code> forcé</td><td class="py-2 text-gray-600">ping-pong</td></tr>
+                <tr class="bg-emerald-50/50"><td class="py-2 pr-4 font-mono font-bold">water</td><td class="py-2 pr-4">Surface d'eau dominante (piscine, jacuzzi, bassin, mer)</td><td class="py-2 text-gray-600">ping-pong</td></tr>
+                <tr class="bg-emerald-50/50"><td class="py-2 pr-4 font-mono font-bold">foliage</td><td class="py-2 pr-4">Palmiers / plantes / feuillage extérieur (autour d'une piscine)</td><td class="py-2 text-gray-600">ping-pong</td></tr>
+                <tr class="bg-gray-100 line-through opacity-60"><td class="py-2 pr-4 font-mono text-gray-500">curtains</td><td class="py-2 pr-4 text-gray-500">Voilages / rideaux — <strong class="text-red-700">EXCLU (scope pool-only)</strong></td><td class="py-2 text-gray-500">—</td></tr>
+                <tr class="bg-gray-100 line-through opacity-60"><td class="py-2 pr-4 font-mono text-gray-500">steam</td><td class="py-2 pr-4 text-gray-500">Vapeur visible — <strong class="text-red-700">EXCLU (scope pool-only)</strong></td><td class="py-2 text-gray-500">—</td></tr>
+                <tr class="bg-gray-100 line-through opacity-60"><td class="py-2 pr-4 font-mono text-gray-500">fire</td><td class="py-2 pr-4 text-gray-500">Flammes — <strong class="text-red-700">EXCLU (scope pool-only)</strong></td><td class="py-2 text-gray-500">—</td></tr>
+                <tr class="bg-gray-100 line-through opacity-60"><td class="py-2 pr-4 font-mono text-gray-500">fountain</td><td class="py-2 pr-4 text-gray-500">Fontaine / jet d'eau — <strong class="text-red-700">EXCLU (scope pool-only)</strong></td><td class="py-2 text-gray-500">—</td></tr>
+                <tr class="bg-gray-100"><td class="py-2 pr-4 font-mono text-gray-500">none</td><td class="py-2 pr-4 text-gray-600">Aucun sujet animable (intérieur sec, plat servi, vue architecturale figée, photo de nuit, sujet minuscule)</td><td class="py-2 text-gray-500">—</td></tr>
               </tbody>
             </table>
           </div>
-          <p class="text-sm text-gray-700 mt-4">
-            <strong>Tri</strong> : <code>motion_strength</code> desc, puis slot asc. <strong>Fallback</strong> : slot 1 (hero) avec sujet "ambient" si aucune candidate qualifiée.<br>
-            <strong>Exclusions</strong> : photos avec humains au premier plan (anim de cheveux/vêtements weird), photos de nuit, photos de food close-up sans vapeur.
+          <p class="text-[12px] text-gray-600">
+            <strong>Règle Gemini :</strong> <code>has_motion_subject = true</code> SEULEMENT si <code>motion_subject ≠ "none"</code> ET <code>motion_strength ≥ 30</code>. Bouée → 70+ automatique.
           </p>
+
+          <!-- Étape 2 : exclusions -->
+          <h4 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2 mt-6">Étape 2 — Filtres d'exclusion (avant tri)</h4>
+          <div class="overflow-x-auto mb-3">
+            <table class="w-full text-sm border border-red-200 rounded">
+              <thead>
+                <tr class="border-b text-left text-xs uppercase text-red-800 bg-red-50">
+                  <th class="py-2 px-3">Exclusion</th>
+                  <th class="py-2 px-3">Pourquoi</th>
+                  <th class="py-2 px-3">Source code</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y text-[13px]">
+                <tr class="bg-blue-50/50"><td class="py-2 px-3 font-semibold">Catégorie ≠ <code>piscine</code> (en primary OU secondary)</td><td class="py-2 px-3">Règle pool-only — on ne slowmote QUE les vues piscine. Inclut les rooftops avec piscine identifiée comme catégorie secondaire</td><td class="py-2 px-3 text-xs text-gray-500">Martin 14/05/2026</td></tr>
+                <tr class="bg-amber-50 line-through opacity-60"><td class="py-2 px-3 font-semibold">~~Photo avec humain ajouté IA~~</td><td class="py-2 px-3 text-gray-600"><strong>RÈGLE SUPPRIMÉE v2</strong> — on utilise désormais la version intermédiaire (avant ajout perso) + LUT brand. Voir Étape 5</td><td class="py-2 px-3 text-xs text-gray-500">Martin 14/05/2026 v2</td></tr>
+                <tr><td class="py-2 px-3 font-semibold">Photo avec humain natif au premier plan (<code>human_presence_type</code> ∈ {<code>full_visible</code>, <code>complete</code>, <code>prominent</code>})</td><td class="py-2 px-3">Higgsfield Kling déforme les vrais humains (pas d'intermédiaire pour fix → on exclut)</td><td class="py-2 px-3 text-xs text-gray-500">Conservé</td></tr>
+                <tr><td class="py-2 px-3 font-semibold"><code>has_motion_subject = false</code></td><td class="py-2 px-3">Gemini a déterminé qu'aucun sujet n'est animable proprement</td><td class="py-2 px-3 text-xs text-gray-500">Filtre principal</td></tr>
+                <tr class="bg-blue-50/50"><td class="py-2 px-3 font-semibold"><code>motion_subject</code> ∉ {<code>pool_float</code>, <code>water</code>, <code>foliage</code>}</td><td class="py-2 px-3">Restriction pool-only : exclut fire, fountain, curtains, steam (pas "subtil pool")</td><td class="py-2 px-3 text-xs text-gray-500">Martin 14/05/2026</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Étape 3 : tri -->
+          <h4 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2 mt-6">Étape 3 — Tri des candidates restantes (Martin 14/05/2026 v2)</h4>
+          <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm">
+            <ol class="list-decimal pl-5 space-y-1.5 text-gray-800">
+              <li><strong><code>slot</code> ascendant</strong> (= top photo piscine du pack = slot 1 si piscine, sinon premier slot piscine — privilégie le hero le plus visible)</li>
+              <li><strong>Tie-break</strong> : <code>motion_strength</code> décroissant (= en cas d'égalité de slot, prend la photo avec le potentiel de mouvement le plus fort)</li>
+            </ol>
+            <p class="text-xs text-emerald-900 mt-2 italic">🆕 <strong>Changement v2</strong> : avant on triait d'abord par <code>motion_strength</code>. Maintenant on privilégie la <strong>top photo</strong> du pack (slot 1) parce que c'est le hero le plus exposé. Si la top photo a un humain ajouté IA, on utilise sa version intermédiaire (cf. Étape 5).</p>
+          </div>
+
+          <!-- Étape 4 : fallback -->
+          <h4 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2 mt-6">Étape 4 — Fallback si aucune candidate (Q2=B)</h4>
+          <div class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-gray-800">
+            <p class="mb-2">Si après filtrage AUCUNE photo piscine n'a <code>has_motion_subject = true</code> :</p>
+            <ol class="list-decimal pl-5 space-y-1.5">
+              <li>On parcourt à nouveau le pack final dans l'ordre des slots</li>
+              <li>On prend la <strong>première photo PISCINE SANS humain</strong> (ni IA ni natif) — scope restreint à piscine</li>
+              <li>On lui assigne <code>motion_subject = "ambient"</code> (= prompt générique "subtle ambient atmosphere")</li>
+              <li>Le flag <code>fallback_used = true</code> est mis dans le résultat</li>
+            </ol>
+            <p class="text-xs mt-2 italic"><strong>🆕 (Martin 14/05/2026)</strong> Le fallback est désormais limité aux photos PISCINE. Si aucune photo piscine sans humain → <code>None</code> retourné, <strong>pas de slowmo généré du tout</strong>.</p>
+          </div>
+
+          <!-- Bonus : loop mode -->
+          <h4 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2 mt-6">Bonus — Choix automatique du mode de loop</h4>
+          <p class="text-sm text-gray-700 mb-2">
+            Une fois la photo cible choisie, le mode de loop ffmpeg est sélectionné en fonction du <code>motion_subject</code> (env var <code>SLOWMO_LOOP_MODE=auto</code> par défaut) :
+          </p>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm border border-gray-200 rounded">
+              <thead>
+                <tr class="text-left text-xs uppercase text-gray-600 bg-gray-50">
+                  <th class="py-2 px-3">motion_subject</th>
+                  <th class="py-2 px-3">Mode</th>
+                  <th class="py-2 px-3">Pourquoi</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y text-[13px]">
+                <tr><td class="py-2 px-3 font-mono">water, pool_float, curtains, foliage, steam</td><td class="py-2 px-3 font-semibold text-emerald-700">ping_pong (10s)</td><td class="py-2 px-3">Sujets NON-DIRECTIONNELS — clip + reverse → seamless mathématique</td></tr>
+                <tr><td class="py-2 px-3 font-mono">fire, fountain</td><td class="py-2 px-3 font-semibold text-amber-700">crossfade (5s)</td><td class="py-2 px-3">Sujets DIRECTIONNELS (flammes qui montent, eau qui jaillit) — ping-pong donnerait un effet stop-motion bizarre. Fade enchaîné 0.5s</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Étape 5 : Résolution de la photo source -->
+          <h4 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2 mt-6">Étape 5 — Résolution de la photo source (Martin 14/05/2026 v2)</h4>
+          <p class="text-sm text-gray-700 mb-2">Une fois la photo cible choisie, il faut décider quelle <strong>version pixel</strong> envoyer à Higgsfield. 3 cas possibles :</p>
+          <div class="overflow-x-auto mb-3">
+            <table class="w-full text-sm border border-gray-200 rounded">
+              <thead>
+                <tr class="text-left text-xs uppercase text-gray-600 bg-gray-50">
+                  <th class="py-2 px-3">Cas</th>
+                  <th class="py-2 px-3">Source utilisée</th>
+                  <th class="py-2 px-3">Pourquoi</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y text-[13px]">
+                <tr><td class="py-2 px-3 font-semibold"><code>use_intermediate = false</code></td><td class="py-2 px-3"><code>enhanced/{filename}.jpg</code> (photo finale du pack avec tout : retouches + LUT)</td><td class="py-2 px-3 text-xs">Pas d'humain IA → comportement standard, on slowmote la photo finale</td></tr>
+                <tr class="bg-emerald-50"><td class="py-2 px-3 font-semibold"><code>use_intermediate = true</code> + intermédiaire dispo</td><td class="py-2 px-3"><code>enhanced/_intermediates/_step*_{filename}.jpg</code> + LUT brand appliquée à la volée</td><td class="py-2 px-3 text-xs">Photo a un humain ajouté IA → on prend la version <strong>avant</strong> ai_add_character (= après lighting/clutter), on ajoute la LUT pour cohérence visuelle</td></tr>
+                <tr class="bg-amber-50"><td class="py-2 px-3 font-semibold"><code>use_intermediate = true</code> + pas d'intermédiaire dispo</td><td class="py-2 px-3"><code>uploads/{filename}.jpg</code> (photo originale brute, sans LUT)</td><td class="py-2 px-3 text-xs">Cas rare (humain IA mais pas de chaînage) → fallback sécuritaire sur l'originale</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="text-xs text-gray-600 italic">L'intermédiaire est sauvegardé par <code>enhance.py</code> dans <code>enhanced/_intermediates/_step{i}_{filename}.jpg</code> à chaque chaînage (ex: <code>ai_lighting → ai_add_character</code>). Désactivable via <code>KEEP_AI_INTERMEDIATES=0</code>.</p>
+
+          <!-- Output -->
+          <h4 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2 mt-6">Résultat retourné</h4>
+          <pre class="bg-gray-50 border rounded p-3 text-[11px] overflow-x-auto">{
+  "filename": "booking_044_451219735.jpg",
+  "motion_subject": "pool_float",      ← prompt Higgsfield correspondant
+  "motion_strength": 85,                ← score Gemini
+  "slot": 1,                            ← position dans le pack final (top photo prioritaire)
+  "use_intermediate": true,             ← 🆕 si humain ajouté IA → utilise intermédiaire+LUT
+  "fallback_used": false                ← true si étape 4 (ambient) déclenchée
+}</pre>
+
+          <!-- Visualisation arbre de décision -->
+          <h4 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2 mt-6">Arbre de décision complet</h4>
+          <pre class="bg-gray-900 text-gray-100 rounded p-4 text-[11px] overflow-x-auto leading-relaxed">Pour chaque photo du pack final ordonné :
+│
+├── category == "piscine" OU "piscine" ∈ categories_secondary ?
+│   └── NON → EXCLUE (règle pool-only, Martin 14/05/2026)
+│
+├── 🆕 A-t-elle un humain natif au premier plan ?
+│   └── OUI → EXCLUE (Kling déforme — pas d'intermédiaire pour fix)
+│
+├── slowmo_potential.has_motion_subject == true ?
+│   ├── OUI →
+│   │   ├── motion_subject ∈ {pool_float, water, foliage} ?
+│   │   │   ├── OUI → AJOUTE aux candidates
+│   │   │   │       use_intermediate = (humain ajouté IA ? oui/non)
+│   │   │   └── NON → IGNORÉE (fire/fountain/curtains/steam exclus)
+│   └── NON → IGNORÉE
+│
+└── (fin de boucle)
+
+SI candidates non vide :
+    🆕 TRI : slot asc (top photo first), puis motion_strength desc en tie-break
+    → 1ère candidate = GAGNANTE (souvent slot 1 si piscine)
+
+SI candidates VIDE (fallback) :
+    Parcourt à nouveau le pack
+    → 1ère photo PISCINE SANS humain natif
+    → assigne motion_subject = "ambient", fallback_used = true
+
+SI aucune photo piscine sans humain natif :
+    → None retourné, pas de slowmo généré
+
+═══════════════════════════════════════════════════════════════
+ENSUITE — Résolution de la source pixel (app.py) :
+
+SI target.use_intermediate == True :
+    Cherche enhanced/_intermediates/_step*_{filename}.jpg
+    ├── EXISTE → applique LUT brand + utilise ce fichier
+    └── ABSENT → fallback sur uploads/{filename}.jpg (sans LUT)
+SINON :
+    Utilise enhanced/{filename}.jpg (photo finale standard)</pre>
         </section>
 
         <section class="card-dayuse p-6 mb-6">
@@ -1673,6 +1870,305 @@ photo finale enhanced (jpeg)
         </section>
       </div><!-- /subtab-slowmo -->
 
+      <!-- ━━━ Sous-onglet Anatomie prompts (Martin 14/05/2026) ━━━ -->
+      <div id="subtab-prompt-anatomy" class="subtab-panel">
+        <section class="card-dayuse p-6 mb-6">
+          <h2 class="text-base font-semibold mb-1">🧩 Anatomie des prompts d'édition d'image</h2>
+          <p class="text-sm text-gray-500 mb-4">Dissection du prompt envoyé à Nano Banana (Gemini Image) pour identifier la part probabiliste (Gemini écrit) vs dérivée déterministe (Python calcule) vs hardcoded statique (texte fixe en dur). Permet de comprendre où sont les leviers d'amélioration de la fiabilité.</p>
+
+          <!-- Légende -->
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+            <div class="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+              <div class="text-xs font-bold text-blue-900 mb-1">🔵 Probabiliste</div>
+              <div class="text-[11px] text-blue-800">Texte généré par Gemini Vision sur la photo réelle. Varie selon la photo (avec <code class="bg-white px-1 rounded text-[10px]">temperature=0</code>, reproductible run-to-run sur la même photo).</div>
+            </div>
+            <div class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+              <div class="text-xs font-bold text-amber-900 mb-1">🟡 Dérivé déterministe</div>
+              <div class="text-[11px] text-amber-800">Valeur calculée en Python à partir de l'output Gemini ou des paramètres d'entrée. 100% reproductible.</div>
+            </div>
+            <div class="rounded-lg border border-gray-300 bg-gray-100 px-3 py-2">
+              <div class="text-xs font-bold text-gray-700 mb-1">⬜ Hardcoded statique</div>
+              <div class="text-[11px] text-gray-700">Texte fixe écrit en dur dans le code Python. <strong>Identique pour TOUTES les photos.</strong></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Step 1 — Lumière -->
+        <section class="card-dayuse p-6 mb-6">
+          <h3 class="text-base font-semibold mb-1">Step 1 — Lumière (nuit→jour) · <code class="bg-gray-100 px-1.5 py-0.5 rounded text-xs">PROMPT_ENSOLEILLEMENT</code></h3>
+          <p class="text-sm text-gray-500 mb-3">Prompt envoyé à Nano Banana pour transformer une scène de nuit en scène ensoleillée.</p>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm border border-gray-200 rounded">
+              <thead class="bg-gray-50">
+                <tr class="text-left text-xs uppercase text-gray-600">
+                  <th class="px-3 py-2 border-b">Bloc</th>
+                  <th class="px-3 py-2 border-b w-24">Type</th>
+                  <th class="px-3 py-2 border-b w-20 text-right">Tokens</th>
+                  <th class="px-3 py-2 border-b">Source</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="px-3 py-2 border-b">Intégralité du prompt</td>
+                  <td class="px-3 py-2 border-b"><span class="inline-block px-2 py-0.5 rounded bg-gray-200 text-gray-800 text-[10px] font-semibold">⬜ statique</span></td>
+                  <td class="px-3 py-2 border-b text-right text-xs font-mono">~700</td>
+                  <td class="px-3 py-2 border-b text-xs">Constante Python <code>PROMPT_ENSOLEILLEMENT</code> dans <code>enhance.py</code></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="mt-3 text-sm text-gray-700"><strong>Conclusion :</strong> 0 % de variance. Prompt identique pour chaque photo nuit→jour.</div>
+        </section>
+
+        <!-- Step 2 — Ajout perso -->
+        <section class="card-dayuse p-6 mb-6">
+          <h3 class="text-base font-semibold mb-1">Step 2 — Ajout personnage · <code class="bg-gray-100 px-1.5 py-0.5 rounded text-xs">build_persona_prompt()</code></h3>
+          <p class="text-sm text-gray-500 mb-4">Construit dans <code>_legacy_prompts.py::build_persona_prompt_v1_long</code> (V1 longue par défaut, ~5000 tokens).</p>
+
+          <!-- Blocs hardcoded inconditionnels -->
+          <h4 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2 mt-4">Blocs hardcoded inconditionnels (cœur du prompt)</h4>
+          <div class="overflow-x-auto mb-6">
+            <table class="w-full text-sm border border-gray-200 rounded">
+              <thead class="bg-gray-50">
+                <tr class="text-left text-xs uppercase text-gray-600">
+                  <th class="px-3 py-2 border-b">Bloc</th>
+                  <th class="px-3 py-2 border-b w-24">Type</th>
+                  <th class="px-3 py-2 border-b w-20 text-right">Tokens</th>
+                  <th class="px-3 py-2 border-b">Note</th>
+                </tr>
+              </thead>
+              <tbody class="text-[13px]">
+                <tr><td class="px-3 py-2 border-b">RULE #1 — Subject-only addition</td><td class="px-3 py-2 border-b"><span class="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded">⬜</span></td><td class="px-3 py-2 border-b text-right font-mono text-xs">~200</td><td class="px-3 py-2 border-b text-xs">Hardcoded</td></tr>
+                <tr><td class="px-3 py-2 border-b">Particular Attention — Floating Furniture</td><td class="px-3 py-2 border-b"><span class="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded">⬜</span></td><td class="px-3 py-2 border-b text-right font-mono text-xs">~180</td><td class="px-3 py-2 border-b text-xs">Ajout 13/05/2026</td></tr>
+                <tr><td class="px-3 py-2 border-b">Particular Attention — Pool Deletion</td><td class="px-3 py-2 border-b"><span class="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded">⬜</span></td><td class="px-3 py-2 border-b text-right font-mono text-xs">~200</td><td class="px-3 py-2 border-b text-xs">Hardcoded</td></tr>
+                <tr><td class="px-3 py-2 border-b">RULE #2 — Framing Lock</td><td class="px-3 py-2 border-b"><span class="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded">⬜</span></td><td class="px-3 py-2 border-b text-right font-mono text-xs">~80</td><td class="px-3 py-2 border-b text-xs">Hardcoded</td></tr>
+                <tr><td class="px-3 py-2 border-b">Structural Preservation</td><td class="px-3 py-2 border-b"><span class="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded">⬜</span></td><td class="px-3 py-2 border-b text-right font-mono text-xs">~280</td><td class="px-3 py-2 border-b text-xs">Hardcoded</td></tr>
+                <tr><td class="px-3 py-2 border-b">Counting Double-Check</td><td class="px-3 py-2 border-b"><span class="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded">⬜</span></td><td class="px-3 py-2 border-b text-right font-mono text-xs">~80</td><td class="px-3 py-2 border-b text-xs">Hardcoded</td></tr>
+                <tr><td class="px-3 py-2 border-b">Scale Lock + Absolute Size Limit</td><td class="px-3 py-2 border-b"><span class="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded">⬜</span></td><td class="px-3 py-2 border-b text-right font-mono text-xs">~280</td><td class="px-3 py-2 border-b text-xs">Renforcement 13/05/2026</td></tr>
+                <tr><td class="px-3 py-2 border-b">Physical Safety & Plausibility</td><td class="px-3 py-2 border-b"><span class="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded">⬜</span></td><td class="px-3 py-2 border-b text-right font-mono text-xs">~80</td><td class="px-3 py-2 border-b text-xs">Hardcoded</td></tr>
+                <tr><td class="px-3 py-2 border-b">Priority Rule Pool/Water</td><td class="px-3 py-2 border-b"><span class="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded">⬜</span></td><td class="px-3 py-2 border-b text-right font-mono text-xs">~120</td><td class="px-3 py-2 border-b text-xs">Hardcoded</td></tr>
+                <tr><td class="px-3 py-2 border-b">Water Depth Physics (bloc 🌊 long)</td><td class="px-3 py-2 border-b"><span class="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded">⬜</span></td><td class="px-3 py-2 border-b text-right font-mono text-xs">~350</td><td class="px-3 py-2 border-b text-xs">Hardcoded</td></tr>
+                <tr><td class="px-3 py-2 border-b">Face Quality</td><td class="px-3 py-2 border-b"><span class="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded">⬜</span></td><td class="px-3 py-2 border-b text-right font-mono text-xs">~200</td><td class="px-3 py-2 border-b text-xs">Hardcoded</td></tr>
+                <tr><td class="px-3 py-2 border-b">Lighting & Realism</td><td class="px-3 py-2 border-b"><span class="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded">⬜</span></td><td class="px-3 py-2 border-b text-right font-mono text-xs">~50</td><td class="px-3 py-2 border-b text-xs">Hardcoded</td></tr>
+                <tr><td class="px-3 py-2 border-b">Integration Rules</td><td class="px-3 py-2 border-b"><span class="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded">⬜</span></td><td class="px-3 py-2 border-b text-right font-mono text-xs">~80</td><td class="px-3 py-2 border-b text-xs">Hardcoded</td></tr>
+                <tr><td class="px-3 py-2 border-b">Photography Style (Reformation/Aman/Kodak Portra…)</td><td class="px-3 py-2 border-b"><span class="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded">⬜</span></td><td class="px-3 py-2 border-b text-right font-mono text-xs">~150</td><td class="px-3 py-2 border-b text-xs">Hardcoded</td></tr>
+                <tr><td class="px-3 py-2 border-b">Negative Prompt — [SCENE PRESERVATION]</td><td class="px-3 py-2 border-b"><span class="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded">⬜</span></td><td class="px-3 py-2 border-b text-right font-mono text-xs">~250</td><td class="px-3 py-2 border-b text-xs">Hardcoded</td></tr>
+                <tr><td class="px-3 py-2 border-b">Negative Prompt — [ATTIRE & STYLING]</td><td class="px-3 py-2 border-b"><span class="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded">⬜</span></td><td class="px-3 py-2 border-b text-right font-mono text-xs">~200</td><td class="px-3 py-2 border-b text-xs">Hardcoded</td></tr>
+                <tr><td class="px-3 py-2 border-b">Negative Prompt — [POSES & PHYSICS]</td><td class="px-3 py-2 border-b"><span class="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded">⬜</span></td><td class="px-3 py-2 border-b text-right font-mono text-xs">~200</td><td class="px-3 py-2 border-b text-xs">Hardcoded</td></tr>
+                <tr><td class="px-3 py-2 border-b">Negative Prompt — [ANATOMY & FACES]</td><td class="px-3 py-2 border-b"><span class="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded">⬜</span></td><td class="px-3 py-2 border-b text-right font-mono text-xs">~150</td><td class="px-3 py-2 border-b text-xs">Hardcoded</td></tr>
+                <tr><td class="px-3 py-2">Negative Prompt — [RENDERING]</td><td class="px-3 py-2"><span class="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded">⬜</span></td><td class="px-3 py-2 text-right font-mono text-xs">~80</td><td class="px-3 py-2 text-xs">Hardcoded</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Blocs conditionnels -->
+          <h4 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2">Blocs hardcoded conditionnels (inclusion ou pas selon la photo)</h4>
+          <div class="overflow-x-auto mb-6">
+            <table class="w-full text-sm border border-gray-200 rounded">
+              <thead class="bg-gray-50">
+                <tr class="text-left text-xs uppercase text-gray-600">
+                  <th class="px-3 py-2 border-b">Bloc</th>
+                  <th class="px-3 py-2 border-b w-32">Type</th>
+                  <th class="px-3 py-2 border-b w-20 text-right">Tokens</th>
+                  <th class="px-3 py-2 border-b">Condition d'inclusion</th>
+                </tr>
+              </thead>
+              <tbody class="text-[13px]">
+                <tr>
+                  <td class="px-3 py-2">RULE #0 — Safety Barrier Lock</td>
+                  <td class="px-3 py-2"><span class="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded">⬜ texte</span> + <span class="text-[10px] bg-amber-200 px-1.5 py-0.5 rounded">🟡 inclusion</span></td>
+                  <td class="px-3 py-2 text-right font-mono text-xs">~250</td>
+                  <td class="px-3 py-2 text-xs">Inclus ssi <code>_detect_barrier_risk(unsafe_zones, category)</code> = True (regex Python sur output Gemini matchant <code>barrière / garde-corps / balustrade / railing / parapet</code>)</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Blocs probabilistes -->
+          <h4 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2">🔵 Blocs probabilistes (écrits par Gemini Vision sur la photo réelle)</h4>
+          <div class="overflow-x-auto mb-6">
+            <table class="w-full text-sm border border-blue-200 rounded">
+              <thead class="bg-blue-50">
+                <tr class="text-left text-xs uppercase text-blue-700">
+                  <th class="px-3 py-2 border-b">Bloc</th>
+                  <th class="px-3 py-2 border-b w-20">Type</th>
+                  <th class="px-3 py-2 border-b w-20 text-right">Tokens</th>
+                  <th class="px-3 py-2 border-b">Source</th>
+                </tr>
+              </thead>
+              <tbody class="text-[13px]">
+                <tr class="bg-blue-50/30">
+                  <td class="px-3 py-2 border-b">🎬 <strong>SCENARIO — description sujet + pose + outfit</strong></td>
+                  <td class="px-3 py-2 border-b"><span class="text-[10px] bg-blue-200 px-1.5 py-0.5 rounded">🔵</span></td>
+                  <td class="px-3 py-2 border-b text-right font-mono text-xs">~300-500</td>
+                  <td class="px-3 py-2 border-b text-xs"><strong>(V5 actif par défaut)</strong> Écrit par Gemini Vision via <code>scenario_writer.py</code> à chaque photo. Si V5 échoue → fallback ⬜ catalogue Python <code>_SCENARIO_CATALOG[(persona, zone_type)]</code></td>
+                </tr>
+                <tr class="bg-blue-50/30">
+                  <td class="px-3 py-2 border-b">🎯 <strong>SAFE ZONES</strong> — <code>ZONE 1: …</code> <code>ZONE 2: …</code> <code>ZONE 3: …</code></td>
+                  <td class="px-3 py-2 border-b"><span class="text-[10px] bg-blue-200 px-1.5 py-0.5 rounded">🔵</span></td>
+                  <td class="px-3 py-2 border-b text-right font-mono text-xs">~100-200</td>
+                  <td class="px-3 py-2 border-b text-xs">Descriptions textuelles écrites par Gemini Vision (<code>analyze.py</code>). Champ <code>safe_zones_for_humans.safe_areas</code></td>
+                </tr>
+                <tr class="bg-blue-50/30">
+                  <td class="px-3 py-2">🚫 <strong>FORBIDDEN</strong> — unsafe_areas</td>
+                  <td class="px-3 py-2"><span class="text-[10px] bg-blue-200 px-1.5 py-0.5 rounded">🔵</span></td>
+                  <td class="px-3 py-2 text-right font-mono text-xs">~50-150</td>
+                  <td class="px-3 py-2 text-xs">Idem — descriptions textuelles écrites par Gemini Vision. Champ <code>safe_zones_for_humans.unsafe_areas</code></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Variables dérivées -->
+          <h4 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2">🟡 Variables dérivées déterministes (1 token à ~30 chacune)</h4>
+          <div class="overflow-x-auto mb-2">
+            <table class="w-full text-sm border border-amber-200 rounded">
+              <thead class="bg-amber-50">
+                <tr class="text-left text-xs uppercase text-amber-800">
+                  <th class="px-3 py-2 border-b">Variable</th>
+                  <th class="px-3 py-2 border-b w-20">Type</th>
+                  <th class="px-3 py-2 border-b">Source / Calcul</th>
+                </tr>
+              </thead>
+              <tbody class="text-[13px]">
+                <tr><td class="px-3 py-2 border-b"><code>{persona}</code></td><td class="px-3 py-2 border-b"><span class="text-[10px] bg-amber-200 px-1.5 py-0.5 rounded">🟡</span></td><td class="px-3 py-2 border-b text-xs">Param d'entrée <code>personas_allowed[0]</code> ou <code>persona_override</code></td></tr>
+                <tr><td class="px-3 py-2 border-b"><code>{target_n}</code></td><td class="px-3 py-2 border-b"><span class="text-[10px] bg-amber-200 px-1.5 py-0.5 rounded">🟡</span></td><td class="px-3 py-2 border-b text-xs"><code>compute_target_humans(persona, capacity)</code> + cap si barrière, + cap par <code>len(safe_zones) + bonus_multi_seat</code></td></tr>
+                <tr><td class="px-3 py-2 border-b"><code>{vibe_mood}</code> (1 phrase d'ambiance)</td><td class="px-3 py-2 border-b"><span class="text-[10px] bg-amber-200 px-1.5 py-0.5 rounded">🟡</span></td><td class="px-3 py-2 border-b text-xs">Lookup dans dict Python par <code>vibe</code></td></tr>
+                <tr><td class="px-3 py-2 border-b"><code>{pool_float_hint}</code> (bouée si tirage ~35%)</td><td class="px-3 py-2 border-b"><span class="text-[10px] bg-amber-200 px-1.5 py-0.5 rounded">🟡</span></td><td class="px-3 py-2 border-b text-xs"><code>pick_pool_float_hint()</code> — hash filename, déterministe</td></tr>
+                <tr><td class="px-3 py-2"><code>{max_h}</code></td><td class="px-3 py-2"><span class="text-[10px] bg-amber-200 px-1.5 py-0.5 rounded">🟡</span></td><td class="px-3 py-2 text-xs">Valeur int extraite de <code>safe_zones_for_humans.max_recommended</code> (output Gemini Vision)</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Bilan en tokens -->
+        <section class="card-dayuse p-6 mb-6">
+          <h3 class="text-base font-semibold mb-3">📈 Bilan en tokens</h3>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="rounded-lg border-2 border-blue-300 bg-blue-50 p-4 text-center">
+              <div class="text-2xl font-bold text-blue-900">10-16%</div>
+              <div class="text-xs font-semibold text-blue-800 mt-1">🔵 Probabiliste</div>
+              <div class="text-[11px] text-blue-700 mt-2">~500-800 tokens<br/>Gemini écrit</div>
+            </div>
+            <div class="rounded-lg border-2 border-amber-300 bg-amber-50 p-4 text-center">
+              <div class="text-2xl font-bold text-amber-900">~1%</div>
+              <div class="text-xs font-semibold text-amber-800 mt-1">🟡 Dérivé déterministe</div>
+              <div class="text-[11px] text-amber-700 mt-2">~50 tokens<br/>Python calcule</div>
+            </div>
+            <div class="rounded-lg border-2 border-gray-400 bg-gray-100 p-4 text-center">
+              <div class="text-2xl font-bold text-gray-800">83-88%</div>
+              <div class="text-xs font-semibold text-gray-700 mt-1">⬜ Hardcoded statique</div>
+              <div class="text-[11px] text-gray-700 mt-2">~4200-4400 tokens<br/>Identique pour toutes les photos</div>
+            </div>
+          </div>
+          <div class="mt-4 text-sm text-gray-700 text-center">Total : <strong>~5000 tokens</strong> par appel à Nano Banana pour <code>ai_add_character</code>.</div>
+        </section>
+
+        <!-- Implications -->
+        <section class="card-dayuse p-6 mb-6">
+          <h3 class="text-base font-semibold mb-3">🔍 Implications structurelles</h3>
+
+          <h4 class="text-sm font-bold text-gray-800 mb-2">Les seules sources de variance créative dans le prompt</h4>
+          <ol class="text-sm text-gray-700 space-y-2 list-decimal pl-5 mb-6">
+            <li><strong>Les <code>safe_zones</code> / <code>unsafe_zones</code></strong> — descriptions textuelles écrites par Gemini Vision (<code>analyze.py</code>). Avec <code>temperature=0</code>, très reproductibles run-to-run sur la même photo.</li>
+            <li><strong>Le <code>scenario_block</code></strong> — depuis V5 (par défaut), écrit dynamiquement par Gemini Vision (<code>scenario_writer.py</code>). C'est LA partie qui varie le plus selon la photo et qui devrait éliminer les bugs "yoga sur tapis de course".</li>
+            <li><strong>Les variables dérivées</strong> (<code>target_n</code>, <code>persona</code>, <code>pool_float_hint</code>, inclusion conditionnelle de RULE #0…) : déterministes, mais varient selon les paramètres d'entrée et l'analyse Gemini.</li>
+          </ol>
+
+          <h4 class="text-sm font-bold text-gray-800 mb-2">Ce que cette répartition révèle</h4>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm border border-gray-200 rounded">
+              <thead class="bg-gray-50">
+                <tr class="text-left text-xs uppercase text-gray-600">
+                  <th class="px-3 py-2 border-b">Constat</th>
+                  <th class="px-3 py-2 border-b">Implication</th>
+                </tr>
+              </thead>
+              <tbody class="text-[13px]">
+                <tr><td class="px-3 py-2 border-b"><strong>83-88 % du prompt est identique à chaque photo</strong></td><td class="px-3 py-2 border-b">Si Nano Banana a du mal à respecter une règle, rajouter des instructions dans la partie hardcoded a un poids de plus en plus faible (dilution attention).</td></tr>
+                <tr><td class="px-3 py-2 border-b"><strong>Règles "no zoom / no decor change" noyées dans 4000+ tokens</strong></td><td class="px-3 py-2 border-b">Difficile pour Nano Banana de prioriser : 200 tokens <code>ABSOLUTE SIZE LIMIT</code> vs 4000 tokens d'autres règles. D'où les bugs de framing / décor altéré.</td></tr>
+                <tr><td class="px-3 py-2 border-b"><strong>Seul ~10-16 % du prompt est adapté à la photo réelle</strong></td><td class="px-3 py-2 border-b">Beaucoup de marge pour pousser plus de personnalisation contextuelle.</td></tr>
+                <tr><td class="px-3 py-2"><strong><code>target_n</code> et <code>safe_zones</code> sont les SEULES variables qui matchent vraiment la scène</strong></td><td class="px-3 py-2">Tout le reste (Face Quality, Water Depth, Photography Style…) reste générique.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Pistes d'amélioration -->
+        <section class="card-dayuse p-6 mb-6">
+          <h3 class="text-base font-semibold mb-1">💡 Pistes pour réduire la part hardcoded</h3>
+          <p class="text-sm text-gray-500 mb-4"><strong>Hypothèse :</strong> plus le prompt est adapté à la photo précise, plus Nano Banana respecte ses contraintes (moins de dilution sur des règles non pertinentes).</p>
+
+          <h4 class="text-sm font-bold text-gray-800 mb-2 mt-4">🟢 Niveau 1 — Quick wins (1-2 jours, opt-in via env var)</h4>
+          <div class="overflow-x-auto mb-4">
+            <table class="w-full text-sm border border-emerald-200 rounded">
+              <thead class="bg-emerald-50">
+                <tr class="text-left text-xs uppercase text-emerald-800">
+                  <th class="px-3 py-2 border-b">Action</th>
+                  <th class="px-3 py-2 border-b">Bloc concerné</th>
+                  <th class="px-3 py-2 border-b">Effet attendu</th>
+                </tr>
+              </thead>
+              <tbody class="text-[13px]">
+                <tr><td class="px-3 py-2 border-b">Faire écrire à Gemini Vision le <code>pitfalls_specific_to_this_photo</code> adapté à cette photo</td><td class="px-3 py-2 border-b">NEGATIVE PROMPT</td><td class="px-3 py-2 border-b">Réduit ~500 tokens de hardcoded en ~150 tokens ciblés</td></tr>
+                <tr><td class="px-3 py-2 border-b">Faire générer le <code>lighting_hint</code> adapté à la palette détectée par Gemini</td><td class="px-3 py-2 border-b">LIGHTING & REALISM</td><td class="px-3 py-2 border-b">Plus pertinent que la phrase générique actuelle</td></tr>
+                <tr><td class="px-3 py-2 border-b">Faire générer le <code>scale_hint_specific</code> (calculé à partir du <code>shot_type</code> Gemini : wide vs medium vs close)</td><td class="px-3 py-2 border-b">SCALE LOCK + ABSOLUTE SIZE LIMIT</td><td class="px-3 py-2 border-b">Évite que la règle "head ≤ 8% frame height" soit ignorée sur les wides</td></tr>
+                <tr><td class="px-3 py-2">Générer dynamiquement le <code>negative_prompt</code> ciblé sur les violations historiques de CE type de photo</td><td class="px-3 py-2">Negative Prompts</td><td class="px-3 py-2">Pertinence ×3, taille réduite</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h4 class="text-sm font-bold text-gray-800 mb-2 mt-4">🟡 Niveau 2 — Refonte architecturale (1-2 semaines)</h4>
+          <p class="text-sm text-gray-700 mb-2">Compression du hardcoded en abstractions plus haute densité :</p>
+          <div class="overflow-x-auto mb-2">
+            <table class="w-full text-sm border border-amber-200 rounded">
+              <thead class="bg-amber-50">
+                <tr class="text-left text-xs uppercase text-amber-800">
+                  <th class="px-3 py-2 border-b">Avant</th>
+                  <th class="px-3 py-2 border-b">Après</th>
+                </tr>
+              </thead>
+              <tbody class="text-[13px]">
+                <tr><td class="px-3 py-2 border-b">Water Depth Physics : 350 tokens de règles détaillées</td><td class="px-3 py-2 border-b"><code>"Subject in pool : chest-deep mandatory (rule reference WD-1)"</code> — 15 tokens, le détail est dans la doc système</td></tr>
+                <tr><td class="px-3 py-2 border-b">Pool Deletion : 200 tokens</td><td class="px-3 py-2 border-b"><code>"Preserve pool surface 100% (rule PD-1)"</code> — 10 tokens</td></tr>
+                <tr><td class="px-3 py-2">Face Quality : 200 tokens</td><td class="px-3 py-2"><code>"Face quality : PHOTO-1 standard (3/4 angle preferred)"</code> — 12 tokens</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="text-[11px] text-amber-700 mt-1 italic">⚠️ Risque : Nano Banana ne reconnaît pas ces "rule references" → tester avant de déployer.</div>
+
+          <h4 class="text-sm font-bold text-gray-800 mb-2 mt-6">🔴 Niveau 3 — Pipeline 2-passes Crop-Inpaint-Paste</h4>
+          <p class="text-sm text-gray-700 mb-2">Approche structurelle qui rend la part hardcoded NON nécessaire :</p>
+          <ol class="text-sm text-gray-700 space-y-1 list-decimal pl-5 mb-3">
+            <li>Gemini Vision retourne une <strong>bounding box précise</strong> où placer le sujet (x, y, w, h)</li>
+            <li>On <strong>crop</strong> l'image autour de cette bbox (+ padding)</li>
+            <li>On envoie à Nano Banana <strong>uniquement le crop</strong> avec un prompt <strong>ultra-court</strong> (~500 tokens : <em>"place subject X on this surface"</em>)</li>
+            <li>On <strong>colle</strong> le résultat dans l'image originale</li>
+          </ol>
+          <div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900">
+            <strong>Bénéfices :</strong>
+            <ul class="list-disc pl-5 mt-1 space-y-0.5 text-[13px]">
+              <li>~80 % du hardcoded devient inutile (pas besoin de "DO NOT change architecture" si le modèle ne voit que la zone autorisée)</li>
+              <li>Élimine quasi tous les bugs <code>architecture_changed</code>, <code>decor_elements_lost</code>, <code>subject_oversized</code></li>
+              <li>Coût : +1 semaine de dev</li>
+            </ul>
+          </div>
+        </section>
+
+        <section class="card-dayuse p-6 mb-6">
+          <h3 class="text-base font-semibold mb-2">📋 Maintenance de cette analyse</h3>
+          <p class="text-sm text-gray-700 mb-2">À mettre à jour quand on modifie significativement :</p>
+          <ul class="text-sm text-gray-700 space-y-1 list-disc pl-5">
+            <li><code>_legacy_prompts.py::build_persona_prompt_v1_long</code> (ajout/suppression de blocs)</li>
+            <li><code>scenario_writer.py::META_PROMPT_TEMPLATE</code> (méta-prompt qui guide Gemini Vision dans la rédaction du scenario)</li>
+            <li><code>analyze.py::SYSTEM_PROMPT</code> (structure du JSON retourné par Gemini Vision sur chaque photo)</li>
+          </ul>
+          <p class="text-sm text-gray-700 mt-2">Si l'audit montre une <strong>dérive</strong> (par ex part probabiliste qui chute), c'est le signal qu'on a re-empilé du hardcoded au lieu de chercher des solutions structurelles.</p>
+          <p class="text-xs text-gray-500 mt-2 italic">Voir aussi <code>docs/PROMPT_ANATOMY.md</code> dans le repo pour la version markdown complète.</p>
+        </section>
+
+      </div><!-- /subtab-prompt-anatomy -->
+
     </div><!-- /tab-doc -->
 
   </div>
@@ -1765,6 +2261,35 @@ photo finale enhanced (jpeg)
         }
         btnIdentifyHotel.disabled = true;
         btnIdentifyHotel.textContent = "🔎 Identification en cours…";
+
+        // ━━ Barre de progression réelle (Martin 14/05/2026) ━━━━━━━━━━━━━━━━━
+        // Affiche un container progress bar dans rp-result + poll le job
+        // booking_scrape côté serveur (déjà initialisé via progress.init avec
+        // total=5 dans /api/identify-hotel). Le job key est "booking_scrape"
+        // sans préfixe slug — c'est un job singleton (pas encore de slug à ce stade).
+        rpResult.classList.remove("hidden");
+        const progressBox = document.createElement("div");
+        progressBox.className = "rounded-lg border border-amber-200 bg-amber-50 p-4";
+        rpResult.innerHTML = "";
+        rpResult.appendChild(progressBox);
+        // Rendu immédiat pour feedback instantané (sans attendre le 1er poll)
+        progressBox.innerHTML = `
+          <div class="text-xs text-gray-700 mb-2">🔎 Démarrage de l'identification…</div>
+          <div class="progress-bar"><div class="progress-fill" style="width: 5%"></div></div>
+          <div class="text-[11px] text-gray-500 mt-1">0/5 (~5-15s : scrape Booking + recherche URLs RP/Expedia/Officiel)</div>
+        `;
+        const stopPoll = pollProgress("", "booking_scrape", (s) => {
+          const cur = Math.max(s.current || 0, 0);
+          const total = Math.max(s.total || 5, 1);
+          const pct = Math.min(100, Math.round(100 * cur / total));
+          const msg = s.message || s.step || "En cours…";
+          progressBox.innerHTML = `
+            <div class="text-xs text-gray-700 mb-2">🔎 ${msg}</div>
+            <div class="progress-bar"><div class="progress-fill" style="width: ${Math.max(5, pct)}%"></div></div>
+            <div class="text-[11px] text-gray-500 mt-1">${cur}/${total} (${pct}%)</div>
+          `;
+        });
+
         try {
           const r = await fetch("/api/identify-hotel", {
             method: "POST",
@@ -1773,6 +2298,7 @@ photo finale enhanced (jpeg)
           });
           const data = await r.json();
           if (!r.ok) throw new Error(data.error || "Erreur");
+          stopPoll();
           state.slug = data.slug;
           state.rp = data.data;
           // Stocke les URLs trouvées + Booking URL (sera utilisé pour pré-remplir Étape 2)
@@ -1787,6 +2313,7 @@ photo finale enhanced (jpeg)
           // Replay : check si un run précédent existe pour ce slug
           if (window.loadRunStatus) window.loadRunStatus(state.slug);
         } catch (e) {
+          stopPoll();
           rpResult.classList.remove("hidden");
           rpResult.innerHTML = `<div class="text-red-600 text-sm">${e.message}</div>`;
         } finally {
@@ -1803,7 +2330,6 @@ photo finale enhanced (jpeg)
       if (urls.official_url && $("step2-official-url")) $("step2-official-url").value = urls.official_url;
       if (urls.expedia_url && $("step2-expedia-url")) $("step2-expedia-url").value = urls.expedia_url;
       if (urls.rp_url && $("step2-rp-url")) $("step2-rp-url").value = urls.rp_url;
-      if (urls.instagram_url && $("step2-instagram-url")) $("step2-instagram-url").value = urls.instagram_url;
       if (urls.booking_url && $("booking-url")) $("booking-url").value = urls.booking_url;
     }
 
@@ -1843,7 +2369,6 @@ photo finale enhanced (jpeg)
               ${row("Site officiel", "official_url", "official")}
               ${row("ResortPass", "rp_url", "rp")}
               ${row("Expedia", "expedia_url", "expedia")}
-              ${row("Instagram", "instagram_url", "instagram")}
             </tbody></table>
           </div>`;
       }
@@ -1974,6 +2499,28 @@ photo finale enhanced (jpeg)
         }
         if (s.id === "multiformat" && !opts.multiformatEnabled) {
           _runProgressState[s.id].state = "skipped";
+        }
+        // ━━ Mode resume_from (Martin 14/05/2026) ━━
+        // En mode "postprocess" : analyse Gemini, dedup, amenities, analyse rich, retouche
+        //   sont chargées du cache → marque-les "done" immédiatement (sinon elles restent
+        //   "pending" car le serveur n'émet pas d'event pour elles).
+        // En mode "selection" : juste analyse + dedup + amenities + analyse rich du cache,
+        //   retouche tourne pour de vrai.
+        if (opts.resumeFrom === "postprocess") {
+          if (["analyse", "dedup", "amenities", "analyse_rich", "retouche"].includes(s.id)) {
+            // Si pas encore done par le serveur, marque skipped (= étape passée sans event)
+            if (_runProgressState[s.id].state === "pending") {
+              _runProgressState[s.id].state = "skipped";
+              _runProgressState[s.id].message = "📂 chargé du cache";
+            }
+          }
+        } else if (opts.resumeFrom === "selection") {
+          if (["analyse", "dedup", "amenities", "analyse_rich"].includes(s.id)) {
+            if (_runProgressState[s.id].state === "pending") {
+              _runProgressState[s.id].state = "skipped";
+              _runProgressState[s.id].message = "📂 chargé du cache";
+            }
+          }
         }
       }
 
@@ -2195,10 +2742,10 @@ photo finale enhanced (jpeg)
       // files = [{name, source}]
       uploadPreview.classList.remove("hidden");
       const SOURCE_BADGE = {
-        official:  { label: "officiel",  color: "bg-dayuse-primary" },
-        booking:   { label: "booking",   color: "bg-blue-500" },
-        rp:        { label: "RP",        color: "bg-purple-500" },
-        instagram: { label: "instagram", color: "bg-pink-500" },
+        official: { label: "officiel", color: "bg-dayuse-primary" },
+        booking:  { label: "booking",  color: "bg-blue-500" },
+        rp:       { label: "RP",       color: "bg-purple-500" },
+        expedia:  { label: "expedia",  color: "bg-amber-500" },
       };
       uploadPreview.innerHTML = `
         <div class="text-xs text-gray-600 mb-2">
@@ -2268,9 +2815,8 @@ photo finale enhanced (jpeg)
         booking: $("src-booking").checked,
         rp: $("src-rp").checked,
         expedia: $("src-expedia") ? $("src-expedia").checked : false,
-        instagram: $("src-instagram").checked,
       };
-      if (!sources.official && !sources.booking && !sources.rp && !sources.expedia && !sources.instagram) {
+      if (!sources.official && !sources.booking && !sources.rp && !sources.expedia) {
         alert("Coche au moins une source.");
         return;
       }
@@ -2296,7 +2842,6 @@ photo finale enhanced (jpeg)
           official_url: $("step2-official-url") ? $("step2-official-url").value.trim() : "",
           expedia_url: $("step2-expedia-url") ? $("step2-expedia-url").value.trim() : "",
           rp_url: $("step2-rp-url") ? $("step2-rp-url").value.trim() : "",
-          instagram_url: $("step2-instagram-url") ? $("step2-instagram-url").value.trim() : "",
         };
         const r = await fetch("/api/fetch-all-sources", {
           method: "POST",
@@ -2336,7 +2881,7 @@ photo finale enhanced (jpeg)
       if (!sources) { el.classList.add("hidden"); return; }
       el.classList.remove("hidden");
       const rows = [];
-      const SOURCE_LABELS = { official: "Site officiel", booking: "Booking.com", rp: "ResortPass", expedia: "Expedia", instagram: "Instagram" };
+      const SOURCE_LABELS = { official: "Site officiel", booking: "Booking.com", rp: "ResortPass", expedia: "Expedia" };
       for (const [key, info] of Object.entries(sources)) {
         const label = SOURCE_LABELS[key] || key;
         if (info.error) {
@@ -2382,7 +2927,7 @@ photo finale enhanced (jpeg)
         if (!r.ok) throw new Error(data.error || "Erreur");
         stopPoll();
         state.uploaded = data.downloaded;
-        uploadSummary.innerHTML = `<span class="text-green-700">✓ ${data.downloaded}/${data.total} photo(s) Booking téléchargée(s) (max1024 HD)</span>`;
+        uploadSummary.innerHTML = `<span class="text-green-700">✓ ${data.downloaded}/${data.total} photo(s) Booking téléchargée(s) (3000×2000 HD)</span>`;
 
         uploadPreview.classList.remove("hidden");
         const okFiles = data.files.filter(f => f.status === "ok");
@@ -2509,11 +3054,21 @@ photo finale enhanced (jpeg)
       const outpaintQuality = (outpaintQualityEl && outpaintQualityEl.value) || 'flash';
       const slowmoToggle = document.getElementById('slowmo-toggle');
       const slowmoEnabled = !!(slowmoToggle && slowmoToggle.checked);
+      // Récupère le mode de reprise (scrape / selection / postprocess) pour que
+      // le front sache quelles étapes serveur seront skip → marque-les visuellement.
+      const resumeRadioForOpts = document.querySelector('input[name="resume-from"]:checked');
+      const resumeFromForOpts = (resumeRadioForOpts && resumeRadioForOpts.value) || 'scrape';
       const runOpts = {
         slowmoEnabled,
         multiformatEnabled: checkedFormats.length > 0,
+        resumeFrom: resumeFromForOpts,
       };
       const runStartedAt = Date.now();
+
+      // Rendu IMMÉDIAT (Martin 14/05/2026) avec un état initial vide pour que
+      // l'utilisateur voie la barre apparaître dès le clic, sans attendre le 1er
+      // poll serveur (sinon en mode postprocess très rapide on peut rater la fenêtre).
+      renderRunProgress(progBox, { step: "starting", current: 0, total: 0, message: "Démarrage du pipeline…" }, runOpts, 0, 0);
 
       const stopPoll = pollProgress(state.slug, "_analyze", (s) => {
         const elapsed = Math.round((Date.now() - runStartedAt) / 1000);
@@ -2574,6 +3129,8 @@ photo finale enhanced (jpeg)
         requestAnimationFrame(() => {
           requestAnimationFrame(initCompareSliders);  // double RAF = paint terminé
           wireExportPdfButton();
+          wireRegenSlowmoButton();
+          wireCopyPromptButtons();
         });
         // Stocke les data du run pour la viz workflow + render
         state.lastRun = data;
@@ -2636,6 +3193,142 @@ photo finale enhanced (jpeg)
           btn.innerHTML = originalLabel;
         }
       };
+    }
+
+    // ━━━ Régénération slowmo (sans re-run le pipeline complet) ━━━━━━━━━━━━━━━
+    // Le bouton ↻ Régénérer dans la carte slowmo permet de relancer juste cet
+    // étape (~$0.35) — utile après un fail credits Higgsfield ou pour tester un
+    // autre mood. Pas besoin de re-faire le coûteux pipeline Gemini Image.
+    // ━━━ Boutons copy prompt (Martin 13/05/2026) ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Bouton "📋 Copier" présent sur chaque prompt IA (Step 1, Step 2, slowmo).
+    // Copie le contenu du data-prompt dans le presse-papier + feedback visuel.
+    // Délégation globale : un seul listener au niveau document, capte tous les clics sur .btn-copy-prompt
+    // Plus robuste que le wire au render car capte aussi les éléments insérés dynamiquement.
+    document.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('.btn-copy-prompt');
+      if (!btn) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const promptEncoded = btn.dataset.prompt || '';
+      const prompt = decodeURIComponent(promptEncoded);
+      const originalLabel = btn.innerHTML;
+      try {
+        await navigator.clipboard.writeText(prompt);
+        btn.innerHTML = '✓ Copié !';
+        btn.classList.add('bg-emerald-100', 'text-emerald-800');
+        btn.classList.remove('bg-amber-100', 'text-amber-800');
+        setTimeout(() => {
+          btn.innerHTML = originalLabel;
+          btn.classList.remove('bg-emerald-100', 'text-emerald-800');
+          btn.classList.add('bg-amber-100', 'text-amber-800');
+        }, 1600);
+      } catch (e) {
+        const ta = document.createElement('textarea');
+        ta.value = prompt;
+        ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); btn.innerHTML = '✓ Copié !'; }
+        catch (_) { btn.innerHTML = '⚠ Erreur'; }
+        document.body.removeChild(ta);
+        setTimeout(() => { btn.innerHTML = originalLabel; }, 1600);
+      }
+    });
+
+    function wireCopyPromptButtons() {
+      // Maintenant no-op : la délégation globale ci-dessus gère tout. Gardé pour compat.
+      document.querySelectorAll('.btn-copy-prompt').forEach(btn => {
+        if (btn.dataset.wired === '1') return;
+        btn.dataset.wired = '1';
+        btn.onclick = async (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const promptEncoded = btn.dataset.prompt || '';
+          const prompt = decodeURIComponent(promptEncoded);
+          const originalLabel = btn.innerHTML;
+          try {
+            await navigator.clipboard.writeText(prompt);
+            btn.innerHTML = '✓ Copié !';
+            btn.classList.add('bg-emerald-100', 'text-emerald-800');
+            btn.classList.remove('bg-amber-100', 'text-amber-800');
+            setTimeout(() => {
+              btn.innerHTML = originalLabel;
+              btn.classList.remove('bg-emerald-100', 'text-emerald-800');
+              btn.classList.add('bg-amber-100', 'text-amber-800');
+            }, 1600);
+          } catch (e) {
+            // Fallback : sélection manuelle via textarea hidden
+            const ta = document.createElement('textarea');
+            ta.value = prompt;
+            ta.style.position = 'fixed'; ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); btn.innerHTML = '✓ Copié !'; }
+            catch (_) { btn.innerHTML = '⚠ Erreur'; }
+            document.body.removeChild(ta);
+            setTimeout(() => { btn.innerHTML = originalLabel; }, 1600);
+          }
+        };
+      });
+    }
+
+    function wireRegenSlowmoButton() {
+      document.querySelectorAll('.btn-regen-slowmo').forEach(btn => {
+        btn.onclick = async () => {
+          if (!state.slug) {
+            alert("Aucun hôtel actif");
+            return;
+          }
+          const originalLabel = btn.innerHTML;
+          btn.disabled = true;
+          btn.style.opacity = '0.6';
+          btn.style.cursor = 'wait';
+          btn.innerHTML = '⏳ Génération…';
+          try {
+            const r = await fetch(`/api/regenerate-slowmo/${encodeURIComponent(state.slug)}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({}),  // pas d'override = on garde la cible/sujet du dernier run
+            });
+            const data = await r.json();
+            if (!r.ok || !data.success) {
+              throw new Error(data.error || `HTTP ${r.status}`);
+            }
+            // Update la card slowmo dans le DOM : remplace la vidéo + le statut
+            // Le plus simple : recharge la vidéo avec un cache-buster
+            const card = btn.closest('.rounded-xl');
+            if (card) {
+              const video = card.querySelector('video');
+              if (video && data.output_url) {
+                video.src = data.output_url + `?t=${Date.now()}`;  // cache-bust
+                video.load();
+              }
+              // Met à jour le sujet affiché
+              const subjectCode = card.querySelector('code');
+              if (subjectCode && data.motion_subject) subjectCode.textContent = data.motion_subject;
+              // Met à jour le coût en bas
+              const meta = card.querySelector('.text-\\[10px\\]');
+              if (meta && data.duration_ms) {
+                meta.innerHTML = `${data.loop_mode || 'ping-pong'} loop · ${data.duration_ms}ms · $${(data.cost_usd || 0).toFixed(4)} <span class="text-emerald-700 font-semibold">· ↻ régénéré</span>`;
+              }
+            }
+            // Update state.lastRun avec le nouveau résultat
+            if (state.lastRun && state.lastRun.slowmo) {
+              state.lastRun.slowmo.video_url = data.output_url;
+              state.lastRun.slowmo.motion_subject = data.motion_subject;
+              state.lastRun.slowmo.cost_usd = data.cost_usd;
+              state.lastRun.slowmo.duration_ms = data.duration_ms;
+            }
+          } catch (e) {
+            alert(`Erreur régénération slowmo : ${e.message}`);
+          } finally {
+            btn.disabled = false;
+            btn.style.opacity = '';
+            btn.style.cursor = '';
+            btn.innerHTML = originalLabel;
+          }
+        };
+      });
     }
 
     // Panneau "Comment ça marche" — explique le scoring, la sélection, l'ordering, les retouches
@@ -2962,11 +3655,20 @@ photo finale enhanced (jpeg)
         const noChangeNote = e.action === 'local_warm_boost'
           ? `<div class="text-[10px] text-gray-400 mt-1 italic">Retouche très subtile (déjà conforme brand). Le slider montre quand même la diff micro-warm.</div>`
           : '';
-        // framing_changed avec warning = altération non voulue (red flag)
-        // framing_changed sans warning = recadrage volontaire (info bénigne)
-        const framingWarn = e.framing_changed && e.framing_warning && e.action !== 'local_smart_crop' && e.action !== 'ai_recompose'
-          ? `<div class="text-[11px] text-red-700 mt-1 font-medium">🚨 Cadrage altéré par l'IA : ${e.framing_warning}. À rejeter manuellement.</div>`
-          : '';
+        // (Martin 13/05/2026) Recadrage IA :
+        //  - Si framing_changed sans violation décor → recadrage propre, info bénigne 📐
+        //  - Si framing_changed AVEC violation `decor_elements_lost` ou similaire → red flag 🚨
+        const hasDecorLoss = e.ai_validation && (e.ai_validation.violations || []).some(
+          v => ['decor_elements_lost', 'architecture_changed', 'scene_regenerated', 'architecture_invented'].includes(v)
+        );
+        let framingWarn = '';
+        if (e.framing_changed && e.action !== 'local_smart_crop' && e.action !== 'ai_recompose') {
+          if (hasDecorLoss) {
+            framingWarn = `<div class="text-[11px] text-red-700 mt-1 font-medium bg-red-50 rounded px-2 py-1 border border-red-200">🚨 Recadrage IA + décor altéré (${e.framing_warning || 'aspect ratio modifié'}). À rejeter manuellement.</div>`;
+          } else {
+            framingWarn = `<div class="text-[11px] text-slate-600 mt-1 italic bg-slate-50 rounded px-2 py-1">📐 Recadrage IA détecté (décor préservé) — ${e.framing_warning || 'aspect ratio modifié'}</div>`;
+          }
+        }
 
         // Validation post-IA — Gemini a comparé avant/après et détecté des violations
         const v = e.ai_validation;
@@ -2978,9 +3680,12 @@ photo finale enhanced (jpeg)
           shallow_water_illusion: "Piscine sans fond (eau trop basse sur sujets debout)",
           subject_on_furniture_top: "Personne debout sur meuble",
           subject_wrong_side_barrier: "Personne du mauvais côté barrière",
+          subject_oversized: "Sujet(s) trop grand(s) (recadrage incohérent)",
           scene_regenerated: "Scène quasi-régénérée",
           inconsistent_scale: "Échelles incohérentes",
           architecture_changed: "Architecture/décor modifié",
+          architecture_invented: "Architecture fabriquée (fenêtre/baie inventée)",
+          decor_elements_lost: "Éléments décoratifs supprimés (plantes/objets disparus)",
           lighting_break: "Lumière incohérente",
         };
         // 4 états possibles après le retry+fallback :
@@ -3213,9 +3918,16 @@ photo finale enhanced (jpeg)
                           const targets = s.clutter_targets && s.clutter_targets.length > 0
                             ? `<div class="text-[10px] text-amber-700 mb-1"><strong>Cibles :</strong> ${s.clutter_targets.join(", ")}</div>` : "";
                           const floatInfo = s.pool_float_used ? `<div class="text-[10px] text-amber-700 mb-1"><strong>Float :</strong> ${s.pool_float_used}</div>` : "";
+                          // Encode le prompt pour data-attr (échappe " et \n)
+                          const promptEncoded = encodeURIComponent(s.prompt || "");
                           return `
                             <div class="border-l-2 border-amber-300 pl-2">
-                              <div class="text-[11px] font-bold text-slate-800">Step ${idx + 1} — ${label}</div>
+                              <div class="flex items-center justify-between gap-2">
+                                <div class="text-[11px] font-bold text-slate-800">Step ${idx + 1} — ${label}</div>
+                                <button class="btn-copy-prompt text-[9px] font-semibold px-2 py-0.5 rounded bg-amber-100 hover:bg-amber-200 text-amber-800 transition-colors"
+                                        data-prompt="${promptEncoded}"
+                                        title="Copier ce prompt dans le presse-papier">📋 Copier</button>
+                              </div>
                               ${targets}${floatInfo}
                               <pre class="text-[10px] font-mono text-slate-600 whitespace-pre-wrap mt-1 max-h-72 overflow-auto bg-slate-50 rounded p-2" style="line-height:1.35;">${(s.prompt || "(prompt vide)").replace(/</g, "&lt;")}</pre>
                             </div>
@@ -3225,11 +3937,131 @@ photo finale enhanced (jpeg)
                     </details>
                   `;
                 }
+                // ━━ Bloc "🧠 Analyse Gemini Vision" (Martin 14/05/2026) ━━━━━━━━━━━━
+                // Affiche le résultat brut de l'analyse sémantique Gemini Vision faite sur
+                // cette photo + l'output du scenario_writer V5 si applicable. Permet de
+                // comprendre ce que Vision a "vu" et décidé pour cette photo.
+                const ga = e.gemini_analysis;
+                let geminiAnalysisBlock = "";
+                if (ga) {
+                  const sw = ga.scenario_writer_v5;
+                  const safe = (ga.safe_zones_for_humans || {});
+                  const cap = (ga.placement_capacity || {});
+                  // Helpers
+                  const escapeHtml = (s) => (s == null ? "" : String(s).replace(/[<>&"]/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[c])));
+                  const pill = (txt, color = "slate") => txt ? `<span class="inline-block text-[10px] px-1.5 py-0.5 rounded bg-${color}-100 text-${color}-800 mr-1">${escapeHtml(txt)}</span>` : "";
+                  const list = (items, color = "slate") => (items || []).length === 0
+                    ? `<span class="text-[10px] text-slate-400 italic">(rien)</span>`
+                    : items.map(i => `<li class="text-[10px] text-${color}-800 leading-snug">${escapeHtml(typeof i === "string" ? i : JSON.stringify(i))}</li>`).join("");
+                  // Section CONTEXTE (factual)
+                  const contextLine = [
+                    ga.category ? `cat: <strong>${escapeHtml(ga.category)}</strong>` : null,
+                    (ga.categories_secondary || []).length ? `sec: ${ga.categories_secondary.map(escapeHtml).join("/")}` : null,
+                    ga.shot_type && ga.shot_type.framing ? `cadrage: ${escapeHtml(ga.shot_type.framing)}` : null,
+                    ga.time_of_day ? `${escapeHtml(ga.time_of_day)}` : null,
+                    ga.human_count != null ? `${ga.human_count} humain(s)` : null,
+                    ga.human_presence_type ? `(${escapeHtml(ga.human_presence_type)})` : null,
+                  ].filter(Boolean).join(" · ");
+                  const ambianceLine = [
+                    ga.ambiance ? `ambiance: <strong>${escapeHtml(ga.ambiance)}</strong>` : null,
+                    ga.palette_alignment ? `palette: ${escapeHtml(ga.palette_alignment)}` : null,
+                    ga.exposure ? `expo: ${escapeHtml(ga.exposure)}` : null,
+                    ga.white_balance ? `WB: ${escapeHtml(ga.white_balance)}` : null,
+                  ].filter(Boolean).join(" · ");
+                  // Section scenario_writer V5 (optionnelle, seulement si Vision a écrit le scenario)
+                  let swSection = "";
+                  if (sw) {
+                    if (sw.used) {
+                      swSection = `
+                        <div class="border-l-2 border-emerald-400 pl-2 mt-2 bg-emerald-50/40 py-1.5 rounded">
+                          <div class="text-[10px] font-bold text-emerald-800 uppercase tracking-wide">🤖 Scenario Writer V5 (Gemini a rédigé le scenario)</div>
+                          <div class="text-[10px] text-slate-700 mt-1 leading-snug">
+                            <div><strong>Feasibility:</strong> ${escapeHtml(sw.feasibility || "?")}${sw.max_subjects_realistic != null ? ` · <strong>max sujets:</strong> ${sw.max_subjects_realistic}` : ""}</div>
+                            ${sw.primary_anchor ? `<div class="mt-1"><strong>Anchor primary:</strong> <em>«${escapeHtml(sw.primary_anchor)}»</em></div>` : ""}
+                            ${sw.pitfalls && sw.pitfalls.length ? `<div class="mt-1"><strong>Pièges identifiés:</strong><ul class="list-disc list-inside ml-1 mt-0.5">${list(sw.pitfalls, "amber")}</ul></div>` : ""}
+                            <div class="text-[9px] text-emerald-700 mt-1">Coût Vision: $${(sw.cost_usd || 0).toFixed(4)} · ${sw.duration_ms || 0}ms</div>
+                          </div>
+                        </div>
+                      `;
+                    } else {
+                      swSection = `
+                        <div class="border-l-2 border-amber-400 pl-2 mt-2 bg-amber-50/40 py-1.5 rounded">
+                          <div class="text-[10px] font-bold text-amber-800 uppercase tracking-wide">🤖 Scenario Writer V5 (skip / fallback)</div>
+                          <div class="text-[10px] text-slate-700 mt-1">${sw.skip_reason || sw.error || "skip (raison inconnue)"}</div>
+                        </div>
+                      `;
+                    }
+                  }
+                  // Sensations émotionnelles (si présentes)
+                  const sensations = (ga.sensations || []).length ? `<div class="text-[10px] text-purple-700 mt-1 italic">✨ ${ga.sensations.map(escapeHtml).join(" · ")}</div>` : "";
+                  // Pillar scores (freedom/wellness/experience)
+                  const ps = ga.pillar_scores || {};
+                  const pillarLine = (ps.freedom != null || ps.wellness != null || ps.experience != null)
+                    ? `<div class="text-[10px] text-slate-600 mt-0.5">Piliers brand: 🕊 freedom <strong>${ps.freedom || 0}</strong> · 🧘 wellness <strong>${ps.wellness || 0}</strong> · ✨ experience <strong>${ps.experience || 0}</strong></div>`
+                    : "";
+
+                  geminiAnalysisBlock = `
+                    <details class="mt-1.5 border border-blue-200 rounded">
+                      <summary class="text-[10px] font-semibold text-blue-800 cursor-pointer px-2 py-1.5 bg-blue-50 hover:bg-blue-100 transition-colors uppercase tracking-wide">
+                        🧠 Analyse Gemini Vision sur cette photo — clique pour déplier
+                      </summary>
+                      <div class="px-2 py-2 space-y-2 bg-white text-[10px]">
+
+                        <div class="border-l-2 border-blue-300 pl-2">
+                          <div class="text-[10px] font-bold text-blue-800 uppercase tracking-wide">📸 Contexte factuel</div>
+                          <div class="text-slate-700 mt-1">${contextLine || "(aucune donnée)"}</div>
+                          <div class="text-slate-700 mt-0.5">${ambianceLine}</div>
+                          ${ga.hero_quality && ga.hero_quality.is_hero ? `<div class="text-[10px] text-orange-700 mt-0.5 font-semibold">🌟 Photo hero détectée (${escapeHtml(ga.hero_quality.reason || "")})</div>` : ""}
+                          ${sensations}
+                          ${pillarLine}
+                        </div>
+
+                        <div class="border-l-2 border-emerald-300 pl-2">
+                          <div class="text-[10px] font-bold text-emerald-800 uppercase tracking-wide">✅ Zones SAFE identifiées (où placer un humain)</div>
+                          <ul class="list-disc list-inside ml-1 mt-1 space-y-0.5">${list(safe.safe_areas, "emerald")}</ul>
+                          ${safe.max_recommended != null ? `<div class="text-[10px] text-emerald-700 mt-1">Max humains recommandé par Vision : <strong>${safe.max_recommended}</strong></div>` : ""}
+                        </div>
+
+                        <div class="border-l-2 border-red-300 pl-2">
+                          <div class="text-[10px] font-bold text-red-800 uppercase tracking-wide">🚫 Zones UNSAFE (interdites)</div>
+                          <ul class="list-disc list-inside ml-1 mt-1 space-y-0.5">${list(safe.unsafe_areas, "red")}</ul>
+                        </div>
+
+                        ${cap.total != null ? `
+                        <div class="border-l-2 border-purple-300 pl-2">
+                          <div class="text-[10px] font-bold text-purple-800 uppercase tracking-wide">🪑 Capacité placement</div>
+                          <div class="text-slate-700 mt-1">Total capacité estimée : <strong>${cap.total}</strong> personne(s)</div>
+                          ${Object.keys(cap.breakdown || {}).length ? `<div class="text-[10px] text-purple-700 mt-0.5">Breakdown: ${Object.entries(cap.breakdown).map(([k,v]) => `${escapeHtml(k)}=${v}`).join(" · ")}</div>` : ""}
+                        </div>
+                        ` : ""}
+
+                        ${(ga.issues || []).length ? `
+                        <div class="border-l-2 border-amber-300 pl-2">
+                          <div class="text-[10px] font-bold text-amber-800 uppercase tracking-wide">⚠️ Issues / problèmes détectés</div>
+                          <ul class="list-disc list-inside ml-1 mt-1 space-y-0.5">${list(ga.issues, "amber")}</ul>
+                        </div>
+                        ` : ""}
+
+                        ${(ga.clutter_to_remove || []).length ? `
+                        <div class="border-l-2 border-orange-300 pl-2">
+                          <div class="text-[10px] font-bold text-orange-800 uppercase tracking-wide">🧹 Clutter à retirer (identifié par Vision)</div>
+                          <ul class="list-disc list-inside ml-1 mt-1 space-y-0.5">${list(ga.clutter_to_remove, "orange")}</ul>
+                        </div>
+                        ` : ""}
+
+                        ${swSection}
+
+                      </div>
+                    </details>
+                  `;
+                }
+
                 return `
                   <div class="border border-slate-200 rounded p-2 bg-slate-50">
                     <div class="text-[10px] font-semibold text-slate-700 mb-1 uppercase tracking-wide">Transformations appliquées</div>
                     <div class="grid grid-cols-2 gap-1 text-[10px]">${cells}</div>
                     ${noHumanNote}
+                    ${geminiAnalysisBlock}
                     ${promptsBlock}
                   </div>
                 `;
@@ -3278,7 +4110,7 @@ photo finale enhanced (jpeg)
             </div>
           </div>
         `;
-      }).join("");
+      });  // ⚠ pas de .join — on garde un array pour pairer chaque card avec sa photo RP correspondante par index
 
       const enhancedSection = (d.enhanced || []).length
         ? `
@@ -3312,26 +4144,58 @@ photo finale enhanced (jpeg)
             </div>
           ` : '')}
           ${(() => {
-            // ━━ Layout : pack final (gauche, photos empilées verticalement) + rail ResortPass (droite, sticky) ━━
+            // ━━ Layout : 2 colonnes ligne-par-ligne (Martin 14/05/2026) ━━━━━━━━━━━━━━━━
+            // Colonne gauche = card photo Dayuse complète (#i)
+            // Colonne droite = photo RP correspondante au RANG i (= ordre original RP)
+            // But : comparer la PRIORISATION Dayuse vs RP sur les N premières positions.
+            // Pas d'appariement sémantique — c'est juste l'ordre vs l'ordre.
             const rpUrls = (d.hotel && d.hotel.rp_image_urls) || [];
-            const rpRailHTML = rpUrls.length ? `
-              <aside class="rp-rail">
-                <div class="rp-rail-header">
-                  <div class="text-xs font-semibold text-dayuse-ink">📋 Ordre ResortPass</div>
-                  <div class="text-[10px] text-gray-500">${rpUrls.length} photos · ordre original RP</div>
-                </div>
-                <ol class="p-2 space-y-2 m-0">
-                  ${rpUrls.map((u, idx) => `
-                    <li class="flex gap-2 items-start">
-                      <span class="shrink-0 text-[10px] font-mono font-bold text-gray-500 w-5 text-right pt-1">${idx + 1}</span>
-                      <a href="${u}" target="_blank" rel="noopener" class="block flex-1 rounded-md overflow-hidden border border-gray-200 hover:border-amber-400 transition">
-                        <img src="${u}" loading="lazy" alt="RP ${idx + 1}" class="w-full aspect-video object-cover bg-gray-100">
-                      </a>
-                    </li>
-                  `).join('')}
-                </ol>
-              </aside>
+            const rpUrl_RP = (d.hotel && d.hotel.rp_url) || null;
+            const hasRPUrls = rpUrls.length > 0;
+            // Message debug si on n'a pas trouvé d'URL RP
+            const rpDebugMessage = !hasRPUrls ? `
+              <div class="mb-3 px-3 py-2 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-800">
+                🔍 <strong>URL ResortPass non trouvée pour cet hôtel</strong> — pas de comparaison côte-à-côte disponible.
+                <span class="text-[11px] text-amber-700 ml-1">(rp_finder a échoué : DDG + Gemini cascade)</span>
+              </div>
             ` : '';
+            // Construit chaque "row" : card Dayuse à gauche + photo RP correspondante à droite
+            const rowsHTML = enhancedHTML.map((cardHTML, i) => {
+              const rpURL = rpUrls[i];  // photo RP au même rang
+              let rpCell = '';
+              if (!hasRPUrls) {
+                rpCell = ''; // colonne droite vide si aucune URL RP du tout
+              } else if (rpURL) {
+                rpCell = `
+                  <div class="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                    <div class="px-3 py-2 flex items-center justify-between bg-gray-50 border-b border-gray-200">
+                      <span class="text-[11px] font-bold text-gray-700">📋 ResortPass #${i + 1}</span>
+                      <a href="${rpURL}" target="_blank" rel="noopener" class="text-[10px] text-amber-700 hover:text-amber-900 font-semibold">↗ ouvrir</a>
+                    </div>
+                    <a href="${rpURL}" target="_blank" rel="noopener" class="block">
+                      <img src="${rpURL}" loading="lazy" alt="RP ${i + 1}" class="w-full bg-gray-100" style="object-fit: cover; aspect-ratio: 16/10;">
+                    </a>
+                  </div>
+                `;
+              } else {
+                rpCell = `
+                  <div class="bg-gray-50 border border-dashed border-gray-300 rounded-xl flex items-center justify-center text-center p-6" style="min-height: 200px;">
+                    <div>
+                      <div class="text-[11px] font-bold text-gray-500">📋 RP #${i + 1}</div>
+                      <div class="text-[10px] text-gray-400 italic mt-1">RP a moins de ${rpUrls.length + 1} photos<br/>(pas de comparaison à ce rang)</div>
+                    </div>
+                  </div>
+                `;
+              }
+              // Layout 2 colonnes (1 colonne sur mobile, 2 sur desktop)
+              // Pas de sticky sur la colonne RP (Martin 14/05/2026) — gênant au scroll.
+              return `
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start mb-3">
+                  <div class="min-w-0">${cardHTML}</div>
+                  ${hasRPUrls ? `<div class="min-w-0">${rpCell}</div>` : ''}
+                </div>
+              `;
+            }).join('');
             const slowmoHTML = d.slowmo ? `
               <div class="mb-4 rounded-xl border-2 ${d.slowmo.success ? 'border-orange-300 bg-gradient-to-br from-amber-50 to-orange-50' : 'border-red-300 bg-red-50'} overflow-hidden">
                 <div class="px-4 py-3 flex items-center justify-between flex-wrap gap-3">
@@ -3350,24 +4214,73 @@ photo finale enhanced (jpeg)
                       ${d.slowmo.model || ''} · ${d.slowmo.duration_s || 5}s × ping-pong = ${(d.slowmo.duration_s || 5) * 2}s loop · ${d.slowmo.duration_ms}ms · $${(d.slowmo.cost_usd || 0).toFixed(4)}
                     </div>
                   </div>
-                  ${d.slowmo.success && d.slowmo.video_url ? `
-                    <a href="${d.slowmo.video_url}" download class="btn-dayuse-ghost inline-flex items-center gap-1.5" style="padding: 6px 14px; font-size: 11px;">⬇ mp4</a>
-                  ` : ''}
+                  <div class="flex items-center gap-2 flex-wrap">
+                    ${d.slowmo.success && d.slowmo.video_url ? `
+                      <a href="${d.slowmo.video_url}" download class="btn-dayuse-ghost inline-flex items-center gap-1.5" style="padding: 6px 14px; font-size: 11px;">⬇ mp4</a>
+                    ` : ''}
+                    <button class="btn-regen-slowmo btn-dayuse-ghost inline-flex items-center gap-1.5"
+                            style="padding: 6px 14px; font-size: 11px;"
+                            title="Re-génère le slow-motion loop sur la même photo cible (coût ~$0.35)">
+                      ↻ Régénérer ($0.35)
+                    </button>
+                  </div>
                 </div>
                 ${d.slowmo.success && d.slowmo.video_url ? `
                   <video src="${d.slowmo.video_url}" autoplay loop muted playsinline class="w-full max-h-96 object-contain bg-black"></video>
                 ` : `
                   <div class="px-4 pb-3 text-xs text-red-700">${d.slowmo.error || 'Génération échouée'}</div>
                 `}
+                ${d.slowmo.prompt ? `
+                  <details class="px-4 py-2 border-t border-amber-200/50 bg-white/50">
+                    <summary class="cursor-pointer text-[11px] font-semibold text-gray-700 hover:text-gray-900">🔍 Prompt envoyé à Higgsfield (clique pour déplier)</summary>
+                    <div class="mt-2 flex items-center justify-between gap-2 mb-1">
+                      <span class="text-[10px] text-gray-500">Modèle: ${d.slowmo.model || 'kling-2.1-pro'} · ${d.slowmo.duration_s || 5}s</span>
+                      <button class="btn-copy-prompt text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-100 hover:bg-amber-200 text-amber-800 transition-colors"
+                              data-prompt="${encodeURIComponent(d.slowmo.prompt || '')}"
+                              title="Copier dans le presse-papier">📋 Copier</button>
+                    </div>
+                    <pre class="text-[10px] text-gray-700 bg-gray-50 p-2 rounded whitespace-pre-wrap font-mono leading-relaxed">${d.slowmo.prompt.replace(/</g, '&lt;')}</pre>
+                  </details>
+                ` : ''}
+                ${d.slowmo.success && d.slowmo.target_filename ? `
+                  <details class="px-4 py-2 border-t border-amber-200/50 bg-white/30">
+                    <summary class="cursor-pointer text-[11px] font-semibold text-gray-700 hover:text-gray-900">💡 Pourquoi cette photo a été choisie ?</summary>
+                    <div class="mt-2 text-[11px] text-gray-700 leading-relaxed space-y-1.5">
+                      <div><strong>Photo cible :</strong> <code class="bg-white px-1 py-0.5 rounded text-[10px]">${d.slowmo.target_filename}</code> (top ${d.slowmo.target_slot || '?'} du pack final)</div>
+                      <div><strong>Sujet en mouvement :</strong> <code class="bg-white px-1 py-0.5 rounded text-[10px]">${d.slowmo.motion_subject || 'ambient'}</code></div>
+                      <div class="text-gray-600 italic">
+                        L'algorithme <code class="bg-white px-1 py-0.5 rounded text-[10px]">pick_slowmo_target()</code> sélectionne automatiquement la photo finale qui maximise :
+                        <ul class="list-disc ml-5 mt-1 space-y-0.5">
+                          <li>Présence d'un <strong>élément animable</strong> (eau de piscine, rideaux, feuillage, bouée, fontaine, feu, vapeur)</li>
+                          <li><strong>Score élevé</strong> du pack (top 3 prioritaire)</li>
+                          <li><strong>Absence d'humains ajoutés par IA</strong> (Higgsfield Kling tend à déformer les visages en mouvement)</li>
+                          <li>Photo retouchée disponible (enhanced/, sinon original)</li>
+                        </ul>
+                        Pour cette photo : le sujet animable détecté est <strong>${d.slowmo.motion_subject || 'ambient'}</strong>, qui donne un mouvement cinemagraph doux (ping-pong de 5s × 2 = 10s loop).
+                      </div>
+                    </div>
+                  </details>
+                ` : ''}
+              </div>
+            ` : '';
+            // En-tête de colonnes (Dayuse | ResortPass), sticky en haut pour rester visible pendant le scroll
+            const columnsHeader = hasRPUrls ? `
+              <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-2 sticky top-0 z-10 bg-white py-2 border-b border-gray-200">
+                <div class="text-xs font-bold text-dayuse-ink uppercase tracking-wide flex items-center gap-2">
+                  🟠 Pack Dayuse <span class="text-[10px] font-normal text-gray-500">(ordre par notre algorithme)</span>
+                </div>
+                <div class="text-xs font-bold text-gray-700 uppercase tracking-wide flex items-center gap-2">
+                  📋 ResortPass ${rpUrl_RP ? `<a href="${rpUrl_RP}" target="_blank" rel="noopener" class="text-[10px] font-normal text-amber-700 hover:text-amber-900">↗ voir source</a>` : ''}
+                  <span class="text-[10px] font-normal text-gray-500">(ordre original sur RP)</span>
+                </div>
               </div>
             ` : '';
             return `
-              <div class="final-pack-layout">
-                <div class="final-pack-main">
-                  ${slowmoHTML}
-                  <div class="flex flex-col gap-3 mb-6">${enhancedHTML}</div>
-                </div>
-                ${rpRailHTML}
+              <div>
+                ${slowmoHTML}
+                ${rpDebugMessage}
+                ${columnsHeader}
+                <div class="flex flex-col gap-0 mb-6">${rowsHTML}</div>
               </div>
             `;
           })()}

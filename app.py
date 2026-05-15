@@ -37,8 +37,6 @@ import spend
 import dedup_vlm
 import amenity_verifier
 import photo_journey as photo_journey_mod
-import instagram_finder
-import instagram_scraper
 import booking_amenities_extractor
 import slowmo_higgsfield
 import pdf_export
@@ -128,12 +126,12 @@ def api_scrape_booking():
 def api_identify_hotel():
     """Étape 1 unifiée (Martin 12/05/2026) : Booking est la clé d'entrée, on
     enrichit en parallèle avec les URLs des autres sources (RP, Expedia,
-    Site officiel, Instagram) via DDG/Gemini cascade.
+    Site officiel) via DDG/Gemini cascade.
 
     Body : {url: "https://www.booking.com/hotel/..."}
     Output : {
         slug, data (= meta hôtel comme /api/scrape-booking),
-        urls: {rp_url, expedia_url, official_url, instagram_url},
+        urls: {rp_url, expedia_url, official_url},
         urls_meta: {rp: {source, error?}, expedia: {...}, ...}
     }
 
@@ -146,7 +144,8 @@ def api_identify_hotel():
         return jsonify({"error": "URL doit être une fiche hôtel Booking."}), 400
 
     progress.init("booking_scrape", total=5, step="extracting")
-    progress.update("booking_scrape", message="Scraping Booking + analyse Gemini…")
+    progress.update("booking_scrape", current=1, total=5,
+                    message="📥 Scraping fiche Booking + analyse Gemini…")
 
     # ━ Étape 1 : Scrape Booking pour récupérer nom/ville/amenities ━
     try:
@@ -164,14 +163,16 @@ def api_identify_hotel():
     slug = f"booking-{booking_slug}"
     rp_dir = ROOT / "data" / "rp"
     rp_dir.mkdir(parents=True, exist_ok=True)
+    progress.update("booking_scrape", current=2, total=5,
+                    message=f"💾 Booking parsée : {(data.get('name') or '?')[:40]} — sauvegarde…")
     with open(rp_dir / f"{slug}.json", "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
     # ━ Étape 2 : Recherche des URLs sources en PARALLÈLE ━
     # Chaque finder fait DDG (3s + retry 3s) + fallback Gemini (1-2s).
     # En parallèle (4 threads) : tout doit prendre ~5-8s max.
-    progress.update("booking_scrape", current=2, total=5,
-                    message="Recherche des URLs RP / Expedia / Site officiel / Instagram…")
+    progress.update("booking_scrape", current=3, total=5,
+                    message="🔎 Recherche URL ResortPass (DDG + Gemini fallback)…")
     name = data.get("name") or ""
     city = data.get("city") or ""
     country = data.get("country") or ""
@@ -196,21 +197,68 @@ def api_identify_hotel():
         except Exception as e:
             return {"url": None, "error": f"crash: {e}"}
 
-    def _find_instagram():
+    # Note : les 3 finders tournent en parallèle. Timeout global 20s/finder pour
+    # éviter qu'un finder lent (ex: hotel_site_finder qui boot Playwright sur une
+    # URL douteuse) bloque toute l'identification. as_completed remonte les futurs
+    # dans l'ordre de complétion réelle.
+    # Échelle d'avancement : étape 2/2 = recherche URLs (de 3/5 à 5/5)
+    #   - 3/5 = recherche en cours (aucune source résolue)
+    #   - 4/5 = 1ère source résolue
+    #   - 4.5/5 = 2ème (arrondi visuel)
+    #   - 5/5 = 3ème (toutes résolues)
+    from concurrent.futures import as_completed, TimeoutError as FutureTimeout
+    FINDER_TIMEOUT_S = 20
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        futures = {
+            ex.submit(_find_rp): ("rp", "📍 ResortPass"),
+            ex.submit(_find_expedia): ("expedia", "✈️ Expedia"),
+            ex.submit(_find_official): ("official", "🌐 Site officiel"),
+        }
+        completed_results = {}
+        completed_count = 0
+        import time as _time
+        t_start = _time.time()
+        # Boucle sur as_completed AVEC timeout cumulé
         try:
-            return instagram_finder.find_hotel_instagram(name, city, country)
-        except Exception as e:
-            return {"url": None, "error": f"crash: {e}"}
-
-    with ThreadPoolExecutor(max_workers=4) as ex:
-        f_rp = ex.submit(_find_rp)
-        f_expedia = ex.submit(_find_expedia)
-        f_official = ex.submit(_find_official)
-        f_instagram = ex.submit(_find_instagram)
-        rp_result = f_rp.result()
-        expedia_result = f_expedia.result()
-        official_result = f_official.result()
-        instagram_result = f_instagram.result()
+            for fut in as_completed(futures, timeout=FINDER_TIMEOUT_S):
+                key, label = futures[fut]
+                try:
+                    completed_results[key] = fut.result(timeout=0.5)
+                except Exception as e:
+                    completed_results[key] = {"url": None, "error": f"crash: {str(e)[:100]}"}
+                completed_count += 1
+                url_found = (completed_results[key] or {}).get("url")
+                status = "✓ trouvée" if url_found else "✗ non trouvée"
+                elapsed = int(_time.time() - t_start)
+                # Mapping cumul → indicateur visuel : 4, 4, 5 (capé à 5)
+                progress.update(
+                    "booking_scrape",
+                    current=min(3 + completed_count, 5),
+                    total=5,
+                    message=f"{label} {status} ({completed_count}/3 sources · {elapsed}s)",
+                )
+        except FutureTimeout:
+            # Au moins un finder n'a pas répondu dans le délai → on flag les manquants
+            pass
+        # Pour les finders qui n'ont pas répondu (timeout) → flag explicite
+        for fut, (key, label) in futures.items():
+            if key not in completed_results:
+                completed_results[key] = {
+                    "url": None,
+                    "error": f"timeout {FINDER_TIMEOUT_S}s (le finder n'a pas répondu à temps)",
+                }
+                # Tente d'annuler le futur (best-effort, marche seulement si pas démarré)
+                fut.cancel()
+                completed_count += 1
+                progress.update(
+                    "booking_scrape",
+                    current=min(3 + completed_count, 5),
+                    total=5,
+                    message=f"{label} ⏱ timeout {FINDER_TIMEOUT_S}s — passe à la suite",
+                )
+        rp_result = completed_results.get("rp")
+        expedia_result = completed_results.get("expedia")
+        official_result = completed_results.get("official")
 
     # ━ Construction du payload de retour ━
     urls = {
@@ -218,13 +266,11 @@ def api_identify_hotel():
         "rp_url": (rp_result or {}).get("url"),
         "expedia_url": (expedia_result or {}).get("url"),
         "official_url": (official_result or {}).get("url"),
-        "instagram_url": (instagram_result or {}).get("url"),
     }
     urls_meta = {
         "rp": rp_result or {},
         "expedia": expedia_result or {},
         "official": official_result or {},
-        "instagram": instagram_result or {},
     }
 
     progress.finish("booking_scrape", message="Identification terminée")
@@ -286,7 +332,7 @@ def api_fetch_rp_photos():
 @app.route("/api/fetch-all-sources", methods=["POST"])
 def api_fetch_all_sources():
     """Orchestre la récupération depuis les sources cochées (officiel/booking/rp/
-    expedia/instagram). Dédup pHash inter-sources. Stocke tout dans data/uploads/{slug}/.
+    expedia). Dédup pHash inter-sources. Stocke tout dans data/uploads/{slug}/.
 
     Body : {
         slug,
@@ -294,8 +340,7 @@ def api_fetch_all_sources():
         official_url?,       # URL site officiel pré-saisie (skip DDG/Gemini si fournie)
         expedia_url?,        # idem Expedia
         rp_url?,             # idem ResortPass (sinon utilise rp_data.image_urls)
-        instagram_url?,      # idem Instagram
-        sources: {official, booking, rp, expedia, instagram}
+        sources: {official, booking, rp, expedia}
     }
     """
     payload = request.get_json(silent=True) or {}
@@ -304,8 +349,7 @@ def api_fetch_all_sources():
     official_url_override = (payload.get("official_url") or "").strip() or None
     expedia_url_override = (payload.get("expedia_url") or "").strip() or None
     rp_url_override = (payload.get("rp_url") or "").strip() or None
-    instagram_url_override = (payload.get("instagram_url") or "").strip() or None
-    sources = payload.get("sources") or {"official": True, "booking": True, "rp": True, "expedia": True, "instagram": True}
+    sources = payload.get("sources") or {"official": True, "booking": True, "rp": True, "expedia": True}
 
     if not slug:
         return jsonify({"error": "slug manquant (scrape RP d'abord)"}), 400
@@ -364,7 +408,15 @@ def api_fetch_all_sources():
                 "photos_downloaded": len(ok),
                 "photos_found": len(urls),
                 "pages_visited": len(extract.get("pages_visited") or []),
+                "engine": extract.get("engine"),  # "playwright_stealth" ou "patchright"
+                "fallback_from": extract.get("fallback_from"),
+                "blocked_signal": extract.get("blocked_signal"),
             }
+            if not urls and extract.get("blocked_signal"):
+                sources_summary["official"]["error"] = (
+                    f"🛡️ Site bloqué ({extract['blocked_signal']}). "
+                    "Même patchright n'a pas pu extraire de photo."
+                )
         else:
             sources_summary["official"] = {
                 "url": None,
@@ -393,27 +445,81 @@ def api_fetch_all_sources():
         except Exception as e:
             sources_summary["booking"] = {"url": booking_url, "error": str(e)[:200], "photos_downloaded": 0}
 
-    # ━━━ SOURCE 3 : RP photos (fallback ou complément) ━━━
+    # ━━━ SOURCE 3 : RP photos ━━━
+    # Deux cas :
+    #   (a) Workflow Booking-first : rp_data vient de Booking et n'a PAS d'image_urls.
+    #       → On scrape l'URL RP fournie (rp_url_override) avec rp_scraper.scrape().
+    #   (b) Workflow RP-first (legacy) : rp_data vient de /api/scrape (RP direct)
+    #       et contient déjà image_urls. → On les utilise direct.
     if sources.get("rp"):
         progress.update(f"{slug}_fetch_all", step="rp", current=75, total=100,
                         message="Téléchargement photos ResortPass…")
-        urls = rp_data.get("image_urls") or []
-        results = rp_scraper.download_photos(urls, hotel_dir / "_rp_temp")
-        ok = [r for r in results if r["status"] == "ok"]
-        for i, r in enumerate(ok, 1):
-            old = hotel_dir / "_rp_temp" / r["filename"]
-            new_name = f"rp_{i:03d}_{r['filename'].split('_', 2)[-1] if '_' in r['filename'] else r['filename']}"
-            new_path = hotel_dir / new_name
-            if old.exists():
-                old.rename(new_path)
-                all_files.append({"name": new_name, "size": r["size"], "source": "rp"})
-        (hotel_dir / "_rp_temp").rmdir() if (hotel_dir / "_rp_temp").exists() and not list((hotel_dir / "_rp_temp").iterdir()) else None
-        sources_summary["rp"] = {"photos_downloaded": len(ok)}
+        urls = []
+        rp_used_url = None
+        if rp_url_override and rp_url_override.startswith("https://www.resortpass.com/hotels/"):
+            # Workflow Booking-first : on doit aller chercher les image_urls
+            # depuis la fiche RP, parce que rp_data (= Booking) ne les a pas.
+            progress.update(f"{slug}_fetch_all", step="rp_scraping", current=72, total=100,
+                            message=f"Scrape fiche ResortPass {rp_url_override[:60]}…")
+            try:
+                rp_scrape = rp_scraper.scrape(rp_url_override)
+                urls = rp_scrape.get("image_urls") or []
+                rp_used_url = rp_url_override
+            except Exception as e:
+                sources_summary["rp"] = {
+                    "url": rp_url_override,
+                    "error": f"Scrape RP échoué : {str(e)[:150]}",
+                    "photos_downloaded": 0,
+                }
+                urls = []
+        if not urls and rp_data.get("image_urls"):
+            # Fallback workflow RP-first : on utilise les image_urls de rp_data
+            urls = rp_data.get("image_urls") or []
+            rp_used_url = rp_data.get("rp_url")
+
+        if urls:
+            results = rp_scraper.download_photos(urls, hotel_dir / "_rp_temp")
+            ok = [r for r in results if r["status"] == "ok"]
+            for i, r in enumerate(ok, 1):
+                old = hotel_dir / "_rp_temp" / r["filename"]
+                new_name = f"rp_{i:03d}_{r['filename'].split('_', 2)[-1] if '_' in r['filename'] else r['filename']}"
+                new_path = hotel_dir / new_name
+                if old.exists():
+                    old.rename(new_path)
+                    all_files.append({"name": new_name, "size": r["size"], "source": "rp"})
+            tmp = hotel_dir / "_rp_temp"
+            if tmp.exists() and not list(tmp.iterdir()):
+                tmp.rmdir()
+            sources_summary["rp"] = {
+                "url": rp_used_url,
+                "photos_downloaded": len(ok),
+                "photos_found": len(urls),
+            }
+            # ━━ Persiste les URLs RP dans rp_data.json (Martin 14/05/2026) ━━
+            # Sans ça, /api/run lit rp_data.image_urls=[] et le front affiche
+            # "URL ResortPass non trouvée" alors qu'on a bien scrapé les photos.
+            # Workflow Booking-first : rp_data vient de Booking et n'a PAS ces champs.
+            try:
+                rp_data["image_urls"] = urls
+                rp_data["rp_url"] = rp_used_url
+                rp_data["image_count"] = len(urls)
+                with open(rp_path, "w") as f:
+                    json.dump(rp_data, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                print(f"[rp persist] failed: {e}")
+        elif "rp" not in sources_summary:
+            sources_summary["rp"] = {
+                "url": None,
+                "error": "Aucune URL RP fournie et rp_data sans image_urls",
+                "photos_downloaded": 0,
+            }
 
     # ━━━ SOURCE 4 : Expedia ━━━
-    # URL trouvée automatiquement par Gemini (comme pour site officiel + Instagram).
-    # Risque connu : Gemini peut halluciner l'ID numérique (h{ID}) → URL inexistante
-    # → 0 photo. Dans ce cas on log proprement, le pipeline continue.
+    # URL trouvée automatiquement par DuckDuckGo + Gemini fallback (comme site officiel).
+    # Risques connus :
+    #   1. Gemini peut halluciner l'ID numérique (h{ID}) → URL inexistante.
+    #   2. Expedia détecte Playwright → page "Bot or Not?" → 0 photo malgré URL valide.
+    # Dans les deux cas on log proprement, le pipeline continue.
     if sources.get("expedia"):
         if expedia_url_override:
             progress.update(f"{slug}_fetch_all", step="expedia_finding", current=70, total=100,
@@ -454,9 +560,19 @@ def api_fetch_all_sources():
                 }
                 if len(urls) == 0:
                     sources_summary["expedia"]["error"] = (
-                        "0 photo extraite (URL Gemini probablement hallucinée — "
-                        "ID Expedia inexistant)"
+                        "0 photo extraite — DOM Expedia probablement changé ou "
+                        "URL invalide (galerie non détectée)"
                     )
+            except expedia_scraper.ExpediaBotBlocked as e:
+                sources_summary["expedia"] = {
+                    "url": expedia_url,
+                    "error": (
+                        "🛡️ Expedia bloque le scraping anonyme (page 'Bot or Not?'). "
+                        "URL OK mais inaccessible sans proxy résidentiel ou API tierce."
+                    ),
+                    "bot_blocked": True,
+                    "photos_downloaded": 0,
+                }
             except Exception as e:
                 sources_summary["expedia"] = {
                     "url": expedia_url,
@@ -470,63 +586,55 @@ def api_fetch_all_sources():
                 "photos_downloaded": 0,
             }
 
-    # ━━━ SOURCE 5 : Instagram ━━━
-    if sources.get("instagram"):
-        if instagram_url_override:
-            progress.update(f"{slug}_fetch_all", step="instagram_finding", current=82, total=100,
-                            message=f"Instagram : URL pré-saisie {instagram_url_override[:60]}…")
-            ig_finder_result = {"url": instagram_url_override, "source": "manual", "handle": None}
-        else:
-            progress.update(f"{slug}_fetch_all", step="instagram_finding", current=82, total=100,
-                            message="Recherche compte Instagram via Gemini…")
-            ig_finder_result = instagram_finder.find_hotel_instagram(
-                name=rp_data.get("name", ""),
-                city=rp_data.get("city", ""),
-                country=rp_data.get("country", ""),
-            )
-        if ig_finder_result and ig_finder_result.get("url"):
-            ig_url = ig_finder_result["url"]
-            progress.update(f"{slug}_fetch_all", step="instagram_scraping", current=85, total=100,
-                            message=f"Scraping {ig_url}…")
+    # ━━━ Upscale Lanczos pour photos trop petites POST-DOWNLOAD ━━━
+    # N1_ingestion d'analyze.py rejette tout ce qui est < 500×320. Plutôt que de
+    # supprimer les thumbnails (ex: hotel_gallery_extractor qui chope du 448×336
+    # via un srcset dégénéré), on les upscale Lanczos jusqu'à passer le seuil.
+    # Cf. Martin 13/05/2026 : "ne supprime pas, agrandis comme avec Lanczos x2".
+    # La photo upscalée n'a pas plus de détail réel mais peut être analysée par
+    # Gemini Vision et utilisée comme source.
+    progress.update(f"{slug}_fetch_all", step="upscale_min_size", current=90, total=100,
+                    message="Upscale Lanczos photos trop petites (< 500×320)…")
+    MIN_W, MIN_H = 500, 320
+    from PIL import Image as _PILImage
+    upscaled_count = 0
+    corrupted_count = 0
+    for f in all_files:
+        p = hotel_dir / f["name"]
+        if not p.exists():
+            continue
+        try:
+            with _PILImage.open(p) as _im:
+                w, h = _im.size
+                if w < MIN_W or h < MIN_H:
+                    # Calcule le facteur d'upscale minimal pour passer les 2 seuils
+                    # (puis arrondi vers le haut + marge confort 1.2x).
+                    factor_w = MIN_W / w if w < MIN_W else 1.0
+                    factor_h = MIN_H / h if h < MIN_H else 1.0
+                    factor = max(factor_w, factor_h) * 1.2  # marge confort
+                    new_w, new_h = int(w * factor), int(h * factor)
+                    upscaled = _im.convert("RGB").resize(
+                        (new_w, new_h), _PILImage.Resampling.LANCZOS
+                    )
+                    f["original_size"] = [w, h]
+                    f["upscaled_size"] = [new_w, new_h]
+                    f["upscaled_from_thumbnail"] = True
+                    # Sauve avec quality 92 (sweet spot poids/qualité)
+                    upscaled.save(p, "JPEG", quality=92, optimize=True)
+                    upscaled_count += 1
+        except Exception as e:
+            # Image corrompue → supprime
             try:
-                ig_extract = instagram_scraper.scrape_instagram_photos(ig_url, max_photos=30)
-                ig_urls = ig_extract.get("photos") or []
-                ig_results = (booking_scraper.download_photos_to_dir(
-                    ig_urls, hotel_dir / "_instagram_temp", max_photos=30
-                ) if ig_urls else [])
-                ok = [r for r in ig_results if r["status"] == "ok"]
-                for i, r in enumerate(ok, 1):
-                    old = hotel_dir / "_instagram_temp" / r["filename"]
-                    base = r["filename"].split("_", 2)[-1] if "_" in r["filename"] else r["filename"]
-                    new_name = f"instagram_{i:03d}_{base}"
-                    new_path = hotel_dir / new_name
-                    if old.exists():
-                        old.rename(new_path)
-                        all_files.append({"name": new_name, "size": r["size"], "source": "instagram"})
-                tmp = hotel_dir / "_instagram_temp"
-                if tmp.exists() and not list(tmp.iterdir()):
-                    tmp.rmdir()
-                sources_summary["instagram"] = {
-                    "url": ig_url,
-                    "handle": ig_finder_result.get("handle"),
-                    "photos_downloaded": len(ok),
-                    "photos_found": len(ig_urls),
-                }
-                if ig_extract.get("error"):
-                    sources_summary["instagram"]["error"] = ig_extract["error"]
-            except Exception as e:
-                sources_summary["instagram"] = {
-                    "url": ig_url,
-                    "handle": ig_finder_result.get("handle"),
-                    "error": str(e)[:200],
-                    "photos_downloaded": 0,
-                }
-        else:
-            sources_summary["instagram"] = {
-                "url": None,
-                "error": (ig_finder_result or {}).get("error", "compte Instagram introuvable via Gemini"),
-                "photos_downloaded": 0,
-            }
+                p.unlink()
+            except Exception:
+                pass
+            corrupted_count += 1
+    if upscaled_count > 0:
+        print(f"[upscale_min_size] {upscaled_count} photos upscalées Lanczos (étaient < {MIN_W}×{MIN_H})")
+    if corrupted_count > 0:
+        print(f"[upscale_min_size] {corrupted_count} photos corrompues supprimées")
+        # Retire les corrompues de all_files
+        all_files = [f for f in all_files if (hotel_dir / f["name"]).exists()]
 
     # ━━━ Dédup pHash inter-sources ━━━
     progress.update(f"{slug}_fetch_all", step="dedup", current=92, total=100,
@@ -536,8 +644,8 @@ def api_fetch_all_sources():
         clusters = dedup_angles.find_duplicate_clusters(paths, threshold=16)
         kept, dropped = dedup_angles.select_best_per_cluster(clusters)
         kept_set = {p.resolve() for p in kept}
-        # Supprime les doublons (priorité : official > booking > rp pour conserver dans cet ordre)
-        priority = {"official": 4, "booking": 3, "instagram": 2, "rp": 1}
+        # Supprime les doublons (priorité : official > booking > expedia > rp)
+        priority = {"official": 4, "booking": 3, "expedia": 2, "rp": 1}
         files_by_path = {(hotel_dir / f["name"]).resolve(): f for f in all_files}
         for cluster in clusters:
             if len(cluster) <= 1:
@@ -728,6 +836,16 @@ def api_run():
 
     progress.init(f"{slug}_analyze", total=len(photo_paths), step="analyzing")
 
+    # ━━ Mode postprocess (Martin 14/05/2026) : signale immédiatement que
+    # l'analyse est "en cours / depuis cache" pour que le front voie l'étape
+    # même si elle se termine en <500ms (cache hit instantané).
+    if use_analysis_cache:
+        progress.update(
+            f"{slug}_analyze", step="analyzing",
+            current=0, total=len(photo_paths),
+            message=f"📂 Chargement {len(photo_paths)} analyses depuis cache…",
+        )
+
     def _progress_cb(done, total, last_filename):
         # Récupère le payload du dernier traité pour cumuler le coût
         # Note : on n'a pas accès direct au payload ici, on cumule a posteriori après le batch
@@ -760,16 +878,38 @@ def api_run():
         if a.get("_from_cache"):
             analyses_from_cache += 1
             continue
-        n2 = next((t for t in a.get("trace", []) if t.get("node") == "N2_analyze_gemini"), None)
+        trace = a.get("trace", [])
+        n1 = next((t for t in trace if t.get("node") == "N1_ingestion"), None)
+        n2 = next((t for t in trace if t.get("node") == "N2_analyze_gemini"), None)
         if n2 and n2.get("result") == "pass":
             u = n2.get("usage", {})
             total_input_tokens += u.get("input_tokens", 0)
             total_output_tokens += u.get("output_tokens", 0)
             total_cost_usd += u.get("cost_usd", 0)
         else:
+            # ━━ Diagnostic d'erreur robuste ━━
+            # Cas 1 : N2 a un champ error → erreur d'analyse Gemini (clé, quota, modèle)
+            # Cas 2 : N2 absent + N1 a une error → l'image n'a pas pu être chargée
+            # Cas 3 : N1 reject (image trop petite/corrompue) → ingestion_reason
+            # Cas 4 : aucun des deux → bug structurel (analyze a planté avant tracing)
+            err = "unknown"
+            stage = "?"
+            if n2 and n2.get("error"):
+                err = n2["error"]
+                stage = "N2_gemini"
+            elif n1 and n1.get("error"):
+                err = n1["error"]
+                stage = "N1_ingestion"
+            elif n1 and n1.get("result") == "reject":
+                err = "image rejetée à l'ingestion (trop petite, corrompue, ou format non supporté)"
+                stage = "N1_reject"
+            elif not trace:
+                err = "trace vide — analyze a probablement crashé avant le tracing"
+                stage = "no_trace"
             failed_analyses.append({
                 "filename": a.get("input", {}).get("filename"),
-                "error": (n2 or {}).get("error", "unknown"),
+                "stage": stage,
+                "error": err,
             })
 
     # ━━ Garde : si trop d'échecs Gemini, on abort avec message explicite ━━
@@ -789,9 +929,10 @@ def api_run():
                     f"Va sur https://ai.studio/spend pour lever le plafond, puis relance."
                 )
             else:
+                sample_stage = failed_analyses[0].get("stage", "?")
                 user_msg = (
-                    f"❌ {len(failed_analyses)}/{fresh_attempted} analyses Gemini en erreur. "
-                    f"Première erreur : {sample_err[:200]}"
+                    f"❌ {len(failed_analyses)}/{fresh_attempted} analyses Gemini en erreur "
+                    f"(étape : {sample_stage}). Première erreur : {sample_err[:200]}"
                 )
             progress.update(
                 f"{slug}_analyze",
@@ -1160,7 +1301,18 @@ def api_run():
                 by_filename[fname]["analysis"] = existing
         print(f"  ✓ Pass2 mergée dans {len(rich_results)}/{len(rich_paths)} analyses")
 
-    progress.update(f"{slug}_analyze", step="enhancing", current=0, total=len(selected_filenames))
+    # ━━ Message d'enhance adapté selon le mode (Martin 14/05/2026) ━━
+    # En postprocess (cache hit), on signale immédiatement que les retouches sont chargées
+    # depuis le cache pour que le front voie l'étape même si elle se termine en <500ms.
+    if use_enhance_cache:
+        enhance_msg = f"📂 Chargement {len(selected_filenames)} retouches depuis cache…"
+    else:
+        enhance_msg = f"Retouches IA — 0/{len(selected_filenames)}"
+    progress.update(
+        f"{slug}_analyze", step="enhancing",
+        current=0, total=len(selected_filenames),
+        message=enhance_msg,
+    )
 
     enhanced_dir = ROOT / "data" / "output" / slug / "enhanced"
     # ━━ Cleanup enhanced/ au début d'un run COMPLET (resume_from=scrape) ━━
@@ -1279,6 +1431,7 @@ def api_run():
         a = by_filename.get(filename)
         if not a or not a.get("analysis"):
             return None
+        input_path = Path(a["input"]["path_absolute"])
         strategy = enhance.pick_strategy(
             a["analysis"],
             personas_allowed=personas_allowed,
@@ -1286,8 +1439,8 @@ def api_run():
             add_character=(filename in add_character_filenames),
             persona_override=persona_per_filename.get(filename),
             photo_filename=filename,
+            image_path=input_path,
         )
-        input_path = Path(a["input"]["path_absolute"])
         existing_enhanced = enhanced_dir / filename
         if use_enhance_cache and existing_enhanced.exists():
             result = {
@@ -1381,31 +1534,133 @@ def api_run():
     # Source = la version `enhanced` finale (avec retouches IA + LUT brand appliqués).
     # Voir docs/SLOWMO_SPEC.md pour la rationale.
     slowmo_enabled = bool((payload or {}).get("slowmo_enabled", False))
+    # Variantes de format pour le slowmo (Insta story / feed / YouTube).
+    slowmo_variants = (payload or {}).get("slowmo_format_variants") or []
     slowmo_result = None
     slowmo_target = None
+
+    # ━━ Mode "réutilise le slowmo précédent" (Martin 13/05/2026) ━━
+    # Si slowmo DÉCOCHÉ MAIS qu'un slowmo existe sur disque depuis un run précédent
+    # → on le ré-expose dans la réponse pour que l'UI affiche la card vidéo sans
+    # le re-générer ($0). Évite de devoir re-payer juste pour "revoir" le slowmo.
+    #
+    # Stratégie en 2 étapes :
+    #   (a) Lit run.json pour le slowmo_result complet (cas idéal, prompt + cost gardés)
+    #   (b) Fallback : scan /slowmo/*.mp4 sur disque si run.json absent / corrompu /
+    #       ancien (avant qu'on ajoute la sérialisation slowmo_result). Reconstruit
+    #       un slowmo_result minimal pour permettre l'affichage UI.
+    if not slowmo_enabled:
+        slowmo_dir_cache = ROOT / "data" / "output" / slug / "slowmo"
+        cached_run_path = ROOT / "data" / "output" / slug / "run.json"
+        # (a) Tente run.json
+        if cached_run_path.exists():
+            try:
+                with open(cached_run_path) as f:
+                    prev_run = json.load(f)
+                prev_slowmo = prev_run.get("slowmo_result")
+                if prev_slowmo and prev_slowmo.get("success"):
+                    prev_path = prev_slowmo.get("output_path")
+                    if prev_path and Path(prev_path).exists():
+                        slowmo_result = prev_slowmo
+                        slowmo_result["reused_from_cache"] = True
+                        print(f"[slowmo] réutilise cache (run.json) : {Path(prev_path).name}")
+            except Exception:
+                pass
+        # (b) Fallback disk-scan si rien chargé via run.json
+        if slowmo_result is None and slowmo_dir_cache.exists():
+            # On exclut les variantes (_raw / _story_9x16 / _feed_1x1 / _youtube_16x9)
+            # et on garde le mp4 final principal le plus récent.
+            VARIANT_SUFFIXES = ("_raw", "_story_9x16", "_feed_1x1", "_youtube_16x9")
+            candidates = [
+                p for p in slowmo_dir_cache.glob("*.mp4")
+                if not any(p.stem.endswith(s) for s in VARIANT_SUFFIXES)
+            ]
+            if candidates:
+                latest = max(candidates, key=lambda p: p.stat().st_mtime)
+                slowmo_result = {
+                    "success": True,
+                    "output_path": str(latest),
+                    "target": {
+                        "filename": latest.stem + ".jpg",  # best-guess (correspond au stem)
+                        "motion_subject": "ambient",
+                    },
+                    "reused_from_cache": True,
+                    "reused_from_disk_scan": True,
+                }
+                print(f"[slowmo] réutilise cache (disk scan) : {latest.name}")
+
     if slowmo_enabled and ordered_pack:
-        slowmo_target = slowmo_higgsfield.pick_slowmo_target(ordered_pack, by_filename)
+        # Passe enhanced_results pour détecter les photos qui ont eu un humain ajouté IA
+        # → on utilisera la version intermédiaire (avant ajout perso) + LUT brand.
+        slowmo_target = slowmo_higgsfield.pick_slowmo_target(
+            ordered_pack, by_filename, enhanced_results=enhanced_results
+        )
         if slowmo_target:
             slowmo_dir = ROOT / "data" / "output" / slug / "slowmo"
             slowmo_dir.mkdir(parents=True, exist_ok=True)
             target_filename = slowmo_target["filename"]
-            # Source = enhanced final (ou original si enhanced absent / fallback)
-            enhanced_path = enhanced_dir / target_filename
-            source_path = enhanced_path if enhanced_path.exists() else Path(by_filename[target_filename]["input"]["path_absolute"])
+
+            # ━━ Résolution de la photo source pour le slowmo (Martin 14/05/2026) ━━
+            # 3 cas possibles selon target.use_intermediate :
+            #   (A) use_intermediate=False : utilise l'enhanced final standard
+            #   (B) use_intermediate=True + intermédiaire dispo : intermédiaire + LUT brand
+            #   (C) use_intermediate=True + pas d'intermédiaire : fallback source originale
+            source_path = None
+            source_reason = ""
+
+            if slowmo_target.get("use_intermediate"):
+                # Cherche l'intermédiaire sauvegardé pendant le chaînage ai_lighting → ai_add_character
+                # (Stocké par enhance.py dans _intermediates/_step{i}_{filename})
+                interm_dir = enhanced_dir / "_intermediates"
+                interm_candidates = []
+                if interm_dir.exists():
+                    interm_candidates = sorted(interm_dir.glob(f"_step*_{target_filename}"))
+                if interm_candidates:
+                    # Prend le DERNIER intermédiaire (= juste avant le step ai_add_character)
+                    last_intermediate = interm_candidates[-1]
+                    # Applique la LUT brand sur l'intermédiaire pour cohérence visuelle
+                    try:
+                        slowmo_source_dir = enhanced_dir / "_slowmo_source"
+                        slowmo_source_dir.mkdir(parents=True, exist_ok=True)
+                        lut_applied_path = slowmo_source_dir / target_filename
+                        from brand_lut import apply_brand_lut
+                        # Profil LUT par défaut : medium (cohérent avec le reste du pack)
+                        apply_brand_lut(last_intermediate, lut_applied_path, profile="medium")
+                        source_path = lut_applied_path
+                        source_reason = f"intermédiaire+LUT ({last_intermediate.name} → +LUT brand)"
+                    except Exception as e:
+                        print(f"[slowmo] LUT sur intermédiaire échouée ({e}) → utilise intermédiaire brut")
+                        source_path = last_intermediate
+                        source_reason = f"intermédiaire brut sans LUT ({last_intermediate.name})"
+                else:
+                    # Fallback : utilise la source originale
+                    orig_path = Path(by_filename[target_filename]["input"]["path_absolute"])
+                    source_path = orig_path
+                    source_reason = "source originale (pas d'intermédiaire dispo)"
+                print(f"[slowmo] use_intermediate=True pour {target_filename} → source={source_reason}")
+            else:
+                # Comportement standard : enhanced final si dispo, sinon source
+                enhanced_path = enhanced_dir / target_filename
+                source_path = enhanced_path if enhanced_path.exists() else Path(by_filename[target_filename]["input"]["path_absolute"])
+                source_reason = "enhanced final" if enhanced_path.exists() else "source originale"
+
             output_mp4 = slowmo_dir / (Path(target_filename).stem + ".mp4")
+            variants_msg = f" + {len(slowmo_variants)} variantes" if slowmo_variants else ""
             progress.update(
                 f"{slug}_analyze",
                 step="slowmo",
                 current=0,
                 total=1,
-                message=f"Slow-motion loop : {target_filename} ({slowmo_target['motion_subject']})…",
+                message=f"Slow-motion loop : {target_filename} ({slowmo_target['motion_subject']}, source: {source_reason}){variants_msg}…",
             )
             slowmo_result = slowmo_higgsfield.generate_slowmo(
                 source_path,
                 slowmo_target["motion_subject"],
                 output_mp4,
+                format_variants=slowmo_variants or None,
             )
             slowmo_result["target"] = slowmo_target
+            slowmo_result["source_reason"] = source_reason
             progress.update(
                 f"{slug}_analyze",
                 step="slowmo_done",
@@ -1606,6 +1861,47 @@ def api_run():
             "issues": analysis.get("issues") or [],
         }
 
+        # ━━ Bloc complet "🧠 Analyse Gemini Vision" pour le front (Martin 14/05/2026) ━━
+        # On expose l'analyse sémantique COMPLÈTE faite par Gemini Vision sur cette photo
+        # + le résultat du scenario_writer (V5) si dispo. Permet de comprendre ce que
+        # Vision a vu / décidé pour chaque photo. Sert au debug et à la transparence.
+        safe_zones_block = analysis.get("safe_zones_for_humans") or {}
+        placement_capacity = analysis.get("placement_capacity") or {}
+        # scenario_writer metadata vient des steps (injecté dans _pick_main_action V5)
+        scenario_writer_meta = None
+        for s in (r.get("steps") or []):
+            if s.get("scenario_writer"):
+                scenario_writer_meta = s.get("scenario_writer")
+                break
+        gemini_analysis = {
+            "category": factual.get("category"),
+            "categories_secondary": factual.get("categories_secondary") or [],
+            "shot_type": analysis.get("shot_type"),
+            "hero_quality": analysis.get("hero_quality"),
+            "amenity_dominance": analysis.get("amenity_dominance"),
+            "human_count": factual.get("human_count"),
+            "human_presence_type": factual.get("human_presence_type"),
+            "time_of_day": factual.get("time_of_day"),
+            "ambiance": (analysis.get("technical_hints") or {}).get("ambiance"),
+            "palette_alignment": (analysis.get("technical_hints") or {}).get("palette_alignment"),
+            "exposure": (analysis.get("technical_hints") or {}).get("exposure"),
+            "white_balance": (analysis.get("technical_hints") or {}).get("white_balance"),
+            "issues": analysis.get("issues") or [],
+            "clutter_to_remove": analysis.get("clutter_to_remove") or [],
+            "safe_zones_for_humans": {
+                "safe_areas": safe_zones_block.get("safe_areas") or [],
+                "unsafe_areas": safe_zones_block.get("unsafe_areas") or [],
+                "max_recommended": safe_zones_block.get("max_recommended"),
+            },
+            "placement_capacity": {
+                "total": placement_capacity.get("total"),
+                "breakdown": placement_capacity.get("breakdown") or {},
+            },
+            "sensations": emotional.get("sensations") or [],
+            "pillar_scores": scores,
+            "scenario_writer_v5": scenario_writer_meta,  # None si V5 inactif ou pas applicable
+        }
+
         if r.get("output_path"):
             is_fully_gen = bool((a or {}).get("is_fully_generated"))
             is_bonus = bool(sel.get("is_bonus")) if sel else False
@@ -1644,6 +1940,7 @@ def api_run():
                 "ai_validation": r.get("ai_validation"),
                 "transformations": transformations,
                 "justification": justification,
+                "gemini_analysis": gemini_analysis,
                 "is_fully_generated": is_fully_gen,
                 "is_bonus": is_bonus,
                 "bonus_amenity": sel.get("bonus_amenity") if sel else None,
@@ -1668,9 +1965,66 @@ def api_run():
     pipeline_completed_at = time.time()
     pipeline_duration_s = round(pipeline_completed_at - pipeline_started_at, 1)
 
-    # ━━ Maintenant que la payload est prête, on peut marquer "done" — coïncide avec
-    #    la dispo de la réponse côté front (plus de fenêtre où progress=done mais
-    #    fetch /api/run encore en attente).
+    # ━━ Construction du payload de réponse AVANT progress.finish ━━━━━━━━━━━━━
+    # ⚠️ RÉGRESSION OBSERVÉE Martin 13/05/2026 : si on appelle progress.finish ICI,
+    # puis qu'on construit ensuite un payload qui inclut `build_photo_journey()`
+    # (~1-5s pour ~80 photos × 16 nœuds) et la grosse `jsonify`, le front voit
+    # "Pipeline terminé" mais le fetch /api/run reste en attente → bouton bloqué
+    # "Analyse en cours…".
+    # Fix : on PRÉ-CALCULE photo_journey ICI (avant progress.finish), puis on
+    # appelle progress.finish juste avant le return. Comme ça la fenêtre entre
+    # done=true côté progress et la réponse fetch retournée est minimale.
+    photo_journey_payload = photo_journey_mod.build_photo_journey(
+        slug=slug,
+        photo_paths_all=photo_paths_all,
+        deselected_set=deselected,
+        analyses=analyses,
+        cov=cov,
+        generated_photos=generated_photos,
+        ordered_pack=ordered_pack,
+        enhanced_results=enhanced_results,
+        vlm_dedup_results=vlm_dedup_results,
+        verifier_results=verifier_results,
+        slowmo_result=slowmo_result,
+    )
+
+    # ━━ Sauve un manifest run.json pour permettre :
+    #    - À /api/regenerate-slowmo de connaître la cible précédente
+    #    - À un futur run mode `selection`/`postprocess` SANS slowmo coché de
+    #      réutiliser le slowmo en cache (cf. logique plus haut au step 4.5)
+    #
+    # ⚠️ NE PAS ÉCRASER : si slowmo_result est None (case décochée et pas de cache
+    # trouvé), on PRÉSERVE l'ancien run.json slowmo_result pour ne pas perdre la
+    # trace d'un slowmo généré dans un run antérieur (sinon Martin perd visibilité
+    # quand il itère en "Reprendre depuis sélection" case décochée).
+    cached_run_path = ROOT / "data" / "output" / slug / "run.json"
+    cached_run_path.parent.mkdir(parents=True, exist_ok=True)
+    # Si on n'a rien de nouveau côté slowmo, lit l'ancien et garde-le
+    persisted_slowmo_result = slowmo_result
+    persisted_slowmo_summary = _build_slowmo_summary(slowmo_result, slug) if slowmo_result else None
+    if persisted_slowmo_result is None and cached_run_path.exists():
+        try:
+            with open(cached_run_path) as f:
+                prev_run = json.load(f)
+            persisted_slowmo_result = prev_run.get("slowmo_result")
+            persisted_slowmo_summary = prev_run.get("slowmo")
+        except Exception:
+            pass
+    try:
+        with open(cached_run_path, "w") as f:
+            json.dump({
+                "slug": slug,
+                "completed_at": pipeline_completed_at,
+                "duration_s": pipeline_duration_s,
+                "resume_from": resume_from,
+                "slowmo_result": persisted_slowmo_result,  # garde tout l'objet pour reuse
+                "slowmo": persisted_slowmo_summary,
+            }, f, indent=2, ensure_ascii=False, default=str)
+    except Exception as e:
+        print(f"[run.json] save failed: {e}")
+
+    # ━━ Maintenant que TOUT est prêt, on marque "done" — coïncide avec la dispo
+    #    de la réponse côté front (fenêtre done→fetch retourné = ms, pas s).
     progress.finish(f"{slug}_analyze", message="Pipeline terminé")
 
     return jsonify({
@@ -1741,19 +2095,7 @@ def api_run():
         # ━━ Multi-format output (Step 5, optionnel) ━━
         "multiformat": multiformat_result,
         # ━━ Workflow visualization data ━━
-        "photo_journey": photo_journey_mod.build_photo_journey(
-            slug=slug,
-            photo_paths_all=photo_paths_all,
-            deselected_set=deselected,
-            analyses=analyses,
-            cov=cov,
-            generated_photos=generated_photos,
-            ordered_pack=ordered_pack,
-            enhanced_results=enhanced_results,
-            vlm_dedup_results=vlm_dedup_results,
-            verifier_results=verifier_results,
-            slowmo_result=slowmo_result,
-        ),
+        "photo_journey": photo_journey_payload,  # pré-calculé avant progress.finish (cf. note ci-dessus)
         "workflow_nodes": photo_journey_mod.NODE_DEFINITIONS,
     })
 
@@ -1786,6 +2128,110 @@ def _build_slowmo_summary(slowmo_result: dict, slug: str) -> dict:
 def serve_slowmo(slug, filename):
     """Sert le mp4 slow-motion pour preview dans l'UI."""
     return send_from_directory(ROOT / "data" / "output" / slug / "slowmo", filename)
+
+
+@app.route("/api/regenerate-slowmo/<slug>", methods=["POST"])
+def api_regenerate_slowmo(slug):
+    """Re-génère uniquement le slowmo loop pour un hôtel déjà processé.
+
+    Cycle de vie typique :
+    - Le pipeline complet a tourné, `data/output/<slug>/enhanced/` contient les
+      photos finales et le manifest run.json a un `slowmo_target.filename`.
+    - L'utilisateur veut juste un autre essai sur le slowmo (changement de mood,
+      modèle, ou simplement re-run après un échec credits) sans re-toucher au
+      reste du pipeline (~$1-3 de Gemini Image).
+
+    Body (optionnel) :
+        {
+          "filename": "...",        # override : choisir une autre photo cible
+          "motion_subject": "...",  # override : water | curtains | foliage | pool_float | fire | steam | fountain | ambient
+          "format_variants": ["story_9x16", ...],
+          "model": "..."            # override modèle Higgsfield
+        }
+    """
+    payload = request.get_json(silent=True) or {}
+
+    # Lit le dernier run pour récupérer le pack + la cible slowmo par défaut
+    run_path = ROOT / "data" / "output" / slug / "run.json"
+    if not run_path.exists():
+        return jsonify({"error": "Pas de run précédent. Lance le pipeline complet d'abord."}), 404
+    try:
+        with open(run_path) as f:
+            run_data = json.load(f)
+    except Exception as e:
+        return jsonify({"error": f"run.json corrompu : {e}"}), 500
+
+    # Cible par défaut = celle stockée dans le run précédent
+    default_target = (run_data.get("slowmo") or {}).get("target") or {}
+    target_filename = (payload.get("filename") or "").strip() or default_target.get("filename")
+    motion_subject = (payload.get("motion_subject") or "").strip() or default_target.get("motion_subject") or "ambient"
+    format_variants = payload.get("format_variants") or []
+    model_override = (payload.get("model") or "").strip() or None
+
+    if not target_filename:
+        return jsonify({"error": "Aucune photo cible (ni override, ni cible stockée du run précédent)"}), 400
+
+    enhanced_dir = ROOT / "data" / "output" / slug / "enhanced"
+    enhanced_path = enhanced_dir / target_filename
+    if not enhanced_path.exists():
+        return jsonify({"error": f"Photo cible introuvable : {target_filename}"}), 404
+
+    slowmo_dir = ROOT / "data" / "output" / slug / "slowmo"
+    slowmo_dir.mkdir(parents=True, exist_ok=True)
+    output_mp4 = slowmo_dir / (Path(target_filename).stem + ".mp4")
+
+    # Lance la génération
+    progress.init(f"{slug}_regen_slowmo", total=1, step="slowmo")
+    progress.update(f"{slug}_regen_slowmo",
+                    message=f"Re-génération slowmo : {target_filename} ({motion_subject})…")
+
+    try:
+        result = slowmo_higgsfield.generate_slowmo(
+            enhanced_path,
+            motion_subject,
+            output_mp4,
+            model=model_override,
+            format_variants=format_variants or None,
+        )
+    except Exception as e:
+        progress.finish(f"{slug}_regen_slowmo", message=f"Erreur : {e}")
+        return jsonify({"error": f"Génération slowmo échouée : {str(e)[:200]}"}), 500
+
+    progress.finish(f"{slug}_regen_slowmo",
+                    message="Slowmo OK" if result.get("success") else f"Slowmo KO : {result.get('error')}")
+
+    # Update du run.json pour garder une trace de la dernière génération slowmo
+    run_data["slowmo"] = {
+        **(run_data.get("slowmo") or {}),
+        "target": {
+            "filename": target_filename,
+            "motion_subject": motion_subject,
+            "regenerated_at": time.time(),
+        },
+        "success": result.get("success"),
+        "error": result.get("error"),
+        "output_path": result.get("output_path"),
+        "loop_mode": result.get("loop_mode"),
+        "format_variants": result.get("format_variants"),
+        "cost_usd": result.get("cost_usd", 0),
+    }
+    try:
+        with open(run_path, "w") as f:
+            json.dump(run_data, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
+    return jsonify({
+        "success": result.get("success"),
+        "filename": target_filename,
+        "motion_subject": motion_subject,
+        "output_url": f"/output/{slug}/slowmo/{output_mp4.name}" if result.get("success") else None,
+        "loop_mode": result.get("loop_mode"),
+        "format_variants": result.get("format_variants"),
+        "cost_usd": result.get("cost_usd", 0),
+        "duration_ms": result.get("duration_ms"),
+        "error": result.get("error"),
+    })
 
 
 @app.route("/output/<slug>/enhanced/<filename>")
@@ -2126,7 +2572,13 @@ def api_run_status(slug):
                     n_multiformat += count
     n_slowmo = 0
     if slowmo_dir.exists():
-        n_slowmo = len(list(slowmo_dir.glob("*.mp4")) + list(slowmo_dir.glob("*.webm")))
+        # On compte UNIQUEMENT les loops finaux, pas les fichiers `_raw.mp4`
+        # (clip Kling brut avant ping-pong ffmpeg — 2 fichiers par génération).
+        # Aussi exclure les variantes format (suffixes _story_9x16, _feed_1x1, etc.)
+        # qui sont des dérivés du même slowmo.
+        VARIANT_SUFFIXES = ("_raw", "_story_9x16", "_feed_1x1", "_youtube_16x9")
+        files = list(slowmo_dir.glob("*.mp4")) + list(slowmo_dir.glob("*.webm"))
+        n_slowmo = sum(1 for p in files if not any(p.stem.endswith(s) for s in VARIANT_SUFFIXES))
 
     # Latest run timestamp (depuis progress.json)
     progress_path = ROOT / "data" / "progress" / f"{slug}_analyze.json"

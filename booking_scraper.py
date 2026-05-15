@@ -30,6 +30,12 @@ USER_AGENT = (
 # On accepte les patterns de la modale galerie : `hotel/maxNNN/{ID}.jpg`
 PHOTO_PATTERN = re.compile(r"cf\.bstatic\.com/xdata/images/hotel/max(\d+)(?:x\d+)?/(\d+)\.")
 
+# Taille cible HD : Booking sert toutes les tailles avec la MÊME signature `k=`,
+# donc on peut remplacer `max1024x768` → `max3000` sans casser l'auth.
+# Empiriquement (12/05/2026) : max3000 → 3000x2000 (taille originale).
+# max2048 = 2048x1365, max1600 = 1600x1067 — disponibles si besoin downgrade.
+BOOKING_TARGET_SIZE = "max3000"
+
 
 def _clean_url(url: str) -> str:
     """Nettoie l'URL Booking : on garde juste le path de la fiche hôtel et on ajoute nos
@@ -139,8 +145,16 @@ def scrape_booking_photos(url: str, headless: bool = True, max_scrolls: int = 30
         if photo_id not in by_id or by_id[photo_id][1] < size:
             by_id[photo_id] = (u, size)
 
+    # ━ UPGRADE HD ━
+    # Booking expose `maxNNN` dans le path et la signature `k=` est universelle
+    # (même HMAC pour toutes les tailles). On remplace systématiquement le
+    # segment maxNNN par BOOKING_TARGET_SIZE pour télécharger en pleine résolution.
+    # Sans ça on téléchargerait du 1024 alors que les originaux font 3000x2000.
+    def _upgrade(u: str) -> str:
+        return re.sub(r"max\d+(?:x\d+)?", BOOKING_TARGET_SIZE, u, count=1)
+
     # Tri stable par photo ID (préserve un ordre cohérent)
-    return [u for u, _ in sorted(by_id.values(), key=lambda x: x[0])]
+    return [_upgrade(u) for u, _ in sorted(by_id.values(), key=lambda x: x[0])]
 
 
 def download_photos_to_dir(urls: list[str], dest_dir: Path, max_photos: int | None = None) -> list[dict]:
