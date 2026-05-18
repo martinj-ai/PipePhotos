@@ -13,3 +13,7 @@ weasyprint>=60.0    # PDF export (alternative à Playwright PDF)
 SQLAlchemy>=2.0     # ORM portable SQLite (local) ↔ Postgres (Railway prod)
 psycopg2-binary>=2.9  # Driver Postgres (utilisé en prod via DATABASE_URL)
 gunicorn>=21        # WSGI server pour Railway (Flask dev server pas adapté en prod)
+beautifulsoup4>=4.12  # bs4 — parser HTML pour booking_amenities_extractor.py
+requests>=2.31      # HTTP client utilisé partout (scrapers, OpenAI, etc.)
+openai>=1.0         # GPT Image API (script scripts/compare_nb_vs_gpt.py)
+numpy>=1.24         # Deps de ImageHash + traitement images
