@@ -211,6 +211,11 @@
     .subtab-btn { padding: .5rem 1rem; border: 1px solid #EAEAEB; border-radius: 100px; color: #54545D; font-size: .8rem; font-weight: 600; cursor: pointer; transition: all .2s ease; background: white; }
     .subtab-btn:hover { background: rgba(255, 175, 54, 0.08); color: #292935; border-color: #FFAF36; }
     .subtab-btn.active { background: linear-gradient(62deg, #FFAF36 0%, #FFC536 100%); color: #292935; border-color: transparent; box-shadow: 0 2px 8px rgba(255, 175, 54, 0.25); }
+    /* Tag widget states (Martin 15/05/2026, pack C) */
+    .tag-btn { background: white; color: #54545d; font-weight: 600; cursor: pointer; }
+    .tag-btn.tag-active-good { background: #d1fae5; color: #065f46; border-color: #10b981 !important; box-shadow: 0 1px 4px rgba(16, 185, 129, 0.2); }
+    .tag-btn.tag-active-border { background: #fef3c7; color: #92400e; border-color: #f59e0b !important; box-shadow: 0 1px 4px rgba(245, 158, 11, 0.2); }
+    .tag-btn.tag-active-bad { background: #fee2e2; color: #991b1b; border-color: #ef4444 !important; box-shadow: 0 1px 4px rgba(239, 68, 68, 0.2); }
     .subtab-panel { display: none; }
     .subtab-panel.active { display: block; }
     /* Final pack layout legacy supprimé (Martin 14/05/2026) — remplacé par grille 2 colonnes ligne-par-ligne (Tailwind grid-cols-1/lg:grid-cols-2) qui pair card Dayuse avec photo RP correspondante par index. Le rail sticky à droite n'est plus utilisé. */
@@ -246,6 +251,7 @@
       <button class="tab-btn active" data-tab="pipeline">🔧 Pipeline</button>
       <button class="tab-btn" data-tab="workflow">🌳 Workflow</button>
       <button class="tab-btn" data-tab="doc">📚 Documentation</button>
+      <button class="tab-btn" data-tab="dashboard">📊 Dashboard</button>
     </nav>
 
     <!-- ━━━━━━━━━━━━━━━━━━━━ Tab Pipeline (contenu original) ━━━━━━━━━━━━━━━━━━━━ -->
@@ -277,106 +283,109 @@
       </div>
     </section>
 
-    <!-- Étape 1 — Source méta hôtel (RP ou Booking) -->
+    <!-- Étape 1 fusionnée — Sources (URLs saisies par l'utilisateur) -->
+    <!-- (Martin 18/05/2026) Fusion étapes 1+2 : plus de "Identifier l'hôtel" séparé.
+         L'utilisateur saisit les URLs qu'il veut utiliser (Booking obligatoire pour les
+         métadonnées, les autres optionnelles). Boutons "Auto-find" optionnels par champ.
+         Au clic "Lancer", on scrape Booking en background pour récupérer les amenities
+         + scrape toutes les sources avec URL fournie. -->
     <section class="card-dayuse p-6 mb-6">
-      <h2 class="text-base font-semibold mb-1">1. Fiche hôtel (source des amenities)</h2>
-      <p class="text-sm text-gray-500 mb-3">Source de vérité pour les amenities. <strong>Choisis le mode</strong> : RP (legacy) ou Booking-only (indépendant de RP).</p>
+      <h2 class="text-base font-semibold mb-1">1. Sources photos</h2>
+      <p class="text-sm text-gray-500 mb-3">Tape les URLs des sources à utiliser. Booking est requise (extraction amenities + nom/ville). Les autres sont optionnelles — laisse vide pour skip. Tu peux déléguer la recherche d'une URL avec le bouton 🔎 à droite.</p>
 
-      <!-- Bloc explicatif détection amenities -->
       <details class="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3 hover:bg-amber-100/50 transition">
-        <summary class="cursor-pointer font-semibold text-amber-900 text-xs select-none">ℹ️ Comment les amenities sont identifiées (et pourquoi c'est non-restrictif)</summary>
+        <summary class="cursor-pointer font-semibold text-amber-900 text-xs select-none">ℹ️ Comment les amenities sont identifiées</summary>
         <div class="mt-3 text-xs text-dayuse-ink2 space-y-2">
-          <div>
-            <strong>Source primaire</strong> : Booking (mode Booking-only) ou RP (mode legacy). Gemini parse la page et extrait les amenities mentionnées dans la description, les facilités, les restaurants et les FAQ.
-          </div>
-          <div>
-            <strong>🟢 Non-restrictif sur les photos</strong> : si une amenity n'est PAS mentionnée sur Booking mais qu'on détecte <strong>≥ 2 photos</strong> qui la montrent (Gemini Vision sur chaque photo), le bucket est <strong>auto-activé par les photos</strong>. Les photos détectées sont gardées. <em>Ex : Booking ne mentionne pas de cabana mais on a 4 photos avec cabanas → bucket cabana activé.</em>
-          </div>
-          <div>
-            <strong>🎨 Génération full IA</strong> : <em>uniquement si</em> l'amenity est <strong>déclarée Booking</strong> ET aucune photo disponible. Pas de génération sur les buckets auto-activés (sécurité : on ne fabrique pas un faux spa pour un hôtel qui n'en a pas réellement).
-          </div>
-          <div>
-            <strong>📋 Catégories autorisées à la génération</strong> : spa, bar uniquement. Pool / cabana / rooftop / beach / food / gym → JAMAIS générés (risque de fabriquer une amenity centrale inexistante).
-          </div>
-          <div class="text-[11px] italic text-dayuse-ink3 pt-1">
-            Module : <code>booking_amenities_extractor.py</code> (Gemini Flash) + <code>coverage.py</code> (logique non-restrictive).
-          </div>
+          <div><strong>Booking = source des amenities</strong>. Gemini parse la page Booking et extrait les amenities (pool, cabana, rooftop…), le nom, la ville, le vibe et les personas autorisés.</div>
+          <div><strong>🟢 Non-restrictif sur les photos</strong> : si une amenity n'est PAS mentionnée Booking mais qu'on détecte <strong>≥ 2 photos</strong> qui la montrent, le bucket est <strong>auto-activé par les photos</strong>.</div>
+          <div><strong>🎨 Génération full IA</strong> : <em>uniquement si</em> amenity déclarée Booking ET aucune photo. Limité à spa et bar.</div>
         </div>
       </details>
 
-      <!-- Mode unifié : Booking comme clé d'entrée + recherche URLs auto (Martin 12/05/2026) -->
-      <div>
-        <div class="flex gap-2">
-          <input id="identify-booking-url" type="url" placeholder="https://www.booking.com/hotel/..."
-                 class="input-dayuse flex-1">
-          <button id="btn-identify-hotel" class="btn-dayuse-primary disabled:opacity-50">
-            🔎 Identifier l'hôtel
-          </button>
-        </div>
-        <div class="mt-2 text-[11px] text-dayuse-ink2 italic">
-          Booking sert de clé d'entrée. On extrait les amenities + le nom/ville,
-          et on cherche en parallèle les URLs RP, Expedia, Site officiel
-          (DuckDuckGo + Gemini). Tu pourras les éditer ou compléter à l'étape 2.
-        </div>
-      </div>
+      <!-- Tableau compact des 4 sources -->
+      <table class="w-full text-sm">
+        <tbody class="divide-y divide-dayuse-border">
+          <!-- BOOKING (requis) -->
+          <tr>
+            <td class="py-2 pr-2 align-middle whitespace-nowrap" style="width: 1%;">
+              <span class="text-sm font-semibold text-dayuse-ink">🅱️ Booking</span>
+              <span class="ml-1 text-[10px] text-red-600 font-semibold">requis</span>
+            </td>
+            <td class="py-2 px-1">
+              <input id="src-input-booking" type="url"
+                     placeholder="https://www.booking.com/hotel/…"
+                     class="input-dayuse w-full text-xs" style="padding: 8px 14px;">
+            </td>
+            <td class="py-2 pl-2 whitespace-nowrap" style="width: 1%;">
+              <!-- Pas d'auto-find pour Booking : c'est l'input principal -->
+              <span class="text-[10px] text-gray-400 italic">clé d'entrée</span>
+            </td>
+          </tr>
 
-      <div id="rp-result" class="hidden mt-5 pt-5 border-t border-gray-100"></div>
-    </section>
+          <!-- SITE OFFICIEL -->
+          <tr>
+            <td class="py-2 pr-2 align-middle whitespace-nowrap">
+              <span class="text-sm font-semibold text-dayuse-ink">⭐ Site officiel</span>
+              <span class="ml-1 text-[10px] text-gray-500">optionnel</span>
+            </td>
+            <td class="py-2 px-1">
+              <input id="src-input-official" type="url"
+                     placeholder="https://www.hotel-example.com — laisse vide pour skip"
+                     class="input-dayuse w-full text-xs" style="padding: 8px 14px;">
+            </td>
+            <td class="py-2 pl-2 whitespace-nowrap">
+              <button data-find-type="official"
+                      class="btn-auto-find text-[11px] font-semibold px-2 py-1.5 rounded bg-amber-100 hover:bg-amber-200 text-amber-800 transition-colors disabled:opacity-50"
+                      title="Cherche l'URL via DuckDuckGo + Gemini (~5-15s)">
+                🔎 Auto-find
+              </button>
+            </td>
+          </tr>
 
-    <!-- Étape 2 — Sources photos (multi-sources avec cases à cocher) -->
-    <section id="step-upload" class="card-dayuse p-6 mb-6 opacity-50 pointer-events-none">
-      <h2 class="text-base font-semibold mb-1">2. Sources de photos</h2>
-      <p class="text-sm text-gray-500 mb-4">Coche les sources à utiliser. Dédup pHash inter-sources automatique.</p>
+          <!-- RESORTPASS -->
+          <tr>
+            <td class="py-2 pr-2 align-middle whitespace-nowrap">
+              <span class="text-sm font-semibold text-dayuse-ink">📋 ResortPass</span>
+              <span class="ml-1 text-[10px] text-gray-500">optionnel</span>
+            </td>
+            <td class="py-2 px-1">
+              <input id="src-input-rp" type="url"
+                     placeholder="https://www.resortpass.com/hotels/… — laisse vide pour skip"
+                     class="input-dayuse w-full text-xs" style="padding: 8px 14px;">
+            </td>
+            <td class="py-2 pl-2 whitespace-nowrap">
+              <button data-find-type="rp"
+                      class="btn-auto-find text-[11px] font-semibold px-2 py-1.5 rounded bg-amber-100 hover:bg-amber-200 text-amber-800 transition-colors disabled:opacity-50"
+                      title="Cherche l'URL via DuckDuckGo + Gemini (~5-15s)">
+                🔎 Auto-find
+              </button>
+            </td>
+          </tr>
 
-      <div class="space-y-3 mb-4">
-        <!-- Source : Site officiel -->
-        <label class="flex items-start gap-3 border border-gray-200 rounded-lg p-3 cursor-pointer hover:bg-gray-50">
-          <input type="checkbox" id="src-official" checked class="mt-0.5 w-4 h-4 accent-dayuse-primary">
-          <div class="flex-1">
-            <div class="text-sm font-semibold">⭐ Site officiel de l'hôtel</div>
-            <div class="text-xs text-gray-500 mb-2">URL pré-saisie depuis l'Étape 1 (DDG + Gemini cascade). Éditable.</div>
-            <input id="step2-official-url" type="url" placeholder="https://www.example.com (auto-rempli)"
-                   class="input-dayuse w-full text-xs" style="padding: 8px 16px;">
-          </div>
-        </label>
+          <!-- EXPEDIA -->
+          <tr>
+            <td class="py-2 pr-2 align-middle whitespace-nowrap">
+              <span class="text-sm font-semibold text-dayuse-ink">🌍 Expedia</span>
+              <span class="ml-1 text-[10px] text-gray-500">optionnel</span>
+            </td>
+            <td class="py-2 px-1">
+              <input id="src-input-expedia" type="url"
+                     placeholder="…/Ville-Hotels-Nom.h{ID}.Hotel-Information — laisse vide pour skip"
+                     class="input-dayuse w-full text-xs" style="padding: 8px 14px;">
+            </td>
+            <td class="py-2 pl-2 whitespace-nowrap">
+              <button data-find-type="expedia"
+                      class="btn-auto-find text-[11px] font-semibold px-2 py-1.5 rounded bg-amber-100 hover:bg-amber-200 text-amber-800 transition-colors disabled:opacity-50"
+                      title="Cherche l'URL via DuckDuckGo + Gemini (~5-15s)">
+                🔎 Auto-find
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
 
-        <!-- Source : Booking -->
-        <label class="flex items-start gap-3 border border-gray-200 rounded-lg p-3 cursor-pointer hover:bg-gray-50">
-          <input type="checkbox" id="src-booking" checked class="mt-0.5 w-4 h-4 accent-dayuse-primary">
-          <div class="flex-1">
-            <div class="text-sm font-semibold">Booking.com (galerie complète HD)</div>
-            <div class="text-xs text-gray-500 mb-2">Headless browser + scraping galerie modale. 50-150 photos en <strong>3000×2000 natif</strong> (signature <code>k=</code> universelle → on upgrade <code>max1024x768</code> → <code>max3000</code>).</div>
-            <input id="booking-url" type="url" placeholder="URL fiche hôtel Booking — colle l'URL même longue, on nettoie"
-                   class="input-dayuse w-full text-xs" style="padding: 8px 16px;">
-          </div>
-        </label>
-
-        <!-- Source : RP -->
-        <label class="flex items-start gap-3 border border-gray-200 rounded-lg p-3 cursor-pointer hover:bg-gray-50">
-          <input type="checkbox" id="src-rp" checked class="mt-0.5 w-4 h-4 accent-dayuse-primary">
-          <div class="flex-1">
-            <div class="text-sm font-semibold">📋 ResortPass <span id="rp-photo-count" class="text-gray-500 font-normal"></span></div>
-            <div class="text-xs text-gray-500 mb-2">URL pré-saisie depuis l'Étape 1. Si renseignée, on scrape les photos RP de cette URL (sinon : fallback sur les images_urls du scrape Booking si présentes).</div>
-            <input id="step2-rp-url" type="url" placeholder="https://www.resortpass.com/hotels/… (auto-rempli)"
-                   class="input-dayuse w-full text-xs" style="padding: 8px 16px;">
-          </div>
-        </label>
-
-        <!-- Source : Expedia -->
-        <label class="flex items-start gap-3 border border-dayuse-border rounded-lg p-3 cursor-pointer hover:bg-amber-50/40">
-          <input type="checkbox" id="src-expedia" checked class="mt-0.5 w-4 h-4 accent-dayuse-primary">
-          <div class="flex-1">
-            <div class="text-sm font-semibold">🌍 Expedia</div>
-            <div class="text-xs text-gray-500 mb-2">URL pré-saisie depuis l'Étape 1 (DDG + Gemini). Édite si nécessaire — format attendu : <code>…/Ville-Hotels-Nom.h{ID}.Hotel-Information</code>.</div>
-            <input id="step2-expedia-url" type="url" placeholder="https://www.expedia.com/...h{ID}.Hotel-Information (auto-rempli)"
-                   class="input-dayuse w-full text-xs" style="padding: 8px 16px;">
-          </div>
-        </label>
-
-      </div>
-
-      <button id="btn-fetch-all" class="btn-dayuse-primary w-full disabled:opacity-50">
-        Récupérer les photos depuis les sources cochées
+      <button id="btn-fetch-all" class="btn-dayuse-primary w-full mt-4 disabled:opacity-50">
+        🚀 Lancer (scrape Booking + récupération photos sources)
       </button>
 
       <details class="mt-3 border border-gray-200 rounded-lg">
@@ -389,10 +398,30 @@
         </div>
       </details>
 
+      <!-- Container pour le récap hôtel (rempli après le scrape Booking) -->
+      <div id="rp-result" class="hidden mt-5 pt-5 border-t border-gray-100"></div>
+
       <div id="upload-summary" class="hidden mt-4 text-sm text-gray-600"></div>
       <div id="sources-summary" class="hidden mt-4"></div>
       <div id="upload-preview" class="hidden mt-4"></div>
+
+      <!-- ━━ Bridges legacy : on garde les anciens IDs comme inputs hidden synchronisés ━━
+           Cela évite de casser le code JS existant qui lit ces IDs (handlers Step 3, etc.). -->
+      <input type="hidden" id="identify-booking-url">
+      <input type="hidden" id="booking-url">
+      <input type="hidden" id="step2-official-url">
+      <input type="hidden" id="step2-rp-url">
+      <input type="hidden" id="step2-expedia-url">
+      <input type="hidden" id="src-official" checked>
+      <input type="hidden" id="src-booking" checked>
+      <input type="hidden" id="src-rp" checked>
+      <input type="hidden" id="src-expedia" checked>
+      <span id="rp-photo-count" class="hidden"></span>
     </section>
+
+    <!-- L'ancien step-upload est devenu la section 1 ci-dessus.
+         Cet ID est conservé en wrapper invisible pour compat JS (state.deselected, etc.). -->
+    <section id="step-upload" class="hidden"></section>
 
     <!-- Étape 3 — Run -->
     <section id="step-run" class="card-dayuse p-6 mb-6 opacity-50 pointer-events-none">
@@ -593,6 +622,7 @@
         <button class="subtab-btn" data-subtab="mcscla">🪣 Champs MCSCLA</button>
         <button class="subtab-btn" data-subtab="slowmo">🎬 Slow-motion</button>
         <button class="subtab-btn" data-subtab="prompt-anatomy">🧩 Anatomie prompts</button>
+        <button class="subtab-btn" data-subtab="multiframe-rejected">🎞️ Multi-frame (pourquoi non)</button>
       </nav>
 
       <!-- ━━━ Sous-onglet Workflow ━━━ -->
@@ -751,7 +781,7 @@ flowchart TD
           <li><strong>shot_type ≠ close_up</strong> avec humain</li>
           <li><strong>hero_quality.score ≥ 50</strong></li>
           <li>Pas un disguised closeup (Python heuristique)</li>
-          <li>Tri par hero_score puis amenity_dominance puis is_slot1_worthy</li>
+          <li><strong>🆕 (Martin 15/05/2026) Tri par score TOTAL puis amenity_dominance puis hero_score</strong> — alignement avec le ranking du bucket (= "top 1 pool" devient le slot 1 du pack automatiquement). Avant : tri par hero_score puis dominance → la "top 1 pool" pouvait se retrouver en slot 5 du pack global si une autre photo avait un hero plus élevé.</li>
           <li>Humain natif <strong>NON discriminant</strong> — on ajoute en IA si manque</li>
         </ul>
 
@@ -849,7 +879,7 @@ flowchart TD
               <li><strong>Tier strict</strong> : tier 1 (pool/cabana/rooftop/beach) > tier 2 (spa) > tier 3 (bar/food/gym, fallback ultime)</li>
               <li><strong>Hard requirements</strong> : amenity_dominance ≥ 50%, shot_type ≠ close_up, hero_quality ≥ 50</li>
               <li>Humain natif <strong>NON discriminant</strong> — si la photo n'a pas d'humain, l'IA en ajoute un (ajout forcé)</li>
-              <li>Tri parmi les éligibles : hero_score → amenity_dominance → score brand</li>
+              <li><strong>🆕 (Martin 15/05/2026)</strong> Tri parmi les éligibles : <strong>score TOTAL</strong> (cumulé bonus/malus, identique au ranking bucket) → amenity_dominance → hero_score → score brand. Avant : on triait par hero_score d'abord, ce qui pouvait placer la "top 1 pool" en slot 5 du pack. Maintenant la "top 1 du bucket" devient automatiquement le slot 1 du pack pour cohérence.</li>
             </ul>
           </div>
 
@@ -2169,7 +2199,227 @@ photo finale enhanced (jpeg)
 
       </div><!-- /subtab-prompt-anatomy -->
 
+      <!-- ━━━ Sous-onglet Multi-frame (pourquoi rejeté) — Martin 15/05/2026 ━━━ -->
+      <div id="subtab-multiframe-rejected" class="subtab-panel">
+        <section class="card-dayuse p-6 mb-6">
+          <h2 class="text-base font-semibold mb-1">🎞️ Multi-frame : pourquoi on a rejeté l'approche</h2>
+          <p class="text-sm text-gray-500 mb-4">Hypothèse testée (Martin 15/05/2026) : découper la génération en plusieurs frames (1 pour décor, 1 pour humains, 1 pour éléments) pour réduire les tokens des prompts. <strong>Conclusion : net négatif sur notre cas d'usage.</strong></p>
+
+          <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 mb-4">
+            <div class="text-sm font-semibold text-amber-900 mb-1">💡 L'idée séduisante</div>
+            <p class="text-xs text-amber-900 leading-relaxed">Au lieu d'envoyer un prompt monolithique de 5000 chars à Nano Banana pour ajouter un humain dans une photo, on découperait en 3 prompts spécialisés :</p>
+            <ul class="text-xs text-amber-900 mt-2 ml-5 list-disc space-y-0.5">
+              <li><strong>Frame 1</strong> — décor (jour/nuit, clutter, lighting) · prompt ~800 chars</li>
+              <li><strong>Frame 2</strong> — humains (subject + pose + scale) · prompt ~2000 chars</li>
+              <li><strong>Frame 3</strong> — éléments (bouée, drinks, accessoires) · prompt ~1200 chars</li>
+            </ul>
+            <p class="text-xs text-amber-900 mt-2"><strong>Tokens totaux :</strong> ~4000 vs ~5000 actuels → -20%. Signal plus focalisé. Debug par step. <strong>Sur le papier, séduisant.</strong></p>
+          </div>
+        </section>
+
+        <section class="card-dayuse p-6 mb-6">
+          <h3 class="text-base font-semibold mb-3">🔍 Pourquoi c'est net négatif en pratique</h3>
+
+          <div class="space-y-4">
+
+            <!-- Raison 1 : structure des coûts -->
+            <div class="border-l-4 border-red-400 pl-4">
+              <div class="text-sm font-bold text-red-800 mb-1">1️⃣ Le coût de Nano Banana n'est PAS dominé par les tokens input</div>
+              <p class="text-xs text-gray-700 mb-2">Tarif Gemini Image (Nano Banana) :</p>
+              <ul class="text-xs text-gray-700 ml-5 list-disc space-y-0.5">
+                <li>Input texte : ~$0.30 / 1M tokens → 5000 tokens prompt = <strong>$0.0015</strong> (négligeable)</li>
+                <li>Output image (1024×1024) : <strong>$0.04 par appel</strong> ← c'est ÇA le vrai coût</li>
+              </ul>
+              <table class="w-full text-xs mt-2 border border-gray-200 rounded">
+                <thead class="bg-gray-50"><tr><th class="px-3 py-1.5 border-b text-left">Pipeline</th><th class="px-3 py-1.5 border-b text-right">Steps</th><th class="px-3 py-1.5 border-b text-right">Coût total / photo</th></tr></thead>
+                <tbody>
+                  <tr><td class="px-3 py-1.5 border-b">Actuel (lighting + add_character)</td><td class="px-3 py-1.5 border-b text-right">2</td><td class="px-3 py-1.5 border-b text-right font-mono">$0.080</td></tr>
+                  <tr class="bg-red-50"><td class="px-3 py-1.5 text-red-900 font-semibold">Découpé 3 frames</td><td class="px-3 py-1.5 text-right text-red-900 font-semibold">3</td><td class="px-3 py-1.5 text-right text-red-900 font-mono font-semibold">$0.120 (+50%)</td></tr>
+                </tbody>
+              </table>
+              <p class="text-xs text-red-700 mt-2"><strong>Verdict :</strong> +50% de coût pour économiser $0.0015 de tokens. <strong>Économiquement absurde.</strong></p>
+            </div>
+
+            <!-- Raison 2 : dégradation cumulative -->
+            <div class="border-l-4 border-red-400 pl-4">
+              <div class="text-sm font-bold text-red-800 mb-1">2️⃣ Dégradation cumulative à chaque pass</div>
+              <p class="text-xs text-gray-700 mb-2">Nano Banana n'est <strong>pas un éditeur de layers</strong> — chaque appel régénère TOUT le pixel-grid à partir de l'image précédente. Effets observés en pratique :</p>
+              <ul class="text-xs text-gray-700 ml-5 list-disc space-y-0.5">
+                <li>Lighting drift (température couleur qui bouge légèrement à chaque pass)</li>
+                <li>Edges qui deviennent flous</li>
+                <li>Détails fins (texture carrelage, joints, reflets eau) qui se "smoothent"</li>
+                <li>Architecture qui se "régularise" (= perte des défauts authentiques)</li>
+              </ul>
+              <p class="text-xs text-red-700 mt-2"><strong>Conséquence :</strong> 3 passes = 3 cycles de dégradation accumulée. Photo finale moins nette qu'après 1 pass.</p>
+            </div>
+
+            <!-- Raison 3 : interactions impossibles à isoler -->
+            <div class="border-l-4 border-red-400 pl-4">
+              <div class="text-sm font-bold text-red-800 mb-1">3️⃣ Les éléments interagissent — impossible de les isoler</div>
+              <p class="text-xs text-gray-700 mb-2">Le sujet humain a besoin de connaître <strong>le contexte complet</strong> de la scène pour s'intégrer :</p>
+              <ul class="text-xs text-gray-700 ml-5 list-disc space-y-0.5">
+                <li>Direction de la lumière (sinon ombre incohérente)</li>
+                <li>Échelle du mobilier voisin (sinon sujet géant ou nain)</li>
+                <li>Position de l'eau (pour respecter dry/wet boundary)</li>
+                <li>Position des barrières / safety zones</li>
+              </ul>
+              <p class="text-xs text-gray-700 mt-2"><strong>Cas concret du raté :</strong> "humain allongé sur une bouée donut". Génération séparée donne :</p>
+              <ul class="text-xs text-gray-700 ml-5 list-disc space-y-0.5">
+                <li>Pass humain : sujet allongé <em>dans le vide</em> (pas de bouée encore) → posture bizarre</li>
+                <li>Pass bouée : bouée flotte <em>vide</em> sur l'eau → incohérent avec le sujet déjà placé</li>
+                <li>Tentative de "laisser un trou" → IA générative ne sait pas faire ça, elle remplit toujours</li>
+              </ul>
+            </div>
+
+            <!-- Raison 4 : latency -->
+            <div class="border-l-4 border-red-400 pl-4">
+              <div class="text-sm font-bold text-red-800 mb-1">4️⃣ Latency × 1.5-2</div>
+              <p class="text-xs text-gray-700">Chaque appel Nano Banana = 20-30s. Sur un pack de 25 photos retouchées : <strong>+15 minutes</strong> de pipeline. Compromet l'objectif "Identifier l'hôtel → pack livré sous 5 minutes".</p>
+            </div>
+
+            <!-- Raison 5 : validateur multiplié -->
+            <div class="border-l-4 border-red-400 pl-4">
+              <div class="text-sm font-bold text-red-800 mb-1">5️⃣ Validateur entre steps = coût additionnel</div>
+              <p class="text-xs text-gray-700">Pour conserver l'avantage debug "on sait quel step a foiré", il faut valider entre chaque step. 3 appels validateur × $0.001 = $0.003 supplémentaires. Cumulé avec ×1.5 sur Nano Banana → <strong>$0.13/photo</strong> au lieu de $0.08.</p>
+            </div>
+
+          </div>
+        </section>
+
+        <!-- Tableau comparatif use cases multi-frame -->
+        <section class="card-dayuse p-6 mb-6">
+          <h3 class="text-base font-semibold mb-3">🎯 Où le multi-frame EST légitime (et pourquoi pas chez nous)</h3>
+          <table class="w-full text-xs border border-gray-200 rounded">
+            <thead class="bg-gray-50">
+              <tr><th class="px-3 py-2 border-b text-left">Use case</th><th class="px-3 py-2 border-b text-left">Compatible multi-frame ?</th><th class="px-3 py-2 border-b text-left">Pourquoi</th></tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              <tr><td class="px-3 py-2"><strong>Vidéo Veo / Kling</strong> (1 frame par scène + interpolation)</td><td class="px-3 py-2 text-emerald-700">✅ OUI</td><td class="px-3 py-2">Nature séquentielle — chaque scène est conceptuellement séparée et interpolée par le modèle FLF</td></tr>
+              <tr><td class="px-3 py-2"><strong>Layer-based editing</strong> (Photoshop, Figma)</td><td class="px-3 py-2 text-emerald-700">✅ OUI</td><td class="px-3 py-2">Layers = vraie séparation logique, compositing déterministe par-dessus</td></tr>
+              <tr><td class="px-3 py-2"><strong>Variations stylistiques</strong> (8 styles sur 1 photo)</td><td class="px-3 py-2 text-emerald-700">✅ OUI</td><td class="px-3 py-2">Chaque pass est indépendant de l'autre, pas d'interaction</td></tr>
+              <tr class="bg-red-50"><td class="px-3 py-2 font-semibold text-red-900"><strong>Photo statique avec interactions</strong> (notre cas)</td><td class="px-3 py-2 text-red-700 font-semibold">❌ NON</td><td class="px-3 py-2 text-red-900">Sujet + bouée + eau + lumière + mobilier interagissent visuellement. Impossible de les isoler sans casser la cohérence.</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <!-- Alternative retenue : optimiser le prompt existant -->
+        <section class="card-dayuse p-6 mb-6">
+          <h3 class="text-base font-semibold mb-3">✅ Alternative retenue à la place</h3>
+          <p class="text-sm text-gray-700 mb-3">Si l'objectif est <strong>réduire les tokens</strong>, on a 2 leviers bien meilleurs que le multi-frame :</p>
+
+          <div class="space-y-3">
+            <div class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+              <div class="text-sm font-bold text-emerald-900 mb-1">A. Dédup du prompt V1 long</div>
+              <p class="text-xs text-emerald-900">Le prompt V1 long (5000 chars) a des doublons historiques : "INVENTED FLOATING FURNITURE" est dit 3 fois, "WATER DEPTH PHYSICS" 2 fois, "SCALE LOCK" et "ABSOLUTE SIZE LIMIT" se recoupent à 70%. Audit + dedup → <strong>5000 → 3500 chars</strong> sans perdre de garde-fous critiques. Même nombre d'appels Nano Banana = pas de risque dégradation.</p>
+            </div>
+
+            <div class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+              <div class="text-sm font-bold text-emerald-900 mb-1">B. Prompt conditionnel par contexte</div>
+              <p class="text-xs text-emerald-900">Aujourd'hui on injecte TOUTES les règles dans TOUTES les photos. Or :</p>
+              <ul class="text-xs text-emerald-900 ml-5 list-disc mt-1 space-y-0.5">
+                <li>RULE #0 (Safety Barrier Lock) → utile seulement si <code>barrier_risk=True</code></li>
+                <li>WATER DEPTH PHYSICS → utile seulement si catégorie = piscine</li>
+                <li>ROOFTOP / ELEVATED scene → utile seulement si rooftop</li>
+              </ul>
+              <p class="text-xs text-emerald-900 mt-2"><strong>Gain :</strong> -40% tokens sur photos non-piscine, -20% sur photos piscine. <strong>Et signal critique augmenté</strong> (Gemini n'est plus distrait par des règles non pertinentes).</p>
+            </div>
+
+            <div class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+              <div class="text-sm font-bold text-emerald-900 mb-1">📊 Combined A+B</div>
+              <p class="text-xs text-emerald-900">Pour une photo piscine simple : <strong>~5000 chars → ~2500 chars (-50%)</strong>. Pour une photo intérieure sans barrière : <strong>~5000 → ~1800 (-64%)</strong>. <strong>Sans rien sacrifier en qualité, sans coûts cachés, sans dégradation cumulative.</strong></p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Encadré final -->
+        <section class="card-dayuse p-6 mb-6">
+          <h3 class="text-base font-semibold mb-2">🎓 Leçon à retenir</h3>
+          <p class="text-sm text-gray-700 mb-2">Le multi-frame est une <strong>technique de séquence</strong> (vidéo, animation, variations indépendantes). Notre cas est une <strong>composition d'image statique avec interactions</strong>. Confondre les deux mène à :</p>
+          <ul class="text-sm text-gray-700 ml-5 list-disc space-y-1">
+            <li>Coût ×1.5 sans bénéfice</li>
+            <li>Dégradation cumulative à chaque pass</li>
+            <li>Perte de cohérence des interactions (sujet ↔ bouée ↔ eau ↔ lumière)</li>
+            <li>Latency dégradée</li>
+          </ul>
+          <p class="text-sm text-gray-700 mt-2"><strong>Règle de décision :</strong> avant d'adopter une technique du monde vidéo / layers / multi-pass, vérifier que les éléments sont VRAIMENT indépendants. Si oui → multi-frame OK. Si non → prompt monolithique optimisé + validation structurée.</p>
+        </section>
+      </div><!-- /subtab-multiframe-rejected -->
+
     </div><!-- /tab-doc -->
+
+    <!-- ━━━ Tab Dashboard (Martin 15/05/2026, pack C) ━━━━━━━━━━━━━━━━━━━━ -->
+    <div id="tab-dashboard" class="tab-panel">
+      <section class="card-dayuse p-6 mb-4">
+        <div class="flex items-center justify-between mb-1 flex-wrap gap-2">
+          <h2 class="text-base font-semibold">📊 Audit Dashboard</h2>
+          <div class="flex items-center gap-2">
+            <label class="text-xs text-gray-500">Fenêtre :</label>
+            <select id="dash-days" class="text-xs px-2 py-1 rounded border border-gray-300">
+              <option value="7">7 jours</option>
+              <option value="30" selected>30 jours</option>
+              <option value="90">90 jours</option>
+              <option value="365">1 an</option>
+            </select>
+            <label class="text-xs text-gray-500 ml-2">Filtre slug :</label>
+            <input id="dash-slug" type="text" placeholder="tous" class="text-xs px-2 py-1 rounded border border-gray-300 w-44">
+            <button id="dash-refresh" class="text-xs px-3 py-1 rounded-full bg-amber-200 hover:bg-amber-300 font-semibold">🔄 Rafraîchir</button>
+          </div>
+        </div>
+        <p class="text-sm text-gray-500">Vue agrégée des validations post-IA + tags humains pour mesurer la santé du pipeline et la précision du validateur Gemini.</p>
+      </section>
+
+      <!-- KPIs principaux -->
+      <div id="dash-kpis" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
+        <!-- rendu via JS -->
+      </div>
+
+      <!-- Validateur précision -->
+      <section class="card-dayuse p-6 mb-4">
+        <h3 class="text-base font-semibold mb-2">🎯 Précision validateur Gemini (vs vérité terrain humaine)</h3>
+        <p class="text-xs text-gray-500 mb-3">Mesure si le validateur Gemini est bien calibré. Calculé sur les photos taguées non-borderline. Plus le F1 score est haut, mieux c'est.</p>
+        <div id="dash-precision" class="grid grid-cols-2 md:grid-cols-4 gap-3"></div>
+        <div id="dash-precision-confusion" class="mt-4"></div>
+      </section>
+
+      <!-- LOI verdicts agrégés (Martin 15/05/2026, P1) -->
+      <section class="card-dayuse p-6 mb-4">
+        <h3 class="text-base font-semibold mb-2">⚖️ LOI verdicts (règles métier structurées)</h3>
+        <p class="text-xs text-gray-500 mb-3">13 LOI métier évaluées automatiquement après chaque génération IA. Triées par criticité (🔴 → 🟠 → 🟡) puis par taux FAIL.</p>
+        <div id="dash-lois"></div>
+      </section>
+
+      <!-- Field fail rates -->
+      <section class="card-dayuse p-6 mb-4">
+        <h3 class="text-base font-semibold mb-2">🔬 Taux d'échec par champ critique</h3>
+        <p class="text-xs text-gray-500 mb-3">Sur les 14 champs structurés du validateur (7 CRITICAL + 7 MAJOR). Identifie les champs où le pipeline rate le plus souvent.</p>
+        <div id="dash-fields"></div>
+      </section>
+
+      <!-- Top violations -->
+      <section class="card-dayuse p-6 mb-4">
+        <h3 class="text-base font-semibold mb-2">🚨 Top violations détectées</h3>
+        <div id="dash-violations"></div>
+      </section>
+
+      <!-- By category -->
+      <section class="card-dayuse p-6 mb-4">
+        <h3 class="text-base font-semibold mb-2">📁 Performance par catégorie</h3>
+        <div id="dash-categories" class="overflow-x-auto"></div>
+      </section>
+
+      <!-- By slug -->
+      <section class="card-dayuse p-6 mb-4">
+        <h3 class="text-base font-semibold mb-2">🏨 Performance par hôtel</h3>
+        <div id="dash-slugs" class="overflow-x-auto"></div>
+      </section>
+
+      <!-- Evolution -->
+      <section class="card-dayuse p-6 mb-4">
+        <h3 class="text-base font-semibold mb-2">📈 Évolution du taux de succès (par jour)</h3>
+        <p class="text-xs text-gray-500 mb-3">% de photos taguées ✅ Bonnes parmi les taguées non-borderline, par jour.</p>
+        <div id="dash-evolution" class="overflow-x-auto"></div>
+      </section>
+    </div><!-- /tab-dashboard -->
 
   </div>
 
@@ -2807,74 +3057,172 @@ photo finale enhanced (jpeg)
       }
     }
 
-    // ----- Fetch ALL sources (orchestre official + booking + rp) -----
+    // ━━━ Bouton "Lancer" : enchaîne scrape Booking + fetch sources (Martin 18/05/2026) ━━━
+    // Avant : 2 boutons séparés ("Identifier l'hôtel" puis "Récupérer photos").
+    // Maintenant : 1 seul bouton qui scrape Booking (background) puis fetch sources.
     $("btn-fetch-all").onclick = async () => {
-      if (!state.slug) { alert("Scrape d'abord la fiche RP (étape 1)"); return; }
+      // ━ Récupère les 4 URLs depuis le formulaire compact ━
+      const bookingUrl = ($("src-input-booking").value || "").trim();
+      const officialUrl = ($("src-input-official").value || "").trim();
+      const rpUrl = ($("src-input-rp").value || "").trim();
+      const expediaUrl = ($("src-input-expedia").value || "").trim();
+
+      // ━ Validation : Booking obligatoire ━
+      if (!bookingUrl.startsWith("https://www.booking.com/hotel/")) {
+        alert("URL Booking requise (https://www.booking.com/hotel/…). C'est la source des amenities/nom/ville.");
+        return;
+      }
+
+      // ━ Sync vers les anciens IDs hidden pour le code legacy ━
+      $("booking-url").value = bookingUrl;
+      $("identify-booking-url").value = bookingUrl;
+      $("step2-official-url").value = officialUrl;
+      $("step2-rp-url").value = rpUrl;
+      $("step2-expedia-url").value = expediaUrl;
+
+      // Sources implicites : une source est utilisée si URL fournie
       const sources = {
-        official: $("src-official").checked,
-        booking: $("src-booking").checked,
-        rp: $("src-rp").checked,
-        expedia: $("src-expedia") ? $("src-expedia").checked : false,
+        official: !!officialUrl,
+        booking: true,  // toujours utilisé (clé d'entrée)
+        rp: !!rpUrl,
+        expedia: !!expediaUrl,
       };
-      if (!sources.official && !sources.booking && !sources.rp && !sources.expedia) {
-        alert("Coche au moins une source.");
-        return;
-      }
-      const bookingUrl = $("booking-url").value.trim();
-      if (sources.booking && !bookingUrl.startsWith("https://www.booking.com/hotel/")) {
-        alert("Source Booking cochée → colle une URL Booking valide.");
-        return;
-      }
+
       const btn = $("btn-fetch-all");
       btn.disabled = true;
-      btn.textContent = "Récupération en cours...";
+      const originalLabel = btn.textContent;
+      btn.textContent = "⏳ Lancement…";
       uploadSummary.classList.remove("hidden");
       uploadSummary.classList.remove("text-red-600");
 
-      const stopPoll = pollProgress(state.slug, "_fetch_all", (s) => {
-        renderProgressBar(uploadSummary, s.current || 0, s.total || 100, s.message || "Initialisation...");
-      });
-
       try {
-        // Récupère les URLs éditées par l'utilisateur dans les champs Step 2.
-        // Si vide → on laisse le backend faire la recherche DDG/Gemini classique.
-        const explicit_urls = {
-          official_url: $("step2-official-url") ? $("step2-official-url").value.trim() : "",
-          expedia_url: $("step2-expedia-url") ? $("step2-expedia-url").value.trim() : "",
-          rp_url: $("step2-rp-url") ? $("step2-rp-url").value.trim() : "",
-        };
-        const r = await fetch("/api/fetch-all-sources", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            slug: state.slug,
-            booking_url: bookingUrl,
-            sources,
-            ...explicit_urls,
-          }),
+        // ━ Étape A : scrape Booking en background si pas déjà fait ━━━━━━━━━━━
+        const slugMatch = bookingUrl.replace(/\/$/, "").split("/").pop().replace(".html", "");
+        const expectedSlug = "booking-" + slugMatch;
+
+        if (state.slug !== expectedSlug) {
+          // Scrape Booking : poll progress sur booking_scrape
+          btn.textContent = "⏳ Scraping Booking…";
+          renderProgressBar(uploadSummary, 0, 3, "🔎 Récupération métadonnées hôtel Booking…");
+          const stopPollIdentify = pollProgress("", "booking_scrape", (s) => {
+            renderProgressBar(uploadSummary, s.current || 0, s.total || 3, s.message || "Scraping Booking…");
+          });
+          try {
+            const idResp = await fetch("/api/identify-hotel", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url: bookingUrl }),
+            });
+            const idData = await idResp.json();
+            if (!idResp.ok) throw new Error(idData.error || "Booking scrape échoué");
+            state.slug = idData.slug;
+            state.rp = idData.data;
+            state.identifiedUrls = idData.urls || {};
+            state.urlsMeta = idData.urls_meta || {};
+            // Affiche le récap hôtel (nom/ville/amenities) dans rp-result
+            renderRP(idData.data, state.identifiedUrls, state.urlsMeta);
+            if (window.loadRunStatus) window.loadRunStatus(state.slug);
+          } finally {
+            stopPollIdentify();
+          }
+        }
+
+        // ━ Étape B : fetch photos depuis les sources avec URLs fournies ━━━━━
+        btn.textContent = "⏳ Téléchargement photos…";
+        renderProgressBar(uploadSummary, 0, 100, "📷 Téléchargement photos…");
+        const stopPollFetch = pollProgress(state.slug, "_fetch_all", (s) => {
+          renderProgressBar(uploadSummary, s.current || 0, s.total || 100, s.message || "Initialisation…");
         });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error || "Erreur");
-        stopPoll();
-        state.uploaded = data.downloaded;
-        state.deselected.clear();
-        uploadSummary.innerHTML = `<span class="text-green-700">✓ ${data.downloaded} photo(s) prêtes (après dédup pHash inter-sources)</span>`;
-
-        // Récap sources
-        renderSourcesSummary(data.sources_summary);
-
-        // Grille interactive
-        renderUploadGrid(data.files);
-
-        $("step-run").classList.remove("opacity-50", "pointer-events-none");
+        try {
+          const r = await fetch("/api/fetch-all-sources", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              slug: state.slug,
+              booking_url: bookingUrl,
+              sources,
+              official_url: officialUrl,
+              rp_url: rpUrl,
+              expedia_url: expediaUrl,
+            }),
+          });
+          const data = await r.json();
+          if (!r.ok) throw new Error(data.error || "Erreur fetch sources");
+          state.uploaded = data.downloaded;
+          state.deselected.clear();
+          uploadSummary.innerHTML = `<span class="text-green-700">✓ ${data.downloaded} photo(s) prêtes (après dédup pHash inter-sources)</span>`;
+          renderSourcesSummary(data.sources_summary);
+          renderUploadGrid(data.files);
+          $("step-run").classList.remove("opacity-50", "pointer-events-none");
+        } finally {
+          stopPollFetch();
+        }
       } catch (e) {
-        stopPoll();
-        uploadSummary.innerHTML = `<span class="text-red-600">Erreur : ${e.message}</span>`;
+        uploadSummary.innerHTML = `<span class="text-red-600">❌ Erreur : ${e.message}</span>`;
       } finally {
         btn.disabled = false;
-        btn.textContent = "Récupérer les photos depuis les sources cochées";
+        btn.textContent = originalLabel;
       }
     };
+
+    // ━━━ Boutons "🔎 Auto-find" sur chaque source optionnelle ━━━━━━━━━━━━━━━━
+    // Délégation globale : capte le click sur .btn-auto-find peu importe quand
+    // l'élément a été inséré dans le DOM.
+    document.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('.btn-auto-find');
+      if (!btn) return;
+      ev.preventDefault();
+      const findType = btn.dataset.findType;  // 'rp', 'expedia', 'official'
+      if (!['rp', 'expedia', 'official'].includes(findType)) return;
+
+      const bookingUrl = ($("src-input-booking").value || "").trim();
+      if (!bookingUrl.startsWith("https://www.booking.com/hotel/")) {
+        alert("Saisis d'abord l'URL Booking — l'auto-find utilise le nom/ville extraits du scrape Booking.");
+        return;
+      }
+      const targetInput = $(`src-input-${findType}`);
+      if (!targetInput) return;
+      const originalLabel = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '⏳…';
+      try {
+        const r = await fetch("/api/auto-find-url", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: findType, booking_url: bookingUrl }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+        if (data.url) {
+          targetInput.value = data.url;
+          btn.innerHTML = '✓ Trouvé';
+          btn.classList.add('bg-emerald-100', 'text-emerald-800');
+          btn.classList.remove('bg-amber-100', 'text-amber-800');
+          setTimeout(() => {
+            btn.innerHTML = originalLabel;
+            btn.classList.remove('bg-emerald-100', 'text-emerald-800');
+            btn.classList.add('bg-amber-100', 'text-amber-800');
+          }, 2000);
+        } else {
+          const err = data.error || "URL non trouvée";
+          btn.innerHTML = '✗ Non trouvée';
+          btn.classList.add('bg-red-100', 'text-red-800');
+          btn.classList.remove('bg-amber-100', 'text-amber-800');
+          setTimeout(() => {
+            btn.innerHTML = originalLabel;
+            btn.classList.remove('bg-red-100', 'text-red-800');
+            btn.classList.add('bg-amber-100', 'text-amber-800');
+          }, 2500);
+          console.warn(`[auto-find ${findType}] ${err}`);
+        }
+      } catch (e) {
+        btn.innerHTML = '⚠ Erreur';
+        alert(`Auto-find ${findType} : ${e.message}`);
+        setTimeout(() => { btn.innerHTML = originalLabel; }, 2000);
+      } finally {
+        btn.disabled = false;
+      }
+    });
 
     function renderSourcesSummary(sources) {
       const el = $("sources-summary");
@@ -3235,6 +3583,74 @@ photo finale enhanced (jpeg)
       }
     });
 
+    // ━━ Tag widget — délégation globale (Martin 15/05/2026, pack C) ━━━━━━━━
+    // Capture les clics sur .tag-btn et les blur sur input note → POST /api/photo-tag.
+    // window.currentSlug est défini quand le pipeline finit (cf. setter dans renderResults).
+    document.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('.tag-btn');
+      if (!btn || btn.dataset.tagAction !== 'set') return;
+      ev.preventDefault();
+      const filename = btn.dataset.tagPhoto;
+      const tag = btn.dataset.tagValue;
+      const slug = window.currentSlug;
+      if (!slug) { console.warn('[tag] no slug'); return; }
+      // Lookup note input voisin
+      const noteInput = document.querySelector(`input[data-tag-note-for="${CSS.escape(filename)}"]`);
+      const note = noteInput?.value || null;
+      const statusEl = document.querySelector(`[data-tag-status="${CSS.escape(filename)}"]`);
+      // UI optimistic : on update visuel immédiatement
+      document.querySelectorAll(`.tag-btn[data-tag-photo="${CSS.escape(filename)}"]`).forEach(b => {
+        b.classList.remove('tag-active-good', 'tag-active-border', 'tag-active-bad');
+      });
+      const cls = tag === 'good' ? 'tag-active-good' : (tag === 'borderline' ? 'tag-active-border' : 'tag-active-bad');
+      btn.classList.add(cls);
+      if (statusEl) statusEl.textContent = 'Sauvegarde…';
+      try {
+        const res = await fetch('/api/photo-tag', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({slug, filename, tag, note}),
+        });
+        const j = await res.json();
+        if (j.ok) {
+          if (statusEl) { statusEl.textContent = '✓ enregistré'; setTimeout(() => statusEl.textContent = '', 1500); }
+          // Mémoire locale pour resilience scroll/re-render
+          if (!window.photoTagsBulk) window.photoTagsBulk = {};
+          window.photoTagsBulk[filename] = {tag, note, tagged_at: j.tagged_at};
+        } else {
+          if (statusEl) statusEl.textContent = '⚠ ' + (j.error || 'erreur');
+        }
+      } catch (e) {
+        if (statusEl) statusEl.textContent = '⚠ offline';
+        console.error('[tag] save failed', e);
+      }
+    });
+
+    // Sauve la note (avec debounce) quand l'input note perd le focus ou Enter
+    document.addEventListener('change', async (ev) => {
+      const input = ev.target.closest('input[data-tag-note-for]');
+      if (!input) return;
+      const filename = input.dataset.tagNoteFor;
+      const slug = window.currentSlug;
+      if (!slug) return;
+      // On ne sauve la note QUE si un tag existe déjà (sinon on attend le 1er clic tag)
+      const existing = window.photoTagsBulk?.[filename];
+      if (!existing) return;
+      const note = input.value || null;
+      try {
+        await fetch('/api/photo-tag', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({slug, filename, tag: existing.tag, note}),
+        });
+        existing.note = note;
+        const statusEl = document.querySelector(`[data-tag-status="${CSS.escape(filename)}"]`);
+        if (statusEl) { statusEl.textContent = '✓ note enregistrée'; setTimeout(() => statusEl.textContent = '', 1500); }
+      } catch (e) {
+        console.error('[tag] note save failed', e);
+      }
+    });
+
     function wireCopyPromptButtons() {
       // Maintenant no-op : la délégation globale ci-dessus gère tout. Gardé pour compat.
       document.querySelectorAll('.btn-copy-prompt').forEach(btn => {
@@ -3434,6 +3850,30 @@ photo finale enhanced (jpeg)
     function renderResults(d) {
       const stats = d.stats;
       const cov = d.coverage;
+      // ━━ Setup tagging context (Martin 15/05/2026, pack C) ━━━━━━━━━━━━━━━━━
+      // Stocke le slug courant pour le widget tagging + précharge les tags existants
+      window.currentSlug = d.slug;
+      window.photoTagsBulk = window.photoTagsBulk || {};
+      // Lance le fetch des tags en parallèle (non bloquant)
+      fetch(`/api/photo-tags-bulk?slug=${encodeURIComponent(d.slug)}`)
+        .then(r => r.json())
+        .then(bulk => {
+          window.photoTagsBulk = bulk || {};
+          // Re-apply visual states aux boutons déjà rendus
+          Object.entries(window.photoTagsBulk).forEach(([fn, info]) => {
+            document.querySelectorAll(`.tag-btn[data-tag-photo="${CSS.escape(fn)}"]`).forEach(b => {
+              b.classList.remove('tag-active-good', 'tag-active-border', 'tag-active-bad');
+              if (b.dataset.tagValue === info.tag) {
+                const cls = info.tag === 'good' ? 'tag-active-good' : (info.tag === 'borderline' ? 'tag-active-border' : 'tag-active-bad');
+                b.classList.add(cls);
+              }
+            });
+            // Pre-fill note input
+            const noteInput = document.querySelector(`input[data-tag-note-for="${CSS.escape(fn)}"]`);
+            if (noteInput && !noteInput.value && info.note) noteInput.value = info.note;
+          });
+        })
+        .catch(e => console.warn('[tag] bulk fetch failed', e));
 
       // Stats top + coût
       const cost = d.cost || {};
@@ -3659,7 +4099,7 @@ photo finale enhanced (jpeg)
         //  - Si framing_changed sans violation décor → recadrage propre, info bénigne 📐
         //  - Si framing_changed AVEC violation `decor_elements_lost` ou similaire → red flag 🚨
         const hasDecorLoss = e.ai_validation && (e.ai_validation.violations || []).some(
-          v => ['decor_elements_lost', 'architecture_changed', 'scene_regenerated', 'architecture_invented'].includes(v)
+          v => ['decor_elements_lost', 'architecture_changed', 'scene_regenerated', 'architecture_invented', 'pool_surface_reduced'].includes(v)
         );
         let framingWarn = '';
         if (e.framing_changed && e.action !== 'local_smart_crop' && e.action !== 'ai_recompose') {
@@ -3686,6 +4126,13 @@ photo finale enhanced (jpeg)
           architecture_changed: "Architecture/décor modifié",
           architecture_invented: "Architecture fabriquée (fenêtre/baie inventée)",
           decor_elements_lost: "Éléments décoratifs supprimés (plantes/objets disparus)",
+          pool_surface_reduced: "Piscine rétrécie / déformée (surface d'eau modifiée)",
+          subject_count_wrong: "Nombre de sujets ajoutés ≠ cible",
+          pool_float_oversized: "Bouée trop grosse ou mauvaise perspective",
+          subject_anatomy_broken: "Anatomie sujet cassée (bras/doigts)",
+          subject_face_unrealistic: "Face sujet non photoréaliste (mannequin/CGI)",
+          framing_modified: "Cadrage modifié (crop/zoom)",
+          outfit_inappropriate: "Tenue inadaptée au contexte",
           lighting_break: "Lumière incohérente",
         };
         // 4 états possibles après le retry+fallback :
@@ -3697,13 +4144,220 @@ photo finale enhanced (jpeg)
         let validationWarn = '';
         if (v) {
           if (e.fallback_to_original) {
-            validationWarn = `<div class="text-[11px] text-blue-800 mt-1 font-medium bg-blue-50 rounded px-2 py-1 border border-blue-200">↩️ Validation IA échouée 2× → on a gardé la photo ORIGINALE non retouchée (mieux qu'une IA pétée). Violations rencontrées : ${(v.violations_before_retry || v.violations || []).map(viol => VIOLATION_LABELS[viol] || viol).join(', ')}</div>`;
+            const beforeRetry = (v.violations_before_retry || []).map(viol => VIOLATION_LABELS[viol] || viol).join(', ');
+            const afterRetry = (v.violations || []).map(viol => VIOLATION_LABELS[viol] || viol).join(', ');
+            const strategies = (v.retry_strategies || []).join(', ');
+            validationWarn = `<div class="text-[11px] text-blue-800 mt-1 font-medium bg-blue-50 rounded px-2 py-1 border border-blue-200">
+              <div class="font-semibold mb-1">↩️ Validation IA échouée 2× → on a gardé la photo ORIGINALE non retouchée</div>
+              <div class="grid grid-cols-1 gap-1 text-[10px] font-normal">
+                <div><strong>1ère tentative (FAIL) :</strong> ${beforeRetry || 'aucune'}</div>
+                ${strategies ? `<div class="italic text-blue-600"><strong>↳ Correctifs appliqués :</strong> ${strategies}</div>` : ''}
+                <div><strong>2ème tentative (FAIL aussi) :</strong> ${afterRetry || 'aucune'}</div>
+                <div class="italic text-blue-700">→ Décision : retomber sur l'originale (mieux qu'une photo IA cassée publiée)</div>
+              </div>
+            </div>`;
           } else if (v.retry_attempted && v.ok) {
-            validationWarn = `<div class="text-[11px] text-amber-800 mt-1 font-medium bg-amber-50 rounded px-2 py-1 border border-amber-200">✓ Auto-corrigée après retry (1ère IA pétée : ${(v.violations_before_retry || []).map(viol => VIOLATION_LABELS[viol] || viol).join(', ')})</div>`;
+            const beforeRetry = (v.violations_before_retry || []).map(viol => VIOLATION_LABELS[viol] || viol).join(', ');
+            const strategies = (v.retry_strategies || []).join(', ');
+            validationWarn = `<div class="text-[11px] text-amber-800 mt-1 font-medium bg-amber-50 rounded px-2 py-1 border border-amber-200">
+              ✓ Auto-corrigée après retry · 1ère IA pétée : ${beforeRetry}${strategies ? ` <span class="italic">(↳ correctifs : ${strategies})</span>` : ''}
+            </div>`;
           } else if (!v.ok && (v.violations || []).length) {
             validationWarn = `<div class="text-[11px] text-red-700 mt-1 font-medium bg-red-50 rounded px-2 py-1 border border-red-200">🚨 Violations détectées par validation post-IA :<ul class="list-disc list-inside mt-0.5">${v.violations.map(viol => `<li>${VIOLATION_LABELS[viol] || viol}</li>`).join('')}</ul><div class="italic text-red-600 font-normal mt-0.5">${v.summary || ''}</div></div>`;
           }
         }
+
+        // ━━ Historique des tentatives IA (Martin 15/05/2026, P0 UX) ━━━━━━━━━
+        // Quand fallback OU retry réussi, on affiche un dépliable avec :
+        // - Pass 1 (initial) : violations + LOI verdicts + critical fields
+        // - Retry (correctifs appliqués + résultat)
+        // - Verdict final
+        let attemptsHistory = '';
+        if (v && v.retry_attempted) {
+          const beforeFields = v.critical_fields_before_retry || {};
+          const beforeLois = v.lois_before_retry || {};
+          const beforeVerdicts = (beforeLois.verdicts) || {};
+          const beforeSummary = beforeLois.summary || {};
+          const beforeViolations = v.violations_before_retry || [];
+
+          const afterFields = v.critical_fields || {};
+          const afterLois = v.lois || {};
+          const afterVerdicts = (afterLois.verdicts) || {};
+          const afterSummary = afterLois.summary || {};
+          const afterViolations = v.violations || [];
+
+          const strategies = (v.retry_strategies || []).join(', ');
+          const finalOutcome = e.fallback_to_original
+            ? '<span style="color:#1d4ed8; font-weight:bold;">↩️ Fallback original</span>'
+            : (v.ok ? '<span style="color:#059669; font-weight:bold;">✓ Auto-corrigée</span>'
+                    : '<span style="color:#dc2626; font-weight:bold;">🚨 Toujours en violation</span>');
+
+          // Helper pour rendre les fields d'une tentative
+          const renderAttemptFields = (fields, lois) => {
+            const failedFields = Object.entries(fields).filter(([_, f]) => (f.status || '').toUpperCase() === 'FAIL');
+            const passedCount = Object.values(fields).filter(f => (f.status || '').toUpperCase() === 'PASS').length;
+            const naCount = Object.values(fields).filter(f => (f.status || '').toUpperCase() === 'N/A').length;
+            const totalEval = Object.keys(fields).length - naCount;
+            const failedLois = Object.entries(lois?.verdicts || {}).filter(([_, l]) => l.status === 'FAIL');
+            return `<div class="mt-1 ml-3 space-y-1">
+              <div class="text-[10px] text-slate-600">Champs : <strong>${passedCount}/${totalEval} PASS</strong> · ${failedFields.length} FAIL · ${naCount} N/A</div>
+              ${failedFields.length > 0 ? `<div class="text-[10px]"><strong class="text-rose-700">Champs FAIL :</strong> <span class="text-rose-700">${failedFields.map(([fn]) => fn).join(', ')}</span></div>` : ''}
+              ${failedLois.length > 0 ? `<div class="text-[10px]"><strong class="text-rose-700">LOI FAIL :</strong> ${failedLois.map(([id, l]) => `<span class="font-mono">${id.replace('LOI_', '')}</span> <span class="italic text-slate-500">(${l.criticality})</span>`).join(' · ')}</div>` : ''}
+            </div>`;
+          };
+
+          attemptsHistory = `<details class="text-[11px] mt-1 rounded border border-purple-200 bg-purple-50/40">
+            <summary class="cursor-pointer font-medium text-purple-900 px-2 py-1 flex items-center justify-between gap-2">
+              <span>🔄 Historique tentatives IA (${e.fallback_to_original ? '2 essais ratés → fallback' : 'auto-corrigée'})</span>
+              ${finalOutcome}
+            </summary>
+            <div class="px-3 py-2 space-y-3">
+              <!-- Tentative 1 -->
+              <div class="border-l-2 border-rose-300 pl-2">
+                <div class="text-[11px] font-semibold text-rose-800">🟥 Tentative 1 (échouée)</div>
+                <div class="text-[10px] text-slate-700 mt-0.5"><strong>Violations :</strong> ${beforeViolations.map(viol => VIOLATION_LABELS[viol] || viol).join(', ') || 'aucune'}</div>
+                ${beforeSummary && beforeSummary.global_verdict ? `<div class="text-[10px] text-slate-600 mt-0.5"><strong>Verdict global LOI :</strong> ${beforeSummary.global_verdict} (${beforeSummary.fail} FAIL / ${beforeSummary.pass} PASS / ${beforeSummary.na} N/A)</div>` : ''}
+                ${renderAttemptFields(beforeFields, beforeLois)}
+              </div>
+
+              <!-- Correctifs appliqués -->
+              <div class="border-l-2 border-amber-400 pl-2 bg-amber-50/60 py-1 rounded">
+                <div class="text-[11px] font-semibold text-amber-900">🛠️ Correctifs appliqués au retry</div>
+                <div class="text-[10px] text-amber-800 mt-0.5">${strategies || 'header de renforcement standard'}</div>
+              </div>
+
+              <!-- Tentative 2 -->
+              <div class="border-l-2 ${e.fallback_to_original ? 'border-rose-300' : 'border-emerald-300'} pl-2">
+                <div class="text-[11px] font-semibold ${e.fallback_to_original ? 'text-rose-800' : 'text-emerald-800'}">${e.fallback_to_original ? '🟥' : '🟩'} Tentative 2 (retry) ${e.fallback_to_original ? '— encore FAIL' : '— OK'}</div>
+                <div class="text-[10px] text-slate-700 mt-0.5"><strong>Violations :</strong> ${afterViolations.map(viol => VIOLATION_LABELS[viol] || viol).join(', ') || 'aucune'}</div>
+                ${afterSummary && afterSummary.global_verdict ? `<div class="text-[10px] text-slate-600 mt-0.5"><strong>Verdict global LOI :</strong> ${afterSummary.global_verdict} (${afterSummary.fail} FAIL / ${afterSummary.pass} PASS / ${afterSummary.na} N/A)</div>` : ''}
+                ${renderAttemptFields(afterFields, afterLois)}
+              </div>
+
+              ${e.fallback_to_original ? `
+              <!-- Décision finale -->
+              <div class="border-l-2 border-blue-400 pl-2 bg-blue-50/60 py-1 rounded">
+                <div class="text-[11px] font-semibold text-blue-900">↩️ Décision : fallback ${v.fallback_kind === 'intermediate_step' ? 'sur intermédiaire' : 'sur originale'}</div>
+                <div class="text-[10px] text-blue-800 mt-0.5">${v.fallback_kind === 'intermediate_step' ? `Garde la version après ${v.fallback_kept_step || 'step précédent'}, ajout perso annulé.` : "Photo originale conservée (mieux qu'une IA cassée publiée)."}</div>
+              </div>
+              ` : ''}
+            </div>
+          </details>`;
+        }
+
+        // ━━ Critical Fields audit-trail (Martin 15/05/2026, Option B) ━━━━━━━━━━━
+        // Affiche par champ : ✅ PASS / 🚨 FAIL / — N/A
+        // Visible uniquement si critical_fields existe (= ai_add_character a tourné).
+        let criticalFieldsBlock = '';
+        if (v && v.critical_fields && Object.keys(v.critical_fields).length > 0) {
+          const FIELD_LABELS = {
+            subject_count_added: "Nombre de sujets ajoutés",
+            pool_shape_preserved: "Forme piscine préservée",
+            pool_surface_preserved: "Surface d'eau préservée",
+            subject_water_boundary_respected: "Frontière sec/eau respectée",
+            barrier_side_correct: "Côté safe barrière",
+            no_invented_support_under_subject: "Aucun mobilier inventé sous sujet",
+            pool_float_realistic: "Bouée : taille & perspective réalistes",
+            subject_anatomy_intact: "Anatomie sujet (bras, doigts)",
+            subject_face_photoreal: "Face photoréaliste",
+            subject_scale_realistic: "Échelle sujet vs mobilier",
+            furniture_existing_preserved: "Mobilier préexistant préservé",
+            decor_elements_preserved: "Décor (plantes, lampes, art)",
+            framing_preserved: "Cadrage / framing préservé",
+            outfit_appropriate: "Tenue adaptée au contexte",
+          };
+          const STATUS_ICON = {"PASS": "✅", "FAIL": "🚨", "N/A": "—"};
+          const fieldRows = Object.entries(v.critical_fields).map(([fname, fdata]) => {
+            const label = FIELD_LABELS[fname] || fname;
+            const status = (fdata.status || "PASS").toUpperCase();
+            const icon = STATUS_ICON[status] || "—";
+            const colorClass = status === "FAIL" ? "text-red-700 bg-red-50" : (status === "N/A" ? "text-slate-500" : "text-emerald-700");
+            const evidence = fdata.evidence ? `<span class="italic text-slate-600">— ${fdata.evidence}</span>` : '';
+            return `<li class="${colorClass} px-1.5 py-0.5 rounded">${icon} <strong>${label}</strong> ${evidence}</li>`;
+          }).join('');
+          criticalFieldsBlock = `<details class="text-[11px] mt-1 bg-slate-50 rounded px-2 py-1 border border-slate-200"><summary class="cursor-pointer font-medium text-slate-700">🔬 Audit champs critiques (${Object.keys(v.critical_fields).length})</summary><ul class="list-none mt-1 space-y-0.5">${fieldRows}</ul></details>`;
+        }
+
+        // ━━ Widget LOI verdicts (Martin 15/05/2026, P1) ━━━━━━━━━━━━━━━━━━━━
+        // Affiche le verdict PASS/FAIL/N/A pour chacune des 13 LOI métier,
+        // classé par criticité. Mappage 🔴 critical / 🟠 major / 🟡 minor.
+        let loisBlock = '';
+        if (v && v.lois && v.lois.verdicts) {
+          const summary = v.lois.summary || {};
+          const verdicts = v.lois.verdicts;
+          const CRIT_BADGE = {
+            critical: '<span style="background:#fee2e2; color:#991b1b; padding:1px 6px; border-radius:100px; font-size:9px; font-weight:700;">🔴 CRITICAL</span>',
+            major:    '<span style="background:#fef3c7; color:#92400e; padding:1px 6px; border-radius:100px; font-size:9px; font-weight:700;">🟠 MAJOR</span>',
+            minor:    '<span style="background:#f1f5f9; color:#475569; padding:1px 6px; border-radius:100px; font-size:9px; font-weight:700;">🟡 MINOR</span>',
+          };
+          const STATUS_BADGE = {
+            PASS: '<span style="color:#059669;">✅</span>',
+            FAIL: '<span style="color:#dc2626; font-weight:bold;">🚨</span>',
+            'N/A': '<span style="color:#94a3b8;">—</span>',
+          };
+          // Tri par criticité asc, puis par fail (failures en premier dans chaque groupe)
+          const sortedVerdicts = Object.entries(verdicts).sort((a, b) => {
+            const co = {critical:0, major:1, minor:2};
+            const ca = co[a[1].criticality] ?? 9;
+            const cb = co[b[1].criticality] ?? 9;
+            if (ca !== cb) return ca - cb;
+            // FAIL avant PASS avant N/A
+            const so = {FAIL:0, PASS:1, 'N/A':2};
+            return (so[a[1].status] ?? 9) - (so[b[1].status] ?? 9);
+          });
+          const rows = sortedVerdicts.map(([id, vd]) => `<li class="flex items-start gap-2 ${vd.status === 'FAIL' ? 'bg-rose-50' : ''} px-1.5 py-0.5 rounded">
+            <span>${STATUS_BADGE[vd.status] || '—'}</span>
+            <span class="font-mono text-[10px] text-slate-400">${id.replace('LOI_', '')}</span>
+            <span class="flex-1 text-[11px] ${vd.status === 'FAIL' ? 'font-semibold text-rose-800' : 'text-slate-700'}">${vd.label}</span>
+            ${CRIT_BADGE[vd.criticality] || ''}
+          </li>`).join('');
+          // Couleur du verdict global
+          const gvColors = {
+            PASS:               {bg: '#d1fae5', text: '#065f46', icon: '✅', label: 'Toutes LOI PASS'},
+            FAIL_CRITICAL:      {bg: '#fee2e2', text: '#991b1b', icon: '🚨', label: 'CRITICAL FAIL'},
+            FAIL_MAJOR:         {bg: '#fef3c7', text: '#92400e', icon: '⚠️', label: 'MAJOR FAIL'},
+            FAIL_MINOR_ONLY:    {bg: '#f1f5f9', text: '#475569', icon: 'ℹ️', label: 'MINOR FAIL only'},
+          };
+          const gv = gvColors[summary.global_verdict] || gvColors.PASS;
+          loisBlock = `<details class="text-[11px] mt-1 rounded border border-slate-200" style="background:${gv.bg}40;">
+            <summary class="cursor-pointer font-medium px-2 py-1 flex items-center justify-between gap-2" style="color:${gv.text};">
+              <span>⚖️ LOI verdicts (${summary.pass}/${summary.total - summary.na} PASS, ${summary.fail} FAIL)</span>
+              <span style="background:${gv.bg}; color:${gv.text}; padding:1px 8px; border-radius:100px; font-size:9px; font-weight:700;">${gv.icon} ${gv.label}</span>
+            </summary>
+            <ul class="list-none mt-1 px-2 pb-1 space-y-0.5">${rows}</ul>
+          </details>`;
+        }
+
+        // ━━ Widget tagging humain ✅⚠️❌ (Martin 15/05/2026, pack C) ━━━━━━━━━
+        // 3 boutons + note libre. Auto-save via POST /api/photo-tag.
+        // Le tag courant est pré-chargé en bulk au début du rendu (lookup d in photoTagsBulk).
+        const currentTag = (window.photoTagsBulk && window.photoTagsBulk[e.filename]) || null;
+        const ct = currentTag?.tag || '';
+        const cn = (currentTag?.note || '').replace(/"/g, '&quot;');
+        // ━━ Fallback note : photo en fallback déjà comptabilisée auto dans dashboard ━━
+        // Le user peut quand même tagguer sa photo s'il veut donner un avis, mais sans
+        // pression : c'est la métrique "🔄 Fallbacks auto" qui mesure cet état.
+        const fallbackBadge = e.fallback_to_original
+          ? `<div class="text-[10px] text-blue-700 italic font-normal mb-1">📊 Cette photo est déjà comptabilisée dans <strong>"🔄 Fallbacks auto"</strong> du dashboard. Tag optionnel (la photo finale = originale propre).</div>`
+          : '';
+        const tagWidget = `
+          <div class="mt-2 px-2 py-1.5 ${e.fallback_to_original ? 'bg-blue-50/60 border-blue-200' : 'bg-gradient-to-r from-yellow-50 to-amber-50 border-amber-200'} border rounded">
+            ${fallbackBadge}
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[10px] font-bold ${e.fallback_to_original ? 'text-blue-900' : 'text-amber-900'} uppercase tracking-wide">🏷️ ${e.fallback_to_original ? 'Ton avis (optionnel)' : 'Ton verdict'} :</span>
+              <button data-tag-action="set" data-tag-photo="${e.filename}" data-tag-value="good"
+                      class="tag-btn ${ct === 'good' ? 'tag-active-good' : ''} text-[11px] px-2.5 py-0.5 rounded-full border border-slate-300 hover:border-emerald-500 hover:bg-emerald-50 transition-colors">✅ Bonne</button>
+              <button data-tag-action="set" data-tag-photo="${e.filename}" data-tag-value="borderline"
+                      class="tag-btn ${ct === 'borderline' ? 'tag-active-border' : ''} text-[11px] px-2.5 py-0.5 rounded-full border border-slate-300 hover:border-amber-500 hover:bg-amber-50 transition-colors">⚠️ Limite</button>
+              <button data-tag-action="set" data-tag-photo="${e.filename}" data-tag-value="bad"
+                      class="tag-btn ${ct === 'bad' ? 'tag-active-bad' : ''} text-[11px] px-2.5 py-0.5 rounded-full border border-slate-300 hover:border-rose-500 hover:bg-rose-50 transition-colors">❌ Mauvaise</button>
+              <input type="text" placeholder="note (optionnelle)" value="${cn}"
+                     data-tag-note-for="${e.filename}"
+                     class="flex-1 min-w-[160px] text-[11px] px-2 py-0.5 rounded-full border border-slate-300 focus:border-amber-400 focus:outline-none">
+              <span data-tag-status="${e.filename}" class="text-[10px] text-slate-500"></span>
+            </div>
+          </div>
+        `;
 
         // ━━ Variantes multi-format pour CETTE photo (Phase 1+2 multi-format crop) ━━
         const multiformatStrip = (() => {
@@ -3907,10 +4561,14 @@ photo finale enhanced (jpeg)
                     ai_remove_people: "🚫 Suppression personnes",
                     ai_recompose: "✂️ Recadrage IA",
                   };
+                  // Total chars sur tous les prompts (= proxy budget tokens × 4)
+                  const totalChars = aiSteps.reduce((acc, s) => acc + (s.prompt || "").length, 0);
+                  const totalCharsFormatted = totalChars.toLocaleString('fr-FR');
+                  const approxTokens = Math.round(totalChars / 4); // approximation grossière (4 chars ≈ 1 token)
                   promptsBlock = `
                     <details class="mt-1.5 border border-slate-200 rounded">
                       <summary class="text-[10px] font-semibold text-slate-700 cursor-pointer px-2 py-1.5 bg-slate-50 hover:bg-slate-100 transition-colors uppercase tracking-wide">
-                        🔎 Prompts IA envoyés (${aiSteps.length} step${aiSteps.length > 1 ? 's' : ''}) — clique pour déplier
+                        🔎 Prompts IA envoyés (${aiSteps.length} step${aiSteps.length > 1 ? 's' : ''}) · <span class="normal-case font-mono text-slate-600">${totalCharsFormatted} char · ~${approxTokens.toLocaleString('fr-FR')} tok</span> — clique pour déplier
                       </summary>
                       <div class="px-2 py-2 space-y-2 bg-white">
                         ${aiSteps.map((s, idx) => {
@@ -3920,10 +4578,14 @@ photo finale enhanced (jpeg)
                           const floatInfo = s.pool_float_used ? `<div class="text-[10px] text-amber-700 mb-1"><strong>Float :</strong> ${s.pool_float_used}</div>` : "";
                           // Encode le prompt pour data-attr (échappe " et \n)
                           const promptEncoded = encodeURIComponent(s.prompt || "");
+                          // Char count + ~token count par step
+                          const chars = (s.prompt || "").length;
+                          const charsFormatted = chars.toLocaleString('fr-FR');
+                          const approxTok = Math.round(chars / 4);
                           return `
                             <div class="border-l-2 border-amber-300 pl-2">
                               <div class="flex items-center justify-between gap-2">
-                                <div class="text-[11px] font-bold text-slate-800">Step ${idx + 1} — ${label}</div>
+                                <div class="text-[11px] font-bold text-slate-800">Step ${idx + 1} — ${label} <span class="font-mono font-normal text-slate-500 text-[10px]">(${charsFormatted} char · ~${approxTok.toLocaleString('fr-FR')} tok)</span></div>
                                 <button class="btn-copy-prompt text-[9px] font-semibold px-2 py-0.5 rounded bg-amber-100 hover:bg-amber-200 text-amber-800 transition-colors"
                                         data-prompt="${promptEncoded}"
                                         title="Copier ce prompt dans le presse-papier">📋 Copier</button>
@@ -4104,6 +4766,10 @@ photo finale enhanced (jpeg)
               ${issues}
               ${framingWarn}
               ${validationWarn}
+              ${attemptsHistory}
+              ${criticalFieldsBlock}
+              ${loisBlock}
+              ${tagWidget}
               ${noChangeNote}
 
               <div class="text-[10px] text-gray-400">${e.duration_ms}ms · $${(e.cost_usd || 0).toFixed(4)}</div>
@@ -4974,6 +5640,293 @@ photo finale enhanced (jpeg)
     }
     // Expose globally pour rappel après scrape/upload
     window.loadRunStatus = loadRunStatus;
+
+    // ━━━ Dashboard render (Martin 15/05/2026, pack C) ━━━━━━━━━━━━━━━━━━━━━
+    async function loadDashboard() {
+      const days = document.getElementById('dash-days')?.value || 30;
+      const slug = (document.getElementById('dash-slug')?.value || '').trim();
+      const url = `/api/audit-dashboard?days=${days}${slug ? `&slug=${encodeURIComponent(slug)}` : ''}`;
+      let data;
+      try {
+        const r = await fetch(url);
+        data = await r.json();
+      } catch (e) {
+        console.error('[dashboard] fetch failed', e);
+        return;
+      }
+      renderDashboard(data);
+    }
+
+    function renderDashboard(d) {
+      const k = d.kpis || {};
+      // KPIs cards
+      const kpiBox = document.getElementById('dash-kpis');
+      if (kpiBox) {
+        const fallbackSub = (k.fallback_auto > 0 && k.fallback_cost_usd > 0)
+          ? `~$${k.fallback_cost_usd} brûlés en retries`
+          : 'pipeline a tenu bon';
+        kpiBox.innerHTML = `
+          ${kpiCard('Photos analysées', k.total, k.taggable != null ? `dont ${k.taggable} taggables` : '', '#FFAF36')}
+          ${kpiCard('Taguées', `${k.tagged}${k.taggable != null ? `/${k.taggable}` : ''}`, k.untagged ? `+${k.untagged} sans tag` : 'toutes taguées', '#6E69AC')}
+          ${kpiCard('✅ Bonnes', k.good, '', '#10b981')}
+          ${kpiCard('⚠️ Limites', k.borderline, '', '#f59e0b')}
+          ${kpiCard('❌ Mauvaises', k.bad, '', '#ef4444')}
+          ${kpiCard('🔄 Fallbacks auto', k.fallback_auto || 0, fallbackSub, '#2563eb')}
+        `;
+      }
+      // Taux de succès sous les KPIs
+      if (kpiBox) {
+        const judged = k.good + k.bad;  // hors borderline et fallback
+        const successLine = judged > 0
+          ? `<span class="font-semibold text-emerald-700 text-base">${k.success_rate}%</span><span class="text-gray-500"> de taux de succès <span class="italic">(% Bonnes parmi les taguées non-limites, hors fallback)</span></span>`
+          : `<span class="text-gray-500 italic">Pas encore assez de tags pour calculer le taux de succès. Tague au moins 3-5 photos non-fallback.</span>`;
+        const fallbackLine = k.fallback_auto > 0
+          ? `<div class="mt-1 text-[12px] text-blue-700"><strong>${k.fallback_auto} fallback${k.fallback_auto > 1 ? 's' : ''} auto</strong> (photos où le pipeline IA a échoué → on a gardé l'originale) · coût brûlé ~$${k.fallback_cost_usd}</div>`
+          : '';
+        kpiBox.innerHTML += `<div class="col-span-full text-center text-sm" style="grid-column: 1 / -1;">
+          ${successLine}
+          ${fallbackLine}
+        </div>`;
+      }
+
+      // Précision validateur
+      const vp = d.validator_precision || {};
+      const precBox = document.getElementById('dash-precision');
+      if (precBox) {
+        precBox.innerHTML = `
+          ${kpiCard('Précision', vp.precision != null ? `${vp.precision}%` : '—', 'vrai-positifs / (vp+fp)', '#2563eb')}
+          ${kpiCard('Rappel', vp.recall != null ? `${vp.recall}%` : '—', 'vp / (vp+fn)', '#7c3aed')}
+          ${kpiCard('F1 score', vp.f1 != null ? `${vp.f1}%` : '—', 'moyenne harmonique', '#FFAF36')}
+          ${kpiCard('Total jugé', vp.total_judged, 'photos évaluées', '#64748b')}
+        `;
+      }
+      const confBox = document.getElementById('dash-precision-confusion');
+      if (confBox && vp.total_judged > 0) {
+        confBox.innerHTML = `
+          <div class="text-xs font-semibold uppercase text-gray-600 mb-2">Matrice de confusion</div>
+          <table class="w-full text-xs border border-gray-200 rounded overflow-hidden">
+            <thead class="bg-gray-50">
+              <tr><th class="px-2 py-1 border-b"></th><th class="px-2 py-1 border-b">Humain dit OK ✅</th><th class="px-2 py-1 border-b">Humain dit KO ❌</th></tr>
+            </thead>
+            <tbody>
+              <tr><td class="px-2 py-1 border-b bg-gray-50 font-semibold">Validator dit OK</td><td class="px-2 py-1 border-b bg-emerald-50">${vp.tn} <span class="text-gray-500">(vrai négatif)</span></td><td class="px-2 py-1 border-b bg-rose-50">${vp.fn} <span class="text-rose-700 font-semibold">(faux négatif — bug raté)</span></td></tr>
+              <tr><td class="px-2 py-1 bg-gray-50 font-semibold">Validator dit FAIL</td><td class="px-2 py-1 bg-amber-50">${vp.fp} <span class="text-amber-700">(faux positif)</span></td><td class="px-2 py-1 bg-emerald-50">${vp.tp} <span class="text-gray-500">(vrai positif)</span></td></tr>
+            </tbody>
+          </table>
+          <p class="text-[11px] text-gray-500 mt-2 italic">${vp.fn > 0 ? `⚠️ ${vp.fn} photo${vp.fn > 1 ? 's' : ''} ont passé la validation mais ont été flag KO par toi — le validateur a des faux négatifs à corriger.` : '✅ Aucun faux négatif détecté.'}</p>
+        `;
+      } else if (confBox) {
+        confBox.innerHTML = '<p class="text-xs text-gray-500 italic">Pas encore assez de photos taguées pour calculer la matrice. Tague au moins 5 photos pour démarrer.</p>';
+      }
+
+      // LOI verdicts agrégés (Martin 15/05/2026, P1)
+      const loisBox = document.getElementById('dash-lois');
+      if (loisBox) {
+        const lois = d.loi_verdicts || [];
+        if (lois.length === 0) {
+          loisBox.innerHTML = '<p class="text-xs text-gray-500 italic">Pas encore de LOI évaluées. Les verdicts s\'accumulent à chaque pipeline.</p>';
+        } else {
+          const CRIT_COLORS = {
+            critical: {bg: '#fee2e2', text: '#991b1b', icon: '🔴'},
+            major:    {bg: '#fef3c7', text: '#92400e', icon: '🟠'},
+            minor:    {bg: '#f1f5f9', text: '#475569', icon: '🟡'},
+          };
+          loisBox.innerHTML = `<table class="w-full text-xs border border-gray-200 rounded overflow-hidden">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-2 py-1.5 border-b text-left">Crit.</th>
+                <th class="px-2 py-1.5 border-b text-left">LOI</th>
+                <th class="px-2 py-1.5 border-b text-left">Description</th>
+                <th class="px-2 py-1.5 border-b text-right">Total</th>
+                <th class="px-2 py-1.5 border-b text-right">PASS</th>
+                <th class="px-2 py-1.5 border-b text-right">FAIL</th>
+                <th class="px-2 py-1.5 border-b text-right">N/A</th>
+                <th class="px-2 py-1.5 border-b text-right">% FAIL</th>
+                <th class="px-2 py-1.5 border-b w-32">Health</th>
+              </tr>
+            </thead>
+            <tbody>${lois.map(l => {
+              const c = CRIT_COLORS[l.criticality] || CRIT_COLORS.minor;
+              const pct = l.fail_pct;
+              const barColor = pct > 30 ? '#ef4444' : (pct > 10 ? '#f59e0b' : '#10b981');
+              return `<tr class="border-b">
+                <td class="px-2 py-1"><span style="background:${c.bg}; color:${c.text}; padding:1px 6px; border-radius:100px; font-size:9px; font-weight:700;">${c.icon} ${l.criticality.toUpperCase()}</span></td>
+                <td class="px-2 py-1 font-semibold">${l.label}</td>
+                <td class="px-2 py-1 text-gray-500 text-[10px]">${l.description}</td>
+                <td class="px-2 py-1 text-right">${l.total}</td>
+                <td class="px-2 py-1 text-right text-emerald-700 font-semibold">${l.pass}</td>
+                <td class="px-2 py-1 text-right text-rose-700 font-semibold">${l.fail}</td>
+                <td class="px-2 py-1 text-right text-gray-400">${l.na}</td>
+                <td class="px-2 py-1 text-right font-bold" style="color:${barColor}">${pct}%</td>
+                <td class="px-2 py-1"><div class="w-full bg-gray-100 rounded h-3"><div style="width:${100 - pct}%; background:#10b981; height:100%; border-radius:inherit;"></div></div></td>
+              </tr>`;
+            }).join('')}</tbody>
+          </table>
+          <p class="text-[11px] text-gray-500 mt-2 italic">Les LOI 🔴 CRITICAL avec un % FAIL > 0 sont prioritaires à corriger.</p>`;
+        }
+      }
+
+      // Field fail rates
+      const fieldsBox = document.getElementById('dash-fields');
+      const FIELD_LABELS_DASH = {
+        subject_count_added: "Sujets ajoutés",
+        pool_shape_preserved: "Forme piscine",
+        pool_surface_preserved: "Surface d'eau",
+        subject_water_boundary_respected: "Frontière sec/eau",
+        barrier_side_correct: "Côté barrière",
+        no_invented_support_under_subject: "Support existant",
+        pool_float_realistic: "Bouée réaliste",
+        subject_anatomy_intact: "Anatomie sujet",
+        subject_face_photoreal: "Face photoréaliste",
+        subject_scale_realistic: "Échelle sujet",
+        furniture_existing_preserved: "Mobilier préservé",
+        decor_elements_preserved: "Décor préservé",
+        framing_preserved: "Cadrage préservé",
+        outfit_appropriate: "Tenue contextuelle",
+      };
+      if (fieldsBox) {
+        const fields = d.field_fail_rates || [];
+        if (fields.length === 0) {
+          fieldsBox.innerHTML = '<p class="text-xs text-gray-500 italic">Pas encore de données.</p>';
+        } else {
+          fieldsBox.innerHTML = fields.map(f => {
+            const pct = f.fail_pct;
+            const barColor = pct > 30 ? '#ef4444' : (pct > 10 ? '#f59e0b' : '#10b981');
+            return `<div class="mb-2">
+              <div class="flex items-center justify-between text-xs mb-1">
+                <span class="font-semibold">${FIELD_LABELS_DASH[f.field] || f.field}</span>
+                <span class="text-gray-500">${f.fail}/${f.total - f.na} FAIL (${pct}%) · ${f.na} N/A</span>
+              </div>
+              <div class="w-full bg-gray-100 rounded-full overflow-hidden h-3">
+                <div style="width: ${pct}%; background: ${barColor}; height: 100%;"></div>
+              </div>
+            </div>`;
+          }).join('');
+        }
+      }
+
+      // Top violations
+      const violBox = document.getElementById('dash-violations');
+      if (violBox) {
+        const vs = d.top_violations || [];
+        const maxCount = vs[0]?.count || 1;
+        if (vs.length === 0) {
+          violBox.innerHTML = '<p class="text-xs text-gray-500 italic">Pas encore de violations détectées.</p>';
+        } else {
+          violBox.innerHTML = `<table class="w-full text-xs border border-gray-200 rounded overflow-hidden">
+            <thead class="bg-gray-50"><tr><th class="px-2 py-1 border-b text-left">Violation</th><th class="px-2 py-1 border-b text-right">Occurrences</th><th class="px-2 py-1 border-b w-48">Distribution</th></tr></thead>
+            <tbody>${vs.map(v => `<tr class="border-b">
+              <td class="px-2 py-1 font-mono text-rose-700">${v.violation}</td>
+              <td class="px-2 py-1 text-right font-semibold">${v.count}</td>
+              <td class="px-2 py-1"><div class="w-full bg-gray-100 rounded h-2"><div style="width:${(v.count / maxCount * 100).toFixed(0)}%; background:#ef4444; height:100%; border-radius:inherit;"></div></div></td>
+            </tr>`).join('')}</tbody>
+          </table>`;
+        }
+      }
+
+      // By category
+      const catBox = document.getElementById('dash-categories');
+      if (catBox) {
+        const cats = d.by_category || [];
+        catBox.innerHTML = renderDistTable(cats, 'category');
+      }
+      const slugBox = document.getElementById('dash-slugs');
+      if (slugBox) {
+        const slugs = d.by_slug || [];
+        slugBox.innerHTML = renderDistTable(slugs, 'slug');
+      }
+
+      // Evolution
+      const evolBox = document.getElementById('dash-evolution');
+      if (evolBox) {
+        const evol = d.evolution || [];
+        if (evol.length === 0) {
+          evolBox.innerHTML = '<p class="text-xs text-gray-500 italic">Pas encore de données.</p>';
+        } else {
+          // Sparkline minimaliste : ligne en SVG
+          const max = Math.max(...evol.map(e => e.total));
+          const w = 800, h = 120, pad = 20;
+          const xStep = (w - 2 * pad) / Math.max(1, evol.length - 1);
+          const points = evol.map((e, i) => {
+            const x = pad + i * xStep;
+            const y = e.good_pct != null ? h - pad - (e.good_pct / 100) * (h - 2 * pad) : h - pad;
+            return `${x},${y}`;
+          }).join(' ');
+          evolBox.innerHTML = `
+            <svg viewBox="0 0 ${w} ${h}" style="width:100%; height:${h}px; max-width:${w}px;">
+              <polyline points="${points}" fill="none" stroke="#FFAF36" stroke-width="2"/>
+              ${evol.map((e, i) => {
+                const x = pad + i * xStep;
+                const y = e.good_pct != null ? h - pad - (e.good_pct / 100) * (h - 2 * pad) : h - pad;
+                return `<circle cx="${x}" cy="${y}" r="3" fill="#FFAF36" title="${e.day}: ${e.good_pct ?? 'N/A'}%"/>`;
+              }).join('')}
+            </svg>
+            <table class="w-full text-xs mt-2 border border-gray-200 rounded">
+              <thead class="bg-gray-50"><tr><th class="px-2 py-1 border-b text-left">Jour</th><th class="px-2 py-1 border-b text-right">Total</th><th class="px-2 py-1 border-b text-right">✅ Bonnes</th><th class="px-2 py-1 border-b text-right">⚠️ Limites</th><th class="px-2 py-1 border-b text-right">❌ Mauvaises</th><th class="px-2 py-1 border-b text-right">Sans tag</th><th class="px-2 py-1 border-b text-right">% succès</th></tr></thead>
+              <tbody>${evol.map(e => `<tr class="border-b">
+                <td class="px-2 py-1 font-mono">${e.day}</td>
+                <td class="px-2 py-1 text-right">${e.total}</td>
+                <td class="px-2 py-1 text-right text-emerald-700">${e.good}</td>
+                <td class="px-2 py-1 text-right text-amber-700">${e.border}</td>
+                <td class="px-2 py-1 text-right text-rose-700">${e.bad}</td>
+                <td class="px-2 py-1 text-right text-gray-500">${e.untagged}</td>
+                <td class="px-2 py-1 text-right font-semibold">${e.good_pct != null ? e.good_pct + '%' : '—'}</td>
+              </tr>`).join('')}</tbody>
+            </table>
+          `;
+        }
+      }
+    }
+
+    function kpiCard(label, value, sub, color) {
+      return `<div class="bg-white rounded-xl p-3 shadow-sm border border-gray-100">
+        <div class="text-[10px] uppercase tracking-wider font-semibold text-gray-500">${label}</div>
+        <div class="text-2xl font-extrabold mt-1" style="color:${color}">${value}</div>
+        ${sub ? `<div class="text-[10px] text-gray-400 mt-1">${sub}</div>` : ''}
+      </div>`;
+    }
+
+    function renderDistTable(rows, keyName) {
+      if (!rows || rows.length === 0) {
+        return '<p class="text-xs text-gray-500 italic">Pas encore de données.</p>';
+      }
+      return `<table class="w-full text-xs border border-gray-200 rounded">
+        <thead class="bg-gray-50"><tr>
+          <th class="px-2 py-1 border-b text-left">${keyName === 'slug' ? 'Hôtel' : 'Catégorie'}</th>
+          <th class="px-2 py-1 border-b text-right">Total</th>
+          <th class="px-2 py-1 border-b text-right">✅</th>
+          <th class="px-2 py-1 border-b text-right">⚠️</th>
+          <th class="px-2 py-1 border-b text-right">❌</th>
+          <th class="px-2 py-1 border-b text-right">Sans tag</th>
+          <th class="px-2 py-1 border-b text-right">% succès</th>
+          <th class="px-2 py-1 border-b text-right">% rate</th>
+        </tr></thead>
+        <tbody>${rows.map(r => `<tr class="border-b">
+          <td class="px-2 py-1 font-mono">${r[keyName]}</td>
+          <td class="px-2 py-1 text-right">${r.total}</td>
+          <td class="px-2 py-1 text-right text-emerald-700">${r.good}</td>
+          <td class="px-2 py-1 text-right text-amber-700">${r.borderline}</td>
+          <td class="px-2 py-1 text-right text-rose-700">${r.bad}</td>
+          <td class="px-2 py-1 text-right text-gray-500">${r.untagged}</td>
+          <td class="px-2 py-1 text-right font-semibold text-emerald-700">${r.good_pct}%</td>
+          <td class="px-2 py-1 text-right font-semibold text-rose-700">${r.bad_pct}%</td>
+        </tr>`).join('')}</tbody>
+      </table>`;
+    }
+
+    // Auto-load + filter handlers
+    document.getElementById('dash-refresh')?.addEventListener('click', loadDashboard);
+    document.getElementById('dash-days')?.addEventListener('change', loadDashboard);
+    document.getElementById('dash-slug')?.addEventListener('change', loadDashboard);
+
+    // Load dashboard quand on switche sur l'onglet
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (btn.dataset.tab === 'dashboard') {
+          loadDashboard();
+        }
+      });
+    });
 
     // ━━━ Raccourci hôtels déjà processés (skip scrap) ━━━
     async function loadHotelShortcut() {

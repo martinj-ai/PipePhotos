@@ -107,6 +107,51 @@ Violations à détecter :
 7. **inconsistent_scale** : 2+ subjets ajoutés ont des échelles incompatibles (un subjet beaucoup plus grand qu'un autre à la même distance camera).
 7.bis **subject_oversized** : sujet(s) ajouté(s) trop grands par rapport au reste de la scène. Détection : compare la TÊTE du sujet à la HAUTEUR de la frame. Si la tête fait > 15% de la frame height sur une photo PANORAMIQUE/ROOFTOP/WIDE, ou > 25% sur une photo CLOSE → `subject_oversized`. Autre signe : le sujet semble PLUS GRAND que les meubles existants à proximité (un homme debout fait 2× la hauteur d'un lounger, pas 4×). Cette violation est SOUS-DÉTECTÉE — sois rigoureux.
 8. **architecture_changed** : l'architecture du bâtiment, la disposition du mobilier existant, ou le décor de fond ont été altérés. Cas typiques : mur déplacé, panneau retiré, table déplacée, plafond modifié, dimensions changées. NE PAS classer ici un simple changement d'éclairage qui colore différemment des murs existants — c'est `lighting_break` à la rigueur, et c'est légitime en ai_lighting.
+
+8.quater **pool_surface_reduced** (Martin 15/05/2026, bug Gates Hotel South Beach) : la SURFACE D'EAU de la piscine a été rétrécie / déformée / partiellement recouverte dans la retouche par rapport à l'originale, alors qu'aucune transformation demandée ne le justifie. C'est une violation CRITIQUE distincte de `architecture_changed` parce que la piscine est l'asset commercial principal d'une photo d'hôtel — toute réduction est inacceptable.
+
+   🔬 PROTOCOLE DE DÉTECTION OBLIGATOIRE — ÉTAPE PAR ÉTAPE :
+
+   **ÉTAPE A — Tracer le contour d'eau de l'ORIGINAL d'abord (AVANT de regarder la retouche) :**
+   Avant TOUTE autre observation, fixe-toi sur l'image ORIGINALE (la 1ère) et trace MENTALEMENT le contour exact de la surface d'eau bleue/turquoise. Mémorise précisément :
+   - Le bord PROCHE de la caméra (= le bord au premier plan, souvent en bas de la frame)
+   - Le bord LOIN (= au fond, souvent vers le milieu de la frame)
+   - Les bords GAUCHE et DROITE (= côtés latéraux)
+   - Tout escalier d'accès / step / shelf VISIBLE dans l'eau
+   - Tout objet préexistant SUR ou DANS l'eau
+
+   **ÉTAPE B — Comparer avec la RETOUCHE :**
+   Maintenant regarde la retouche (la 2nde image). Pour CHAQUE bord identifié en A :
+   - Le bord est-il à la MÊME position ? Si le bord PROCHE a reculé (= eau plus petite vue de face) → `pool_surface_reduced`.
+   - Y a-t-il du DECK / DALLE / CARRELAGE / BOIS visible dans une zone qui était de l'EAU en A ? → `pool_surface_reduced`.
+   - Y a-t-il du MOBILIER (transat, daybed, banc, coussin) posé dans une zone qui était de l'EAU en A ? → `pool_surface_reduced` + `invented_furniture`.
+
+   **ÉTAPE C — Cas piège "extension de deck cohérente" (Martin 15/05/2026 v2 — bug Gates Hotel SB FAUX NÉGATIF) :**
+   🚨 PIÈGE CRITIQUE QUE TU AS HISTORIQUEMENT RATÉ : Nano Banana peut peindre un FAUX DECK BLANC / CARRELAGE BLANC / DALLE BLANCHE au premier plan, qui s'intègre parfaitement avec le reste du deck existant — texture cohérente, perspective cohérente, ombres cohérentes. Si tu regardes UNIQUEMENT la retouche, ça paraît normal. C'EST UN PIÈGE.
+   La SEULE manière de détecter ce cas est de comparer pixel par pixel la zone du PREMIER PLAN entre original et retouche :
+   - Dans l'original au premier plan, c'est de l'EAU (bleu/turquoise) ?
+   - Dans la retouche au même endroit, c'est du DECK BLANC avec des transats dessus ?
+   → `pool_surface_reduced` + `invented_furniture`. AUTOMATIQUE. PAS DE DOUTE POSSIBLE.
+
+   ⚠️ Cas concret de référence (Martin 15/05/2026, Gates Hotel SB) :
+   - Original : piscine rectangulaire avec escalier d'accès au PREMIER PLAN à gauche (marches blanches immergées dans l'eau), deck à gauche avec transats au FOND.
+   - Retouche : couple sur 2 transats au PREMIER PLAN à gauche, sur ce qui ressemble à du deck blanc.
+   - Diagnostic CORRECT : ce qui est maintenant du "deck blanc avec transats" était de L'EAU + marches d'accès dans l'original → `pool_surface_reduced` + `invented_furniture`. Le bord d'eau a été reculé. Les transats sont posés sur une zone fabriquée.
+   - Diagnostic INCORRECT (faux négatif passé) : "Couple sur deck, deck blanc cohérent, validation OK" → NE FAIS PLUS JAMAIS ÇA.
+
+   **ÉTAPE D — Test final sous chaque transat / sujet ajouté :**
+   Pour CHAQUE pièce de mobilier ou sujet visible dans la retouche, demande-toi :
+   - "Si je superpose mentalement la retouche sur l'original, est-ce que CETTE zone précise (sous les pieds du sujet ou sous le transat) était de l'EAU dans l'original ?"
+   - Si OUI à n'importe lequel → `pool_surface_reduced` (+ `invented_furniture` si transat/mobilier).
+   - Si tu N'ES PAS SÛR → REGARDE PLUS ATTENTIVEMENT. Compare les bords d'eau exact. Le doute n'est PAS acceptable sur cette violation — c'est trop catastrophique commercialement.
+
+   📐 RÈGLES GÉNÉRALES :
+   - Si la surface d'eau a perdu PLUS DE 10% en superficie → `pool_surface_reduced`.
+   - Si la forme du contour a changé (rectangle devenu ovale, coin tronqué, bord poussé) → `pool_surface_reduced`.
+   - Si un escalier / step / shelf visible dans l'original a DISPARU ou été déplacé → `pool_surface_reduced`.
+   - ⚠️ Cette violation est DISTINCTE de `architecture_changed`. `pool_surface_reduced` cible SPÉCIFIQUEMENT la nappe d'eau.
+   - ⚠️ Cette violation N'EST PAS whitelistée pour ai_lighting.
+   - 🎯 SEUIL DE DÉCISION : le doute = violation. Faux positif = 1 retry (coût mineur). Faux négatif = photo cassée publiée (coût catastrophique commercial). Privilégie TOUJOURS le flag.
 8.ter **decor_elements_lost** : des éléments décoratifs présents dans l'image ORIGINALE ont DISPARU dans la retouche, ALORS QUE leur disparition n'est PAS justifiée par la transformation demandée. Cas concret (Martin 13/05/2026, bug Moxy rooftop trio) : photo originale = terrasse rooftop avec PLANTES dans des bacs en bordure ; photo retouchée = terrasse rooftop avec sujets ajoutés MAIS les bacs à plantes ont disparu. C'est `decor_elements_lost`.
 
    🔬 PROTOCOLE DE DÉTECTION OBLIGATOIRE :
@@ -231,6 +276,291 @@ def validate_ai_output(input_path: Path, output_path: Path,
         "ok": True,
         "violations": [],
         "summary": f"Validation post-IA échouée : {str(last_error)[:200]}",
+        "duration_ms": 0,
+        "cost_usd": 0,
+        "error": str(last_error)[:200] if last_error else None,
+    }
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# VALIDATEUR STRUCTURÉ "CRITICAL FIELDS" (Martin 15/05/2026, Option B hybride)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Inspiré du système de criticité de champs utilisé par le manager pour la vidéo
+# Veo/Kling. Adapté au cas Photo Dayuse : on PRÉSERVE LE DÉCOR pendant qu'on
+# ajoute un sujet éphémère (inverse du cas vidéo où on préserve l'identité du
+# personnage à travers les scènes).
+#
+# PHILOSOPHIE :
+# - Le validator narratif (validate_ai_output) reste en place : il catch les
+#   "unknown unknowns" (genre une porte transformée en miroir).
+# - Ce validateur structuré ajoute un 2e check ULTRA-FOCALISÉ sur 6 champs
+#   CRITIQUES où on a eu des fails historiques. Chaque champ retourne PASS/FAIL
+#   + evidence textuelle. Si l'un fail → on convertit en violation existante
+#   pour réutiliser la chaîne retry/fallback actuelle.
+#
+# COÛT : ~$0.0006 par photo (×1 appel Gemini Flash, output ~300-500 tokens).
+# Cumulé avec le validator narratif (~$0.0005) = ~$0.001/photo en validation.
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CRITICAL_FIELDS_PROMPT = """Tu reçois 2 images : la première est l'ORIGINALE (input), la seconde est une RETOUCHE IA (output).
+
+🎯 MISSION : checker EXACTEMENT 6 champs CRITIQUES de préservation du décor et de placement du sujet. Pour chaque champ, retourne PASS ou FAIL avec une evidence textuelle courte. N'ajoute PAS d'autres champs. N'ajoute PAS de variance opinion.
+
+🔬 PROTOCOLE — tu DOIS suivre ces étapes AVANT de remplir le JSON :
+
+ÉTAPE A : Trace mentalement le contour exact de la nappe d'EAU (piscine/jacuzzi/fontaine) dans l'image ORIGINALE. Mémorise :
+- Position des 4 bords (proche caméra / fond / gauche / droite)
+- % de la frame que l'eau occupe (estimation approximative)
+- Position des marches d'accès / step / shelf si présents
+- Tout objet préexistant dans/sur l'eau (bouée originale, etc.)
+
+ÉTAPE B : Trace mentalement la même chose dans la RETOUCHE.
+
+ÉTAPE C : Pour CHAQUE personne ajoutée dans la retouche, identifie EXACTEMENT où sont leurs pieds/fesses (le sol sous eux) — c'est de l'eau, du deck, du carrelage, du bois, du sable ?
+
+ÉTAPE D : Pour CHAQUE personne ajoutée, identifie ce qui est SOUS elle (chaise existante, transat existant, sol nu, OU mobilier qui n'existait pas dans l'original).
+
+ÉTAPE E : Identifie toute barrière de sécurité visible dans l'original (garde-corps, balustrade, glass panel, parapet). Note de quel côté sont les meubles existants et la piscine.
+
+Maintenant retourne ce JSON STRICT (aucun markdown, aucun texte hors JSON) :
+
+{
+  "subject_count_added": {
+    "actual": int (nombre exact d'humains AJOUTÉS dans la retouche par rapport à l'original — ne compte PAS les humains qui étaient déjà dans l'original),
+    "evidence": "1 phrase brève décrivant les sujets ajoutés visibles (ex: 'a young couple sitting on the lounger at foreground-left')"
+  },
+  "pool_shape_preserved": {
+    "status": "PASS" | "FAIL",
+    "evidence": "1 phrase brève : la forme du contour d'eau est-elle identique ? Si FAIL, dire précisément ce qui a changé (ex: 'the foreground edge of the water has receded by ~15% to make room for an apparent deck extension')",
+    "delta_estimate_pct": int (estimation du % de superficie d'eau perdue par rapport à l'original, 0 si intact)
+  },
+  "pool_surface_preserved": {
+    "status": "PASS" | "FAIL",
+    "evidence": "1 phrase brève : y a-t-il des pixels qui étaient de l'eau dans l'original et qui sont maintenant du deck/sol/mobilier dans la retouche ? Si FAIL, localiser précisément la zone."
+  },
+  "subject_water_boundary_respected": {
+    "status": "PASS" | "FAIL" | "N/A",
+    "evidence": "1 phrase brève : les sujets ajoutés respectent-ils la frontière sec/eau de l'original ? Cas valides PASS : (a) sujet sur deck existant entièrement sec ; (b) sujet intentionnellement dans l'eau (nageant / assis bord pieds dans l'eau) avec piscine intacte. Cas FAIL : sujet sur une extension de deck fabriquée au-dessus de l'eau ; sujet sur transat invented dans l'eau. N/A si aucun sujet ajouté."
+  },
+  "barrier_side_correct": {
+    "status": "PASS" | "FAIL" | "N/A",
+    "evidence": "1 phrase brève : si une barrière de sécurité existe dans l'original (rooftop / piscine / balcon), tous les sujets ajoutés sont-ils du même côté que les meubles existants et la piscine ? PASS si oui ou si pas de barrière (N/A). FAIL si un sujet est du côté void/ciel."
+  },
+  "no_invented_support_under_subject": {
+    "status": "PASS" | "FAIL" | "N/A",
+    "evidence": "1 phrase brève : sous chaque sujet ajouté, voit-on un support qui existait DÉJÀ dans l'original (transat existant, sol nu, marche existante, bord piscine existant) ? Ou un support INVENTÉ (nouveau transat, daybed inventé, coussin ajouté, plateforme fabriquée, step nouveau) ? PASS = support existant. FAIL = mobilier/support fabriqué. N/A si aucun sujet ajouté."
+  },
+  "pool_float_realistic": {
+    "status": "PASS" | "FAIL" | "N/A",
+    "evidence": "1 phrase brève : si une bouée gonflable a été ajoutée, est-elle de taille et perspective réalistes ? PASS = bouée ≤ ~15% surface eau, perspective cohérente avec la photo (top-down si vue aérienne, oblique sinon), style photoréaliste. FAIL = bouée géante (> 20% surface eau) OU perspective incohérente (3D frontale sur photo top-down, ou inversement) OU style CGI candy. N/A si aucune bouée ajoutée.",
+    "size_pct_of_water": int
+  },
+  "subject_anatomy_intact": {
+    "status": "PASS" | "FAIL" | "N/A",
+    "evidence": "1 phrase brève : sur chaque sujet ajouté, l'anatomie est-elle correcte ? PASS = bras OK (2 par sujet, mains avec 5 doigts), jambes OK, proportions humaines naturelles. FAIL = bras dupliqué, main avec 6/7 doigts ou difforme, jambe coupée/fusionnée, anatomie cassée. N/A si aucun sujet ajouté."
+  },
+  "subject_face_photoreal": {
+    "status": "PASS" | "FAIL" | "N/A",
+    "evidence": "1 phrase brève : la face de chaque sujet ajouté est-elle photoréaliste ? PASS = traits clairement dessinés (yeux/nez/bouche), texture peau naturelle. FAIL = face smudge/floue, mannequin plastic, yeux manquants/déformés, look CGI. N/A si aucun sujet ajouté OU si face cachée intentionnellement (sunglasses + hat + profil)."
+  },
+  "subject_scale_realistic": {
+    "status": "PASS" | "FAIL" | "N/A",
+    "evidence": "1 phrase brève : chaque sujet ajouté est-il à l'échelle correcte vs le mobilier voisin ? PASS = sujet debout ≈ 2× hauteur d'un lounger visible. FAIL = sujet géant (> 30% largeur frame) OU sujet nain (< 5% hauteur frame sur photo wide). N/A si aucun mobilier référence visible OU aucun sujet ajouté."
+  },
+  "furniture_existing_preserved": {
+    "status": "PASS" | "FAIL" | "N/A",
+    "evidence": "1 phrase brève : tous les meubles préexistants dans l'original (loungers, daybeds, tables, chaises) sont-ils PRÉSENTS dans la retouche à la MÊME position ? PASS = tous présents, déplacements < 30cm visuels. FAIL = un meuble a disparu OU a été déplacé significativement OU remplacé. N/A si l'original n'a aucun mobilier visible."
+  },
+  "decor_elements_preserved": {
+    "status": "PASS" | "FAIL" | "N/A",
+    "evidence": "1 phrase brève : les éléments décoratifs préexistants (plantes en pot, vases, lampes, art mural, signalétique) sont-ils tous présents dans la retouche ? PASS = tous présents. FAIL = au moins un élément a disparu (plante en pot retirée, vase supprimé, lampe enlevée, art mural effacé). N/A si l'original n'a aucun décor visible."
+  },
+  "framing_preserved": {
+    "status": "PASS" | "FAIL" | "N/A",
+    "evidence": "1 phrase brève : le cadrage est-il identique ? PASS = même angle de caméra, même champ visuel, même perspective, mêmes bords. FAIL = zoom-in, crop, recadrage, angle modifié. N/A jamais (toujours évaluable)."
+  },
+  "outfit_appropriate": {
+    "status": "PASS" | "FAIL" | "N/A",
+    "evidence": "1 phrase brève : la tenue de chaque sujet ajouté est-elle adaptée au contexte ? PASS = swimwear sur piscine/plage, smart casual sur rooftop/bar/restaurant, athleisure sur gym, etc. FAIL = street clothes lourds sur piscine, robe formelle sur gym, lingerie/sheer/cheeky-cut. N/A si aucun sujet ajouté."
+  }
+}
+
+⚠️ RÈGLES DE DÉCISION STRICTE :
+1. Si tu hésites entre PASS et FAIL sur un champ → FAIL (le doute = fail, faux positif coûte 1 retry mineur, faux négatif publie une photo cassée).
+2. Pour `pool_shape_preserved` et `pool_surface_preserved` : compare PIXEL PAR PIXEL les bords d'eau ; ne te laisse PAS tromper par un "deck blanc cohérent" qui s'intègre bien — si la zone était de l'eau dans l'original, c'est FAIL même si la texture deck paraît plausible.
+3. Pour `subject_water_boundary_respected` : si le scenario indiquait "sur le deck sec" et que les pieds du sujet sont sur une zone qui était de l'eau dans l'original → FAIL.
+4. Sois CHIRURGICAL : evidence en 1 phrase max, factuelle, citant des zones précises (foreground-left, near pool steps, etc.).
+"""
+
+
+def validate_critical_fields(input_path: Path, output_path: Path,
+                              expected_subject_count: int | None = None,
+                              model_name: str = VALIDATION_MODEL,
+                              max_retries: int = 2) -> dict:
+    """2e validateur structuré focalisé sur 6 champs CRITIQUES de préservation.
+
+    Args:
+        input_path : chemin image originale
+        output_path : chemin image retouchée
+        expected_subject_count : nombre de sujets que le pipeline a demandé d'ajouter
+            (pour comparer avec actual). Si None, on ne check pas le count.
+
+    Returns:
+        dict {
+            "ok": bool (True si TOUS les champs critical sont PASS),
+            "field_checks": {field_name: {status, evidence, ...}, ...},
+            "violations_derived": list[str] (violations existantes dérivées des fails — réutilise la chaîne retry),
+            "duration_ms": int,
+            "cost_usd": float,
+            "error": str | None,
+        }
+
+    Mapping field FAIL → violation existante (pour réutiliser la retry pipeline) :
+        - pool_shape_preserved FAIL          → "pool_surface_reduced"
+        - pool_surface_preserved FAIL        → "pool_surface_reduced"
+        - subject_water_boundary_respected FAIL → "subject_on_water" + "pool_surface_reduced"
+                                                  (parce que c'est souvent un deck inventé sur l'eau)
+        - barrier_side_correct FAIL          → "subject_wrong_side_barrier"
+        - no_invented_support_under_subject FAIL → "invented_furniture"
+        - subject_count_added mismatch       → "subject_count_wrong" (NEW)
+    """
+    _ensure_configured()
+    model = genai.GenerativeModel(model_name)
+
+    last_error = None
+    for attempt in range(max_retries + 1):
+        t0 = time.time()
+        try:
+            before = Image.open(input_path).convert("RGB")
+            after = Image.open(output_path).convert("RGB")
+            response = model.generate_content(
+                [CRITICAL_FIELDS_PROMPT, before, after],
+                generation_config={"response_mime_type": "application/json", "temperature": 0.0},
+            )
+            duration_ms = int((time.time() - t0) * 1000)
+            data = json.loads(response.text)
+            usage = getattr(response, "usage_metadata", None)
+            input_tokens = getattr(usage, "prompt_token_count", 0) if usage else 0
+            output_tokens = getattr(usage, "candidates_token_count", 0) if usage else 0
+            cost_usd = (input_tokens * 0.30 + output_tokens * 2.50) / 1_000_000
+
+            # ━━ Parse field checks (defensive : Gemini peut omettre des champs) ━━
+            # 14 champs : 7 CRITICAL (initial pack B) + 7 MAJOR (Martin 15/05/2026, P0)
+            field_checks = {}
+            for fname in ("subject_count_added", "pool_shape_preserved",
+                          "pool_surface_preserved", "subject_water_boundary_respected",
+                          "barrier_side_correct", "no_invented_support_under_subject",
+                          "pool_float_realistic",
+                          # ━ Champs MAJOR ajoutés (P0) ━
+                          "subject_anatomy_intact", "subject_face_photoreal",
+                          "subject_scale_realistic", "furniture_existing_preserved",
+                          "decor_elements_preserved", "framing_preserved",
+                          "outfit_appropriate"):
+                raw = data.get(fname) or {}
+                field_checks[fname] = {
+                    "status": (raw.get("status") or ("PASS" if fname == "subject_count_added" else "PASS")).upper(),
+                    "evidence": raw.get("evidence") or "",
+                }
+                # Cas spéciaux
+                if fname == "subject_count_added":
+                    try:
+                        field_checks[fname]["actual"] = int(raw.get("actual", 0))
+                    except (ValueError, TypeError):
+                        field_checks[fname]["actual"] = 0
+                if fname == "pool_shape_preserved":
+                    try:
+                        field_checks[fname]["delta_estimate_pct"] = int(raw.get("delta_estimate_pct", 0))
+                    except (ValueError, TypeError):
+                        field_checks[fname]["delta_estimate_pct"] = 0
+                if fname == "pool_float_realistic":
+                    try:
+                        field_checks[fname]["size_pct_of_water"] = int(raw.get("size_pct_of_water", 0))
+                    except (ValueError, TypeError):
+                        field_checks[fname]["size_pct_of_water"] = 0
+
+            # ━━ Check subject count vs expected ━━
+            count_status = "PASS"
+            if expected_subject_count is not None:
+                actual = field_checks["subject_count_added"]["actual"]
+                # Tolérance : on accepte -1 (pipeline reduce when no room) mais pas +N (jamais d'ajout en trop)
+                if actual > expected_subject_count or actual < max(0, expected_subject_count - 1):
+                    count_status = "FAIL"
+                    field_checks["subject_count_added"]["evidence"] += (
+                        f" [MISMATCH : target={expected_subject_count}, actual={actual}]"
+                    )
+            field_checks["subject_count_added"]["status"] = count_status
+
+            # ━━ Mapping FAIL → violations existantes (réutilise la chaîne retry actuelle) ━━
+            violations_derived = []
+            if field_checks["pool_shape_preserved"]["status"] == "FAIL":
+                violations_derived.append("pool_surface_reduced")
+            if field_checks["pool_surface_preserved"]["status"] == "FAIL":
+                if "pool_surface_reduced" not in violations_derived:
+                    violations_derived.append("pool_surface_reduced")
+            if field_checks["subject_water_boundary_respected"]["status"] == "FAIL":
+                # Boundary failure = soit deck inventé sur eau, soit sujet sur eau
+                # On flag les 2 violations pour maximiser le ciblage retry
+                if "pool_surface_reduced" not in violations_derived:
+                    violations_derived.append("pool_surface_reduced")
+                if "subject_on_water" not in violations_derived:
+                    violations_derived.append("subject_on_water")
+            if field_checks["barrier_side_correct"]["status"] == "FAIL":
+                violations_derived.append("subject_wrong_side_barrier")
+            if field_checks["no_invented_support_under_subject"]["status"] == "FAIL":
+                violations_derived.append("invented_furniture")
+            if count_status == "FAIL":
+                violations_derived.append("subject_count_wrong")
+            if field_checks["pool_float_realistic"]["status"] == "FAIL":
+                violations_derived.append("pool_float_oversized")
+            # ━ Mapping des nouveaux champs MAJOR (Martin 15/05/2026, P0) ━
+            if field_checks.get("subject_anatomy_intact", {}).get("status") == "FAIL":
+                violations_derived.append("subject_anatomy_broken")
+            if field_checks.get("subject_face_photoreal", {}).get("status") == "FAIL":
+                violations_derived.append("subject_face_unrealistic")
+            if field_checks.get("subject_scale_realistic", {}).get("status") == "FAIL":
+                # Réutilise violation existante "subject_oversized" pour rester cohérent
+                if "subject_oversized" not in violations_derived:
+                    violations_derived.append("subject_oversized")
+            if field_checks.get("furniture_existing_preserved", {}).get("status") == "FAIL":
+                # Réutilise "architecture_changed" — un meuble retiré/déplacé entre dans cette catégorie
+                if "architecture_changed" not in violations_derived:
+                    violations_derived.append("architecture_changed")
+            if field_checks.get("decor_elements_preserved", {}).get("status") == "FAIL":
+                # Réutilise "decor_elements_lost"
+                if "decor_elements_lost" not in violations_derived:
+                    violations_derived.append("decor_elements_lost")
+            if field_checks.get("framing_preserved", {}).get("status") == "FAIL":
+                violations_derived.append("framing_modified")
+            if field_checks.get("outfit_appropriate", {}).get("status") == "FAIL":
+                violations_derived.append("outfit_inappropriate")
+
+            ok = len(violations_derived) == 0
+
+            return {
+                "ok": ok,
+                "field_checks": field_checks,
+                "violations_derived": violations_derived,
+                "expected_subject_count": expected_subject_count,
+                "duration_ms": duration_ms,
+                "cost_usd": round(cost_usd, 6),
+            }
+        except Exception as e:
+            err = str(e)
+            last_error = e
+            is_retryable = "429" in err or "500" in err or "503" in err
+            if is_retryable and attempt < max_retries:
+                m = _re.search(r"retry in (\d+(?:\.\d+)?)\s*s", err)
+                wait = (float(m.group(1)) + 2) if m else min(2 ** attempt * 5, 30)
+                time.sleep(wait)
+                continue
+            break
+
+    # Échec → ok=True par défaut (don't block pipeline) + erreur tracée
+    return {
+        "ok": True,
+        "field_checks": {},
+        "violations_derived": [],
+        "expected_subject_count": expected_subject_count,
         "duration_ms": 0,
         "cost_usd": 0,
         "error": str(last_error)[:200] if last_error else None,

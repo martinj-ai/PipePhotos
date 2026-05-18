@@ -32,11 +32,28 @@ def _lock_for(slug: str) -> Lock:
 
 
 def _atomic_write(p: Path, state: dict) -> None:
-    """Write JSON atomiquement : write to .tmp, puis os.replace (atomic move)."""
+    """Write JSON atomiquement : write to .tmp, puis os.replace (atomic move).
+
+    Fallback macOS Sequoia (Martin 15/05/2026) : sur certains setups le xattr
+    `com.apple.provenance` bloque `os.replace()` → PermissionError [Errno 1].
+    Dans ce cas on retombe sur un write direct (non-atomique mais fonctionnel —
+    les fichiers progress sont write-heavy/read-fréquent mais pas critiques).
+    """
     tmp = p.with_suffix(".tmp")
-    with open(tmp, "w") as f:
-        json.dump(state, f)
-    os.replace(tmp, p)
+    try:
+        with open(tmp, "w") as f:
+            json.dump(state, f)
+        os.replace(tmp, p)
+    except (PermissionError, OSError):
+        # Cleanup tmp orphelin si présent
+        try:
+            tmp.unlink()
+        except (FileNotFoundError, PermissionError, OSError):
+            pass
+        # Write direct (non-atomique) — acceptable car les fichiers progress
+        # sont lus par polling 500ms, une lecture partielle est récupérée au tick suivant
+        with open(p, "w") as f:
+            json.dump(state, f)
 
 
 def init(slug: str, total: int, step: str = "starting") -> None:

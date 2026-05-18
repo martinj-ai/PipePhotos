@@ -16,6 +16,8 @@ data/progress/
 data/rp/
 data/spend.json
 data/cache/
+data/audit.db
+data/audit.db-journal
 
 # ━━━ Environnement Python ━━━
 .venv/

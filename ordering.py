@@ -58,6 +58,12 @@ def _human_can_be_prominent(entry: dict) -> bool:
     """Vrai si la composition permet d'afficher un humain de façon visible (close_up/medium).
     Pour slot 1 : si on doit AJOUTER un humain IA, on refuse les vues aériennes/larges
     où la personne sera minuscule (cas Grand Beach Hotel piscine_vue_aerienne).
+
+    (Martin 18/05/2026) — Rollback du fix "consulter safe_zones" : il rendait éligibles
+    des photos wide où Gemini Image plaçait un humain qui RECOUVRAIT la piscine (pas
+    juste mauvaise taille, mais transformation du décor pour faire de la place). Le
+    signal Gemini `human_can_be_prominent=False` reste pertinent pour bloquer ces
+    cas avant qu'ils n'arrivent.
     """
     a = entry.get("analysis") or {}
     shot = a.get("shot_type") or {}
@@ -286,11 +292,33 @@ def order_final_pack(
         d = (a.get("amenity_dominance") or {}).get("primary_amenity_visible_pct") or 0
         return int(d) if isinstance(d, (int, float)) else 0
 
+    # ━━ Score TOTAL = score utilisé pour le ranking bucket (Martin 15/05/2026) ━━
+    # Avant : on triait par hero_score (WOW visuel subjectif Gemini) → la "top 1 pool"
+    # pouvait se retrouver en slot 5 du pack si une autre photo avait un hero plus élevé.
+    # Maintenant : on aligne le slot 1 du pack sur le ranking bucket pour cohérence
+    # (= la "top 1 pool" devient automatiquement le slot 1 du pack si éligible).
+    # Le hero_score reste en critère de tie-break pour départager les ex-aequo.
+    def _total_score(entry: dict) -> int:
+        """Score TOTAL avec bonus/malus (pillar + dominance_mod + hero + transformable + ...).
+
+        Réutilise compute_score_components depuis coverage.py pour cohérence stricte
+        avec le ranking affiché dans chaque bucket (= selection_rank).
+        """
+        try:
+            from coverage import compute_score_components
+            return int(compute_score_components(entry).get("total") or 0)
+        except Exception:
+            # Fallback : score brand pillar uniquement (sans bonus)
+            return _score(entry.get("analysis") or {})
+
     def _slot1_sort_key(t):
         entry = t[0]
         return (
-            -_hero_score(entry),                       # WOW factor en premier
-            -_amenity_dominance(entry),                # amenity bien visible
+            -_total_score(entry),                      # ⭐ Critère #1 (Martin 15/05/2026)
+                                                        # = même score que le ranking bucket
+                                                        # → cohérence top 1 pool = slot 1 pack
+            -_amenity_dominance(entry),                # amenity bien visible (tie-break 1)
+            -_hero_score(entry),                       # WOW visuel (tie-break 2, ex-#1)
             -1 if _is_slot1_worthy(entry) else 0,
             -1 if (_has_human(entry) or _human_can_be_prominent(entry)) else 0,
             -_score(entry.get("analysis") or {}),

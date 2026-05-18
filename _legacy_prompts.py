@@ -36,6 +36,7 @@ def build_persona_prompt_v1_long(
     # Dépendances injectées depuis enhance.py au moment du call (pour éviter
     # un import circulaire ici) :
     scenario_block_override: str | None = None,
+    chosen_anchor: str | None = None,
     _pick_human_scenario=None,
     _PERSONA_TEMPLATES=None,
     _CATEGORY_ACTION_HINT=None,
@@ -119,10 +120,41 @@ def build_persona_prompt_v1_long(
 
     has_safe_zones = bool(safe_zones)
     safe_zones_block = ""
-    if has_safe_zones:
+    max_h = max_humans or 1
+    unsafe_list = "\n".join(f"  - {z}" for z in (unsafe_zones or []))
+
+    # ━━ Mode V5 mono-zone (Martin 15/05/2026, bug Gates Hotel SB) ━━━━━━━━━━━━━
+    # Quand scenario_writer a CHOISI un anchor unique (via primary_anchor passé
+    # comme chosen_anchor), on ne liste plus les 3 zones — on lock sur 1 seule.
+    # Bénéfices :
+    #   1. Évite que Nano Banana "interpole" entre 3 zones listées → choix bizarres
+    #   2. Cohérent avec la philosophie V5 (Gemini Vision EST le décideur)
+    #   3. Réduit les tokens du prompt (~150-200 tokens en moins par photo)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    if chosen_anchor:
+        safe_zones_block = f"""
+
+🎯 ABSOLUTE PLACEMENT LOCK — UNIQUE ANCHOR CHOSEN BY VISION (Martin 15/05/2026 — mono-zone mode):
+
+Gemini Vision analyzed THIS exact photo and selected EXACTLY ONE placement anchor — the optimal one for both PLACEMENT FEASIBILITY and SUBJECT READABILITY. There are NO alternative zones to consider.
+
+📍 THE ONLY allowed placement :
+  → {chosen_anchor}
+
+📌 STRICT RULES :
+- Place the subject(s) PRECISELY at this anchor — same location, same orientation, same pose described in the scenario block above.
+- Do NOT slide / shift / re-interpret the anchor to put the subject somewhere "more aspirational" (closer to the camera, more centered, on a different piece of furniture). The anchor IS the placement.
+- Do NOT create a new edge / step / ledge / platform / lounger / float to make a different placement work.
+- Do NOT consider any other furniture / spot in the scene as a fallback. There is no fallback. Either this anchor works, OR you return the image UNCHANGED.
+
+FORBIDDEN placements in this scene (do NOT place subjects here under any circumstance):
+{unsafe_list or "  - (none specific)"}
+
+Maximum subjects to add: {max_h} (less is better — if the chosen anchor cannot fit {max_h}, place fewer).
+"""
+    elif has_safe_zones:
+        # ━━ Mode legacy multi-zones (fallback V1 catalog, ou scenario_writer skip) ━
         safe_list = "\n".join(f"  ZONE {i+1}: {z}" for i, z in enumerate(safe_zones))
-        unsafe_list = "\n".join(f"  - {z}" for z in (unsafe_zones or []))
-        max_h = max_humans or 1
         safe_zones_block = f"""
 
 🎯 ABSOLUTE PLACEMENT RULE — THE SCENE-SPECIFIC SAFE ZONES (analyzed by Gemini Vision on THIS exact photo):

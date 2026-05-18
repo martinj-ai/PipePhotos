@@ -27,6 +27,7 @@ import booking_scraper
 import hotel_site_finder
 import hotel_gallery_extractor
 import analyze
+import audit_db  # Martin 15/05/2026 : persist validation + tagging humain
 import dedup_angles
 import coverage as coverage_mod
 import enhance
@@ -143,11 +144,16 @@ def api_identify_hotel():
     if not url.startswith("https://www.booking.com/hotel/"):
         return jsonify({"error": "URL doit être une fiche hôtel Booking."}), 400
 
-    progress.init("booking_scrape", total=5, step="extracting")
-    progress.update("booking_scrape", current=1, total=5,
+    progress.init("booking_scrape", total=3, step="extracting")
+    progress.update("booking_scrape", current=1, total=3,
                     message="📥 Scraping fiche Booking + analyse Gemini…")
 
-    # ━ Étape 1 : Scrape Booking pour récupérer nom/ville/amenities ━
+    # ━ Scrape Booking pour récupérer nom/ville/amenities ━
+    # (Martin 18/05/2026) Le pipeline auto-find DDG+Gemini des URLs RP/Expedia/
+    # Officiel a été retiré : le user saisit lui-même les URLs qu'il veut utiliser
+    # via les champs du form. Cet endpoint ne fait QUE le scrape Booking pour
+    # récupérer les métadonnées hôtel (nom, ville, amenities, vibe). Pour
+    # auto-find ponctuel d'une URL, utiliser /api/auto-find-url.
     try:
         data = booking_amenities_extractor.extract_hotel_data_from_booking(url)
     except Exception as e:
@@ -163,114 +169,22 @@ def api_identify_hotel():
     slug = f"booking-{booking_slug}"
     rp_dir = ROOT / "data" / "rp"
     rp_dir.mkdir(parents=True, exist_ok=True)
-    progress.update("booking_scrape", current=2, total=5,
+    progress.update("booking_scrape", current=2, total=3,
                     message=f"💾 Booking parsée : {(data.get('name') or '?')[:40]} — sauvegarde…")
     with open(rp_dir / f"{slug}.json", "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
-    # ━ Étape 2 : Recherche des URLs sources en PARALLÈLE ━
-    # Chaque finder fait DDG (3s + retry 3s) + fallback Gemini (1-2s).
-    # En parallèle (4 threads) : tout doit prendre ~5-8s max.
-    progress.update("booking_scrape", current=3, total=5,
-                    message="🔎 Recherche URL ResortPass (DDG + Gemini fallback)…")
-    name = data.get("name") or ""
-    city = data.get("city") or ""
-    country = data.get("country") or ""
-
-    from concurrent.futures import ThreadPoolExecutor
-
-    def _find_rp():
-        try:
-            return rp_finder.find_rp_url(name, city, country)
-        except Exception as e:
-            return {"url": None, "error": f"crash: {e}"}
-
-    def _find_expedia():
-        try:
-            return expedia_finder.find_expedia_url(name, city, country)
-        except Exception as e:
-            return {"url": None, "error": f"crash: {e}"}
-
-    def _find_official():
-        try:
-            return hotel_site_finder.find_hotel_site(name, city, country)
-        except Exception as e:
-            return {"url": None, "error": f"crash: {e}"}
-
-    # Note : les 3 finders tournent en parallèle. Timeout global 20s/finder pour
-    # éviter qu'un finder lent (ex: hotel_site_finder qui boot Playwright sur une
-    # URL douteuse) bloque toute l'identification. as_completed remonte les futurs
-    # dans l'ordre de complétion réelle.
-    # Échelle d'avancement : étape 2/2 = recherche URLs (de 3/5 à 5/5)
-    #   - 3/5 = recherche en cours (aucune source résolue)
-    #   - 4/5 = 1ère source résolue
-    #   - 4.5/5 = 2ème (arrondi visuel)
-    #   - 5/5 = 3ème (toutes résolues)
-    from concurrent.futures import as_completed, TimeoutError as FutureTimeout
-    FINDER_TIMEOUT_S = 20
-    with ThreadPoolExecutor(max_workers=3) as ex:
-        futures = {
-            ex.submit(_find_rp): ("rp", "📍 ResortPass"),
-            ex.submit(_find_expedia): ("expedia", "✈️ Expedia"),
-            ex.submit(_find_official): ("official", "🌐 Site officiel"),
-        }
-        completed_results = {}
-        completed_count = 0
-        import time as _time
-        t_start = _time.time()
-        # Boucle sur as_completed AVEC timeout cumulé
-        try:
-            for fut in as_completed(futures, timeout=FINDER_TIMEOUT_S):
-                key, label = futures[fut]
-                try:
-                    completed_results[key] = fut.result(timeout=0.5)
-                except Exception as e:
-                    completed_results[key] = {"url": None, "error": f"crash: {str(e)[:100]}"}
-                completed_count += 1
-                url_found = (completed_results[key] or {}).get("url")
-                status = "✓ trouvée" if url_found else "✗ non trouvée"
-                elapsed = int(_time.time() - t_start)
-                # Mapping cumul → indicateur visuel : 4, 4, 5 (capé à 5)
-                progress.update(
-                    "booking_scrape",
-                    current=min(3 + completed_count, 5),
-                    total=5,
-                    message=f"{label} {status} ({completed_count}/3 sources · {elapsed}s)",
-                )
-        except FutureTimeout:
-            # Au moins un finder n'a pas répondu dans le délai → on flag les manquants
-            pass
-        # Pour les finders qui n'ont pas répondu (timeout) → flag explicite
-        for fut, (key, label) in futures.items():
-            if key not in completed_results:
-                completed_results[key] = {
-                    "url": None,
-                    "error": f"timeout {FINDER_TIMEOUT_S}s (le finder n'a pas répondu à temps)",
-                }
-                # Tente d'annuler le futur (best-effort, marche seulement si pas démarré)
-                fut.cancel()
-                completed_count += 1
-                progress.update(
-                    "booking_scrape",
-                    current=min(3 + completed_count, 5),
-                    total=5,
-                    message=f"{label} ⏱ timeout {FINDER_TIMEOUT_S}s — passe à la suite",
-                )
-        rp_result = completed_results.get("rp")
-        expedia_result = completed_results.get("expedia")
-        official_result = completed_results.get("official")
-
-    # ━ Construction du payload de retour ━
+    # ━ Pas d'auto-find des URLs : le user les a saisies manuellement côté front ━
     urls = {
-        "booking_url": url,  # déjà connue (input)
-        "rp_url": (rp_result or {}).get("url"),
-        "expedia_url": (expedia_result or {}).get("url"),
-        "official_url": (official_result or {}).get("url"),
+        "booking_url": url,
+        "rp_url": None,
+        "expedia_url": None,
+        "official_url": None,
     }
     urls_meta = {
-        "rp": rp_result or {},
-        "expedia": expedia_result or {},
-        "official": official_result or {},
+        "rp": {"url": None, "source": "manual"},
+        "expedia": {"url": None, "source": "manual"},
+        "official": {"url": None, "source": "manual"},
     }
 
     progress.finish("booking_scrape", message="Identification terminée")
@@ -279,6 +193,86 @@ def api_identify_hotel():
         "data": data,
         "urls": urls,
         "urls_meta": urls_meta,
+    })
+
+
+@app.route("/api/auto-find-url", methods=["POST"])
+def api_auto_find_url():
+    """Trouve UNE URL (RP / Expedia / Site officiel) à partir de l'URL Booking.
+
+    Endpoint léger pour les boutons "🔎 Auto-find" du formulaire — appelé à la
+    demande quand le user n'a pas l'URL et veut déléguer la recherche à
+    DuckDuckGo + Gemini fallback.
+
+    Body : {type: "rp"|"expedia"|"official", booking_url: str}
+    Output : {url: str|None, source: "duckduckgo"|"gemini"|null, confidence: str|None, error?: str}
+    """
+    payload = request.get_json(silent=True) or {}
+    url_type = (payload.get("type") or "").strip().lower()
+    booking_url = (payload.get("booking_url") or "").strip()
+
+    if url_type not in ("rp", "expedia", "official"):
+        return jsonify({"error": "type doit être 'rp', 'expedia' ou 'official'"}), 400
+    if not booking_url.startswith("https://www.booking.com/hotel/"):
+        return jsonify({"error": "URL Booking valide requise"}), 400
+
+    # ━ Scrape Booking (depuis cache si possible) pour récupérer nom/ville/pays ━
+    parsed_path = booking_url.rstrip("/").split("/")
+    booking_slug = parsed_path[-1].replace(".html", "") if parsed_path else "hotel"
+    slug = f"booking-{booking_slug}"
+    rp_path = ROOT / "data" / "rp" / f"{slug}.json"
+
+    if rp_path.exists():
+        with open(rp_path) as f:
+            data = json.load(f)
+    else:
+        try:
+            data = booking_amenities_extractor.extract_hotel_data_from_booking(booking_url)
+            if data.get("error"):
+                return jsonify({"error": f"Booking scrape échoué : {data['error']}"}), 500
+            rp_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(rp_path, "w") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            return jsonify({"error": f"Booking scrape crash : {str(e)[:200]}"}), 500
+
+    name = data.get("name") or ""
+    city = data.get("city") or ""
+    country = data.get("country") or ""
+
+    # ━ Appel finder approprié avec timeout 20s ━
+    import concurrent.futures as _cf
+    def _find():
+        try:
+            if url_type == "rp":
+                return rp_finder.find_rp_url(name, city, country)
+            if url_type == "expedia":
+                return expedia_finder.find_expedia_url(name, city, country)
+            if url_type == "official":
+                return hotel_site_finder.find_hotel_site(name, city, country)
+        except Exception as e:
+            return {"url": None, "error": f"crash: {str(e)[:200]}"}
+
+    with _cf.ThreadPoolExecutor(max_workers=1) as ex:
+        future = ex.submit(_find)
+        try:
+            result = future.result(timeout=20)
+        except _cf.TimeoutError:
+            future.cancel()
+            return jsonify({
+                "url": None,
+                "source": None,
+                "error": "timeout 20s (le finder n'a pas répondu)",
+            })
+
+    if not result:
+        return jsonify({"url": None, "source": None, "error": "Aucun résultat"})
+
+    return jsonify({
+        "url": result.get("url"),
+        "source": result.get("source"),
+        "confidence": result.get("confidence"),
+        "error": result.get("error"),
     })
 
 
@@ -2027,6 +2021,18 @@ def api_run():
     #    de la réponse côté front (fenêtre done→fetch retourné = ms, pas s).
     progress.finish(f"{slug}_analyze", message="Pipeline terminé")
 
+    # ━━ Persist validation results dans audit DB (Martin 15/05/2026) ━━━━━━━━━
+    # Permet le dashboard agrégé + corrélation avec tags humains.
+    # Ne JAMAIS bloquer le pipeline sur un échec de persist (try/except interne).
+    try:
+        for entry in enhanced_summary:
+            fn = entry.get("filename")
+            if not fn:
+                continue
+            audit_db.save_photo_result(slug=slug, filename=fn, entry=entry)
+    except Exception as e:
+        print(f"[audit_db] persist batch failed for {slug}: {e}")
+
     return jsonify({
         "slug": slug,
         "pipeline_started_at": pipeline_started_at,
@@ -2706,6 +2712,60 @@ def serve_laws_audit(filename="laws_audit.html"):
     Cf. `laws.py` (formalisation) et `laws_matrix.py` (calcul).
     """
     return send_from_directory(ROOT / "data" / "output" / "laws_audit", filename)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Audit endpoints (Martin 15/05/2026, pack C)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@app.route("/api/photo-tag", methods=["POST"])
+def api_set_photo_tag():
+    """Crée/MAJ le tag humain ✅⚠️❌ pour une photo.
+
+    Body JSON : { slug: str, filename: str, tag: 'good'|'borderline'|'bad', note?: str }
+    """
+    data = request.get_json(force=True) or {}
+    slug = (data.get("slug") or "").strip()
+    filename = (data.get("filename") or "").strip()
+    tag = (data.get("tag") or "").strip()
+    note = data.get("note")
+    if not slug or not filename or not tag:
+        return jsonify({"error": "slug, filename, tag requis"}), 400
+    res = audit_db.set_photo_tag(slug, filename, tag, note)
+    if not res.get("ok"):
+        return jsonify({"error": res.get("error", "save failed")}), 400
+    return jsonify(res)
+
+
+@app.route("/api/photo-tag", methods=["GET"])
+def api_get_photo_tag():
+    """Retourne le tag humain courant d'une photo (ou null)."""
+    slug = (request.args.get("slug") or "").strip()
+    filename = (request.args.get("filename") or "").strip()
+    if not slug or not filename:
+        return jsonify({"error": "slug et filename requis"}), 400
+    tag = audit_db.get_photo_tag(slug, filename)
+    return jsonify(tag or {})
+
+
+@app.route("/api/photo-tags-bulk", methods=["GET"])
+def api_get_tags_bulk():
+    """Tous les tags d'un slug, formatés en {filename: {tag, note, ...}}."""
+    slug = (request.args.get("slug") or "").strip()
+    if not slug:
+        return jsonify({"error": "slug requis"}), 400
+    return jsonify(audit_db.get_all_tags_for_slug(slug))
+
+
+@app.route("/api/audit-dashboard")
+def api_audit_dashboard():
+    """Stats agrégées pour le dashboard. Filtres optionnels : slug, days."""
+    slug = request.args.get("slug") or None
+    try:
+        days = int(request.args.get("days") or 30)
+    except (ValueError, TypeError):
+        days = 30
+    return jsonify(audit_db.get_dashboard_stats(slug=slug, days=days))
 
 
 if __name__ == "__main__":

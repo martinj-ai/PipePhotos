@@ -109,13 +109,32 @@ PROMPT_WARM_BOOST = (
 )
 
 # === Ajout pool float (standalone — sans humain, pour photos déjà peuplées ou non) ===
-def build_pool_float_only_prompt(float_desc: str) -> str:
+def build_pool_float_only_prompt(float_desc: str, is_aerial: bool = False) -> str:
     """Prompt pour ajouter UNIQUEMENT une bouée dans une photo piscine, sans toucher au reste.
 
     Utilisé quand la photo n'a pas besoin d'add_character mais qu'on veut quand même
     booster son côté playful (Martin 11/05/2026 : "ça peut être ajouté en plus des humains,
     pas un critère unique").
+
+    Args:
+        float_desc : description du float ("inflatable flamingo float, pink", etc.)
+        is_aerial : True si la photo est en vue aérienne / drone (modifie les contraintes
+            de perspective — Martin 15/05/2026, bug Moxy Miami où cygne 3D frontale
+            a été ajouté sur une photo top-down → look incohérent).
     """
+    # Bloc perspective spécifique vue aérienne (Martin 15/05/2026)
+    aerial_block = """
+📐 AERIAL VIEW LOCK — CRITICAL (this photo is shot from ABOVE, top-down / drone perspective) :
+- The float MUST be rendered with the SAME top-down perspective as the rest of the scene.
+- Seen from ABOVE as a FLAT shape : ellipse for a donut, elongated flat shape for flamingo/swan, rectangle for a lilo.
+- We see only the TOP surface of the float — its profile / side / volume must NOT be visible.
+- ❌ FORBIDDEN : float rendered in 3D perspective (frontale catalog product shot, side view, 3/4 angle).
+- ❌ FORBIDDEN : float that "stands up" out of the water vertically.
+- ✅ The float lies COMPLETELY FLAT on the water surface, partially submerged where appropriate.
+- Same shading direction as other floats already in the pool (if any visible).
+- Shadow on the water is a soft ellipse directly below the float (sun overhead in aerial shots), NOT a long shadow stretching sideways.
+""" if is_aerial else ""
+
     return f"""🛑 ABSOLUTE RULE — ADD ONE SINGLE POOL FLOAT, NOTHING ELSE:
 
 You are ONLY allowed to add ONE pool float in the existing pool water of this image — specifically: {float_desc}.
@@ -127,17 +146,26 @@ You MUST NEVER add ANY of the following:
 - Any modification to the existing water shape, decking, plants, walls, ceiling, lighting
 - Any second float — exactly ONE float, no more
 - Any change to the framing, composition, perspective, lighting, color grading
-
+{aerial_block}
 🎯 PLACEMENT RULES for the float:
 - Place it IN the existing pool water, in a zone that is currently EMPTY (no swimmers, no decoration in that spot already).
 - Pick a natural-looking position : near the center of the water surface, or gently drifting near the edge.
-- Realistic SCALE : the float must be proportional to the pool (typically 0.8–1.8m long for a flamingo/swan, ~1m diameter for a donut). It must NEVER cover more than ~25% of the visible water surface.
-- Realistic INTEGRATION with the water:
-  - Subtle wake / ripple around it
-  - Slight reflection of the float's underside on the water
-  - Float partially sitting on water, NOT floating dry above it
-- Realistic LIGHTING : the float must receive the same sunlight direction as the rest of the scene; cast a soft natural shadow on the water consistent with the existing shadow direction.
-- Color/style remain PHOTOREALISTIC — no over-saturated CGI candy palette. Slight wear/dust is fine.
+
+📏 SCALE LOCK — CRITICAL (Martin 15/05/2026, bug bouées géantes) :
+- The float must NEVER cover more than ~12% of the visible water surface. NOT 25%, NOT 20% — strict 12% max.
+- SCALE ANCHOR : the float must be approximately the SAME SIZE as ONE of the existing loungers/daybeds visible around the pool. If a lounger appears N pixels long in the input, the float should be MAX N pixels long (NOT 2× a lounger, NOT 3× a lounger).
+- For a typical 5m×3m pool seen from a standard angle, the float should appear ROUGHLY the size of an ADULT HUMAN LYING DOWN — never larger.
+- ❌ FORBIDDEN : a giant float occupying half the pool. That looks fake and ruins the photo. A small natural float in a corner is INFINITELY better than a giant one centered.
+- Mental visual test BEFORE finalizing : compare the float to the visible loungers in the photo. Float longer than a lounger = WRONG, downscale immediately.
+
+🌊 Realistic INTEGRATION with the water:
+- Subtle wake / ripple around it
+- Slight reflection of the float's underside on the water
+- Float partially sitting on water, NOT floating dry above it
+
+☀️ Realistic LIGHTING : the float must receive the same sunlight direction as the rest of the scene; cast a soft natural shadow on the water consistent with the existing shadow direction.
+
+🎨 STYLE : color/style remain PHOTOREALISTIC — no over-saturated CGI candy palette. Slight wear/dust is fine.
 
 🚫 IF YOU CANNOT add the float naturally according to ALL the rules above → DO NOT add it. Return the image UNCHANGED. A photo without a float is always acceptable. A bad fake float ruins the photo.
 
@@ -149,6 +177,8 @@ NEGATIVE PROMPT:
 - new humans, new people, hands, legs, body parts
 - new furniture, new objects beyond the single float
 - duplicated floats, multiple floats, more than one float
+- 🚨 oversized float covering > 12% of water surface (banned even if "centerpiece" look is tempting)
+- 🚨 3D perspective float on a top-down aerial photo
 - changes to framing, composition, perspective, water shape, decking
 - cartoon / CGI look, oversaturated colors, plastic shine, glowing edges
 - floating dry above water without surface contact
@@ -1220,12 +1250,19 @@ def pick_pool_float_hint(
     category: str | None,
     vibe: str | None,
     photo_filename: str | None,
+    analysis: dict | None = None,
 ) -> str | None:
     """Retourne la description du float à autoriser, ou None pour skip.
 
     Déterministe par filename → un même run replay donne le même résultat.
     Pas systématique : la randomisation déterministe est CRITIQUE pour que ça
     reste "occasionnel et naturel" comme demandé par Martin.
+
+    SKIP RULE (Martin 15/05/2026, bug Moxy Miami vue aérienne : cygne doré ajouté
+    alors que 15 bouées colorées déjà présentes → look incohérent) : si la photo
+    contient DÉJÀ des bouées/flotteurs, on n'en ajoute pas — pour éviter (a) de
+    saturer la piscine, (b) d'ajouter une bouée stylistiquement incohérente avec
+    les existantes (perspective, palette).
     """
     if not category:
         return None
@@ -1233,6 +1270,27 @@ def pick_pool_float_hint(
     # Seuls les scènes piscine sont éligibles (rooftop ok ssi le mot pool est dedans)
     if "piscine" not in cat_lower and "pool" not in cat_lower:
         return None
+
+    # ━━ SKIP si bouées EXISTANTES détectées dans la photo source ━━━━━━━━━━━━━
+    # Niveau A : on scanne factual.subjects / clutter_to_remove / issues pour des
+    # mots-clés bouée. Si match → on n'ajoute pas une 2e bouée.
+    # Note : analyze.py ne retourne pas (encore) un champ structuré
+    # existing_pool_floats_count → fallback heuristique sur les chaînes de texte.
+    if analysis:
+        factual = analysis.get("factual") or {}
+        subjects_text = " ".join(factual.get("subjects") or []).lower()
+        clutter_text = " ".join(analysis.get("clutter_to_remove") or []).lower()
+        issues_text = " ".join(analysis.get("issues") or []).lower()
+        # Mots-clés bouée gonflable, en FR + EN (Gemini Vision peut alterner)
+        EXISTING_FLOAT_KEYWORDS = (
+            "bouée", "bouee", "buoy", "float", "flotteur", "matelas gonflable",
+            "gonflable", "inflatable", "flamingo", "flamant", "donut", "swan", "cygne",
+            "lilo", "pool noodle", "frite piscine", "raft", "ring", "anneau gonflable",
+            "ananas gonflable", "watermelon float", "pastèque gonflable", "licorne gonflable",
+        )
+        combined = f"{subjects_text} {clutter_text} {issues_text}"
+        if any(kw in combined for kw in EXISTING_FLOAT_KEYWORDS):
+            return None  # Bouée(s) déjà présente(s) → on n'en ajoute pas
     # Les vues aériennes piscine RESTENT éligibles pour les bouées.
     # Référence : hero homepage Dayuse avec bouée flamingo en vue aérienne. La bouée est
     # parfaitement visible en aerial (contrairement à un humain qui serait trop petit).
@@ -1312,7 +1370,8 @@ def build_persona_prompt(persona: str, category: str, vibe: str | None = None,
                          max_humans: int | None = None,
                          capacity: int | None = None,
                          pool_float_hint: str | None = None,
-                         scenario_block_override: str | None = None) -> str:
+                         scenario_block_override: str | None = None,
+                         chosen_anchor: str | None = None) -> str:
     """Construit le prompt ajout personnage.
 
     ━━━ HISTORIQUE & VERSIONS ━━━
@@ -1343,6 +1402,7 @@ def build_persona_prompt(persona: str, category: str, vibe: str | None = None,
             max_humans=max_humans, capacity=capacity,
             pool_float_hint=pool_float_hint,
             scenario_block_override=scenario_block_override,
+            chosen_anchor=chosen_anchor,
             _pick_human_scenario=pick_human_scenario,
             _PERSONA_TEMPLATES=PERSONA_TEMPLATES,
             _CATEGORY_ACTION_HINT=CATEGORY_ACTION_HINT,
@@ -1599,7 +1659,8 @@ def _pick_main_action(
             }
 
         # ━ Pool float occasionnel (déterministe par filename, voir pick_pool_float_hint) ━
-        pool_float = pick_pool_float_hint(cat, vibe, photo_filename)
+        # Skip auto si la photo a déjà des bouées (cf. analysis passé en arg).
+        pool_float = pick_pool_float_hint(cat, vibe, photo_filename, analysis=analysis)
         fallback_tag = " [fallback safe_zones]" if used_fallback else ""
 
         # ━━ V5 Vision-Generated Scenario (Martin 13/05/2026) ━━━━━━━━━━━━━━━━━━━
@@ -1612,6 +1673,7 @@ def _pick_main_action(
         # fallback automatique vers l'ancien catalogue (pas de break pipeline).
         scenario_block_override = None
         scenario_writer_meta = None
+        chosen_anchor = None  # Mono-zone (Martin 15/05/2026) — anchor unique choisi par Vision
         if os.getenv("USE_LEGACY_SCENARIO_CATALOG") != "1" and image_path is not None:
             try:
                 from scenario_writer import write_scenario
@@ -1623,6 +1685,7 @@ def _pick_main_action(
                 )
                 if sw_result.get("feasibility") == "ok" and sw_result.get("scenario_block"):
                     scenario_block_override = sw_result["scenario_block"]
+                    chosen_anchor = sw_result.get("primary_anchor") or None
                     # Optionnel : si Vision dit max_subjects < ce que Python calcule,
                     # on respecte Vision (= sa lecture de la photo, plus fiable)
                     sw_max = sw_result.get("max_subjects_realistic")
@@ -1634,6 +1697,8 @@ def _pick_main_action(
                     "skip_reason": sw_result.get("skip_reason"),
                     "max_subjects_realistic": sw_result.get("max_subjects_realistic"),
                     "primary_anchor": sw_result.get("primary_anchor"),
+                    "estimated_subject_scale_pct": sw_result.get("estimated_subject_scale_pct"),
+                    "uses_pool_float_joker": sw_result.get("uses_pool_float_joker", False),
                     "pitfalls": sw_result.get("pitfalls_specific_to_this_photo"),
                     "cost_usd": (sw_result.get("_meta") or {}).get("cost_usd", 0),
                     "duration_ms": (sw_result.get("_meta") or {}).get("duration_ms", 0),
@@ -1650,8 +1715,9 @@ def _pick_main_action(
                 max_humans=max_h, capacity=capacity_total,
                 pool_float_hint=pool_float,
                 scenario_block_override=scenario_block_override,
+                chosen_anchor=chosen_anchor,
             ),
-            "reason": f"ajout personnage IA ({persona}, target={compute_target_humans(persona, capacity_total or 2)}) sur {cat or 'scène vide'}{fallback_tag}" + (f" + bouée 🍩 {pool_float[:30]}…" if pool_float else "") + (" [Vision scenario]" if scenario_block_override else ""),
+            "reason": f"ajout personnage IA ({persona}, target={compute_target_humans(persona, capacity_total or 2)}) sur {cat or 'scène vide'}{fallback_tag}" + (f" + bouée 🍩 {pool_float[:30]}…" if pool_float else "") + (" [Vision scenario, mono-anchor]" if scenario_block_override else ""),
             "scenario_writer": scenario_writer_meta,
             "persona_used": persona,
             "capacity_used": capacity_total,
@@ -1951,6 +2017,7 @@ def pick_strategy(
         })
         # V5 : utilise scenario_writer également pour le chaînage lighting→character
         chained_scenario_override = None
+        chained_chosen_anchor = None  # mono-zone (Martin 15/05/2026)
         chained_sw_meta = None
         if os.getenv("USE_LEGACY_SCENARIO_CATALOG") != "1" and image_path is not None:
             try:
@@ -1958,12 +2025,16 @@ def pick_strategy(
                 sw_result = write_scenario(image_path=image_path, category=cat, vibe=vibe, persona=persona)
                 if sw_result.get("feasibility") == "ok" and sw_result.get("scenario_block"):
                     chained_scenario_override = sw_result["scenario_block"]
+                    chained_chosen_anchor = sw_result.get("primary_anchor") or None
                     sw_max = sw_result.get("max_subjects_realistic")
                     if sw_max and (max_h is None or sw_max < max_h):
                         max_h = sw_max
                 chained_sw_meta = {
                     "used": chained_scenario_override is not None,
                     "feasibility": sw_result.get("feasibility"),
+                    "primary_anchor": sw_result.get("primary_anchor"),
+                    "estimated_subject_scale_pct": sw_result.get("estimated_subject_scale_pct"),
+                    "uses_pool_float_joker": sw_result.get("uses_pool_float_joker", False),
                     "cost_usd": (sw_result.get("_meta") or {}).get("cost_usd", 0),
                 }
             except Exception as e:
@@ -1974,8 +2045,9 @@ def pick_strategy(
             "action": "ai_add_character",
             "prompt": build_persona_prompt(persona, cat, vibe, safe_zones=safe_zones,
                                            unsafe_zones=unsafe_zones, max_humans=max_h,
-                                           scenario_block_override=chained_scenario_override),
-            "reason": f"ajout personnage IA ({persona}) sur scène ensoleillée (étape 2/2)" + (" [Vision scenario]" if chained_scenario_override else ""),
+                                           scenario_block_override=chained_scenario_override,
+                                           chosen_anchor=chained_chosen_anchor),
+            "reason": f"ajout personnage IA ({persona}) sur scène ensoleillée (étape 2/2)" + (" [Vision scenario, mono-anchor]" if chained_scenario_override else ""),
             "scenario_writer": chained_sw_meta,
         })
     else:
@@ -2009,16 +2081,20 @@ def pick_strategy(
     primary_cat = (factual_.get("category") or "").lower()
     already_has_character = any(s.get("action") == "ai_add_character" for s in steps)
     if not already_has_character:
-        float_hint = pick_pool_float_hint(primary_cat, vibe, photo_filename)
+        float_hint = pick_pool_float_hint(primary_cat, vibe, photo_filename, analysis=analysis)
         if float_hint:
+            # Détection vue aérienne pour appliquer les contraintes perspective top-down
+            # (Martin 15/05/2026, bug Moxy Miami : cygne 3D ajouté sur photo top-down)
+            is_aerial_view = "aerienne" in primary_cat or "aerial" in primary_cat
             # Insertion juste avant un éventuel local_warm_boost final (pour que le warm_boost
             # apparaisse comme une dernière étape de finition). Si pas de warm_boost, on
             # ajoute en fin.
             float_step = {
                 "action": "ai_add_pool_float",
-                "prompt": build_pool_float_only_prompt(float_hint),
-                "reason": f"ajout bouée 🍩 ({float_hint[:40]}…) — playful touch sur piscine",
+                "prompt": build_pool_float_only_prompt(float_hint, is_aerial=is_aerial_view),
+                "reason": f"ajout bouée 🍩 ({float_hint[:40]}…) — playful touch sur piscine" + (" [aerial perspective]" if is_aerial_view else ""),
                 "pool_float_used": float_hint,
+                "is_aerial_view": is_aerial_view,
             }
             # Si dernière étape est local_warm_boost → insère avant ; sinon ajoute en fin
             if steps and steps[-1]["action"] == "local_warm_boost":
@@ -2125,6 +2201,11 @@ def is_add_character_candidate(analysis: dict) -> bool:
         return False
 
     # ━ Guard #2 : shot_type problématique (échelle humain irréaliste) ━
+    # (Martin 18/05/2026) — Rollback du fix "consulter safe_zones" : il rendait
+    # éligibles des photos wide où Nano Banana plaçait un humain qui RECOUVRAIT
+    # la piscine en partie (transformation décor pour faire de la place). Le
+    # signal Gemini `human_can_be_prominent=False` reste pertinent pour bloquer
+    # ces cas avant qu'ils n'arrivent.
     shot_block = analysis.get("shot_type") or {}
     shot_t = (shot_block.get("type") or "").lower()
     human_can_be_prominent = bool(shot_block.get("human_can_be_prominent"))
@@ -2465,6 +2546,39 @@ VIOLATION_REINFORCEMENT = {
     "architecture_changed": (
         "DO NOT ALTER THE ARCHITECTURE: walls, structures, decor, plants, water shape, sky, and overall composition must remain identical to the input. Only requested transformations apply."
     ),
+    "pool_surface_reduced": (
+        "🚨 CRITICAL VIOLATION — POOL SURFACE MODIFIED : in your previous output, the SWIMMING POOL "
+        "water surface was shrunk / reshaped / partially covered compared to the input. "
+        "THIS IS UNACCEPTABLE — the pool is the primary commercial asset of a hotel photo. "
+        "ABSOLUTE RULE for this retry : the pool water surface MUST stay 100% IDENTICAL to the input — "
+        "same shape (rectangular stays rectangular, oval stays oval, lagoon shape stays lagoon shape), "
+        "same dimensions (every edge in the EXACT same place), same proportion of the frame. "
+        "If a subject or furniture conflicts with the pool space, MOVE THE SUBJECT to a different "
+        "anchor point AWAY from the water — DO NOT shrink the pool to make room. "
+        "Verify before output : trace the contour of the water in the input, trace it in your output, "
+        "they must be SUPERIMPOSABLE. Zero pixel of former water may become deck/floor/furniture."
+    ),
+    "subject_count_wrong": (
+        "🚨 SUBJECT COUNT MISMATCH : in your previous output, the number of humans added does NOT "
+        "match the target requested in the original task. Re-read the scenario : the target N must "
+        "be exactly respected. If you added MORE than N → remove the extras. If you added FEWER "
+        "than N → it's acceptable ONLY if you cannot fit them on EXISTING furniture/water without "
+        "inventing decor. Count the visible added humans before finalizing — match the target exactly."
+    ),
+    "pool_float_oversized": (
+        "🚨 POOL FLOAT OVERSIZED / WRONG PERSPECTIVE : in your previous output, the inflatable "
+        "pool float added is TOO LARGE or in WRONG PERSPECTIVE relative to the scene. "
+        "ABSOLUTE RULES for this retry : "
+        "(a) The float must cover MAXIMUM 12% of the visible water surface — NOT 25%, NOT 20%, strict 12% max. "
+        "(b) Scale anchor : the float must be approximately the SAME size as ONE existing lounger/daybed visible "
+        "in the photo. If the lounger is N pixels long, the float is MAX N pixels long (not 2N, not 3N). "
+        "(c) Perspective : if the photo is shot from ABOVE (aerial / top-down / drone), the float MUST be rendered "
+        "in TOP-DOWN view (flat ellipse / flat elongated shape — never in 3D side perspective). "
+        "(d) Reference : a real flamingo float is ~1.5m long, a real donut ~1m diameter, both fit a 5m×3m pool "
+        "as a small playful accent, NEVER as a centerpiece covering half the water. "
+        "A small natural float in a corner is INFINITELY better than a giant misplaced one. "
+        "If you cannot honor these rules → DO NOT add the float (return image unchanged)."
+    ),
     "architecture_invented": (
         "🚨 CRITICAL VIOLATION — FABRICATED ARCHITECTURE : in your previous output, you "
         "INVENTED a structural element that does not exist in the input. Typical cases : "
@@ -2528,6 +2642,49 @@ _SCENARIO_SWAP_TARGETS = {
     # piscine, pieds dans l'eau, du bon côté) — c'est la position la plus safe
     # qui ne nécessite aucun mobilier inventé et garde le sujet visible côté safe.
     "subject_wrong_side_barrier": ("pool_edge", "outdoor_deck"),
+    # pool_surface_reduced (Martin 15/05/2026, Gates Hotel SB) : Nano Banana a rétréci
+    # la piscine pour faire de la place au sujet. Swap vers outdoor_deck (sujet sur le
+    # sol/dalle, AWAY from water) pour éliminer le conflit géographique avec la piscine.
+    "pool_surface_reduced": ("outdoor_deck", "pool_edge"),
+}
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Préfixe de RETRY "preserve pool" (Martin 15/05/2026 — bug Gates Hotel South Beach)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Quand un retry est déclenché après invented_furniture / architecture_changed /
+# pool_surface_reduced (toutes les violations qui indiquent que Nano Banana s'est mis
+# à recomposer la scène pour caser le sujet), on prepend ce bloc EN TÊTE du prompt
+# retry. Objectif : faire passer le message "préserve la piscine ET le décor" AVANT
+# même que Nano Banana lise le scenario.
+#
+# Différent du `_reinforced_prompt` qui empile des [CRITICAL — RETRY AFTER VIOLATION]
+# header par violation : ce préfixe est COURT, prioritaire, et axé spécifiquement sur
+# la préservation du décor structurel — pas sur la correction d'une violation.
+_POOL_PRESERVE_PREFIX = (
+    "🚨 RETRY CONTEXT — DECOR PRESERVATION OVERRIDE (read this FIRST) :\n"
+    "Your previous attempt FAILED because you modified the scene's STRUCTURE while placing the subject. "
+    "On THIS retry, the following rules SUPERSEDE every other instruction below :\n"
+    "  1. THE POOL WATER SURFACE MUST STAY 100% IDENTICAL — same shape, same dimensions, "
+    "every edge in the EXACT same place. Zero pixel of former water may become deck/floor.\n"
+    "  2. NO NEW FURNITURE may appear — only existing visible loungers/daybeds/chairs may be used.\n"
+    "  3. NO EXISTING DECOR may disappear — every plant, planter, vase, lamp, art piece stays.\n"
+    "  4. THE FRAME MUST STAY IDENTICAL — no crop, no zoom, no recentering on the subject.\n"
+    "If the requested subject placement would CONFLICT with these rules (e.g., the anchor would force "
+    "the pool to shrink), then MOVE the subject to a different anchor point AWAY from the water/decor — "
+    "DO NOT modify the scene to make space. If no compatible anchor exists, return the input UNCHANGED "
+    "rather than damage the scene.\n\n"
+    "[ORIGINAL TASK INSTRUCTION FOLLOWS — apply it UNDER the constraints above]\n\n"
+)
+
+# Violations qui déclenchent l'ajout du préfixe pool/decor preserve en tête de prompt retry.
+# Logique : ces violations indiquent que Nano Banana a CONFONDU "placer un sujet" avec
+# "recomposer la scène pour optimiser le sujet". Le préfixe corrige cette confusion en amont.
+_VIOLATIONS_TRIGGERING_POOL_PREFIX = {
+    "invented_furniture",
+    "architecture_changed",
+    "pool_surface_reduced",
+    "decor_elements_lost",
+    "scene_regenerated",
 }
 
 # Liste des zone_types qu'on peut swap (= scenarios "complexes" qui risquent l'invention)
@@ -2595,6 +2752,15 @@ def _reinforced_prompt(original_prompt: str, violations: list[str]) -> tuple[str
         prompt = header + prompt
         applied.append("reinforcement_header")
 
+    # ━ Stratégie 3 : préfixe "preserve pool/decor" en TÊTE absolue ━
+    # Si une des violations indique une recomposition de la scène (pool rétrécie,
+    # mobilier inventé, décor perdu, scène régénérée), on prepend un bloc COURT qui
+    # supersede toutes les autres instructions. Ce bloc passe en PREMIER, AVANT le
+    # header de renforcement et AVANT le scenario swappé.
+    if any(v in _VIOLATIONS_TRIGGERING_POOL_PREFIX for v in violations):
+        prompt = _POOL_PRESERVE_PREFIX + prompt
+        applied.append("pool_preserve_prefix")
+
     return prompt, applied
 
 
@@ -2622,6 +2788,15 @@ ACTIONABLE_VIOLATIONS = {
                                      # disparus après ai_lighting. Pas whitelisté pour lighting
                                      # car la disparition d'éléments décoratifs n'est JAMAIS
                                      # justifiée par un changement de luminosité.
+    "pool_surface_reduced",         # Martin 15/05/2026 : Gates Hotel SB — Nano Banana a
+                                     # rétréci la piscine sur retry après invented_furniture.
+                                     # NON whitelisté pour ai_lighting : un changement de lumière
+                                     # ne justifie JAMAIS de modifier la surface d'eau.
+    "subject_count_wrong",          # Martin 15/05/2026 : validateur critical fields option B —
+                                     # détecte mismatch target_n vs actual humans added.
+    "pool_float_oversized",         # Martin 15/05/2026 : bouée trop grosse OU mauvaise perspective
+                                     # (3D frontale sur photo top-down). Détecté par validator
+                                     # critical fields. Retry avec contraintes scale renforcées.
 }
 
 
@@ -2718,6 +2893,63 @@ def enhance_one(input_path: Path, strategy: dict, output_dir: Path) -> dict:
             except Exception as e:
                 ai_validation = {"ok": True, "violations": [], "summary": f"validation skip: {e}"}
 
+            # ━━━ Validateur structuré "critical fields" en parallèle (Martin 15/05/2026, Option B) ━━━
+            # Focalisé sur 6 champs critiques (pool shape/surface, water boundary, count, barrier,
+            # invented support). Fusionne ses verdicts avec le validateur narratif.
+            import re as _re_local
+            critical_validation = None
+            has_add_char_step = any(s["action"] == "ai_add_character" for s in steps)
+            if has_add_char_step:
+                # Extraction de la target N depuis le prompt du dernier step IA (regex "EXACTLY N")
+                expected_n = None
+                if last_ai_step_index is not None:
+                    prompt_text = steps[last_ai_step_index].get("prompt", "") or ""
+                    m = _re_local.search(r"EXACTLY\s+(\d+)\s+HUMAN", prompt_text)
+                    if m:
+                        try:
+                            expected_n = int(m.group(1))
+                        except (ValueError, TypeError):
+                            expected_n = None
+                try:
+                    critical_validation = ai_validator.validate_critical_fields(
+                        input_path, output_path,
+                        expected_subject_count=expected_n,
+                    )
+                    total_cost_usd += critical_validation.get("cost_usd", 0)
+                    total_duration_ms += critical_validation.get("duration_ms", 0)
+                    # Fusion : on ajoute les violations dérivées au verdict narratif (déduplication)
+                    derived = critical_validation.get("violations_derived", []) or []
+                    existing = ai_validation.get("violations", []) or []
+                    merged = list(existing)
+                    for v in derived:
+                        if v not in merged:
+                            merged.append(v)
+                    if merged != existing:
+                        ai_validation["violations"] = merged
+                        ai_validation["ok"] = False
+                        # Note les violations qui viennent du structured validator (pour debug UI)
+                        ai_validation["violations_from_critical_fields"] = derived
+                    # Stocke les field_checks complets pour affichage UI (audit-trail)
+                    ai_validation["critical_fields"] = critical_validation.get("field_checks") or {}
+                    ai_validation["critical_fields_cost_usd"] = critical_validation.get("cost_usd", 0)
+
+                    # ━━ Évaluation LOI structurées (Martin 15/05/2026, P1) ━━
+                    # Calcule PASS/FAIL pour chaque LOI métier (P1 à P13) à partir des
+                    # field_checks structurés + violations narratives. Pas de coût additionnel
+                    # (calcul Python pur, pas d'appel LLM).
+                    try:
+                        import laws_engine
+                        lois_result = laws_engine.evaluate_lois(
+                            field_checks=ai_validation["critical_fields"],
+                            violations=ai_validation.get("violations", []),
+                        )
+                        ai_validation["lois"] = lois_result
+                    except Exception as e:
+                        ai_validation["lois_error"] = str(e)[:200]
+                except Exception as e:
+                    # En cas d'échec : on ne bloque pas le pipeline, on note juste l'erreur
+                    ai_validation["critical_fields_error"] = str(e)[:200]
+
             # ━━━ Auto-correction : retry avec prompt durci sur les violations actionables ━━━
             actionable_violations = [
                 v for v in (ai_validation.get("violations") or [])
@@ -2745,13 +2977,55 @@ def enhance_one(input_path: Path, strategy: dict, output_dir: Path) -> dict:
                     total_cost_usd += ai_validation2.get("cost_usd", 0)
                     total_duration_ms += ai_validation2.get("duration_ms", 0)
 
+                    # Re-validation critical fields aussi (cohérence avec le 1er pass)
+                    if has_add_char_step:
+                        try:
+                            critical_validation2 = ai_validator.validate_critical_fields(
+                                input_path, output_path,
+                                expected_subject_count=expected_n,
+                            )
+                            total_cost_usd += critical_validation2.get("cost_usd", 0)
+                            total_duration_ms += critical_validation2.get("duration_ms", 0)
+                            derived2 = critical_validation2.get("violations_derived", []) or []
+                            existing2 = ai_validation2.get("violations", []) or []
+                            merged2 = list(existing2)
+                            for v in derived2:
+                                if v not in merged2:
+                                    merged2.append(v)
+                            if merged2 != existing2:
+                                ai_validation2["violations"] = merged2
+                                ai_validation2["ok"] = False
+                                ai_validation2["violations_from_critical_fields"] = derived2
+                            ai_validation2["critical_fields"] = critical_validation2.get("field_checks") or {}
+                            ai_validation2["critical_fields_cost_usd"] = critical_validation2.get("cost_usd", 0)
+                            # ━━ Évaluation LOI post-retry ━━
+                            try:
+                                import laws_engine
+                                lois_result2 = laws_engine.evaluate_lois(
+                                    field_checks=ai_validation2["critical_fields"],
+                                    violations=ai_validation2.get("violations", []),
+                                )
+                                ai_validation2["lois"] = lois_result2
+                            except Exception as e:
+                                ai_validation2["lois_error"] = str(e)[:200]
+                        except Exception as e:
+                            ai_validation2["critical_fields_error"] = str(e)[:200]
+
                     still_bad = [
                         v for v in (ai_validation2.get("violations") or [])
                         if v in ACTIONABLE_VIOLATIONS
                     ]
                     # Note l'historique : on garde ai_validation2 mais on signale qu'il y a eu retry
+                    # On préserve le SNAPSHOT COMPLET de la 1ère tentative (violations + fields + lois)
+                    # pour permettre au UI d'afficher un "historique des tentatives" debug-friendly
+                    # quand le fallback tombe (Martin 15/05/2026, P0 UX).
                     ai_validation2["retry_attempted"] = True
                     ai_validation2["violations_before_retry"] = ai_validation.get("violations", [])
+                    ai_validation2["critical_fields_before_retry"] = ai_validation.get("critical_fields", {})
+                    ai_validation2["lois_before_retry"] = ai_validation.get("lois", {})
+                    ai_validation2["summary_before_retry"] = ai_validation.get("summary", "")
+                    # Aussi : les stratégies appliquées au retry (swap scenario, préfixe pool, etc.)
+                    ai_validation2["retry_strategies"] = retry_strategies if retry_strategies else []
                     ai_validation = ai_validation2
 
                     if still_bad:
