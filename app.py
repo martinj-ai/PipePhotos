@@ -1594,49 +1594,26 @@ def api_run():
             slowmo_dir.mkdir(parents=True, exist_ok=True)
             target_filename = slowmo_target["filename"]
 
-            # ━━ Résolution de la photo source pour le slowmo (Martin 14/05/2026) ━━
-            # 3 cas possibles selon target.use_intermediate :
-            #   (A) use_intermediate=False : utilise l'enhanced final standard
-            #   (B) use_intermediate=True + intermédiaire dispo : intermédiaire + LUT brand
-            #   (C) use_intermediate=True + pas d'intermédiaire : fallback source originale
-            source_path = None
-            source_reason = ""
-
-            if slowmo_target.get("use_intermediate"):
-                # Cherche l'intermédiaire sauvegardé pendant le chaînage ai_lighting → ai_add_character
-                # (Stocké par enhance.py dans _intermediates/_step{i}_{filename})
-                interm_dir = enhanced_dir / "_intermediates"
-                interm_candidates = []
-                if interm_dir.exists():
-                    interm_candidates = sorted(interm_dir.glob(f"_step*_{target_filename}"))
-                if interm_candidates:
-                    # Prend le DERNIER intermédiaire (= juste avant le step ai_add_character)
-                    last_intermediate = interm_candidates[-1]
-                    # Applique la LUT brand sur l'intermédiaire pour cohérence visuelle
-                    try:
-                        slowmo_source_dir = enhanced_dir / "_slowmo_source"
-                        slowmo_source_dir.mkdir(parents=True, exist_ok=True)
-                        lut_applied_path = slowmo_source_dir / target_filename
-                        from brand_lut import apply_brand_lut
-                        # Profil LUT par défaut : medium (cohérent avec le reste du pack)
-                        apply_brand_lut(last_intermediate, lut_applied_path, profile="medium")
-                        source_path = lut_applied_path
-                        source_reason = f"intermédiaire+LUT ({last_intermediate.name} → +LUT brand)"
-                    except Exception as e:
-                        print(f"[slowmo] LUT sur intermédiaire échouée ({e}) → utilise intermédiaire brut")
-                        source_path = last_intermediate
-                        source_reason = f"intermédiaire brut sans LUT ({last_intermediate.name})"
+            # ━━ Résolution de la photo source pour le slowmo (Martin 15/05/2026 v3) ━━
+            # Stratégie : utiliser TOUJOURS la photo finale (enhanced) — y compris si
+            # elle a un humain ajouté IA. La logique "use_intermediate" est désactivée
+            # car pick_slowmo_target() exige maintenant `ai_validation.ok == True`
+            # ET `fallback_to_original == False` pour les photos avec humain IA,
+            # garantissant que la photo finale est "propre" et exploitable par Kling.
+            #
+            # Avant : on prenait l'intermédiaire (sans humain) si humain IA présent.
+            # Maintenant : Kling reçoit la version FINALE (avec humain validé) +
+            # prompt renforcé qui interdit timelapse + autorise micro-movements humains.
+            enhanced_path = enhanced_dir / target_filename
+            if enhanced_path.exists():
+                source_path = enhanced_path
+                if slowmo_target.get("has_ai_human"):
+                    source_reason = "enhanced final (avec humain IA validé)"
                 else:
-                    # Fallback : utilise la source originale
-                    orig_path = Path(by_filename[target_filename]["input"]["path_absolute"])
-                    source_path = orig_path
-                    source_reason = "source originale (pas d'intermédiaire dispo)"
-                print(f"[slowmo] use_intermediate=True pour {target_filename} → source={source_reason}")
+                    source_reason = "enhanced final"
             else:
-                # Comportement standard : enhanced final si dispo, sinon source
-                enhanced_path = enhanced_dir / target_filename
-                source_path = enhanced_path if enhanced_path.exists() else Path(by_filename[target_filename]["input"]["path_absolute"])
-                source_reason = "enhanced final" if enhanced_path.exists() else "source originale"
+                source_path = Path(by_filename[target_filename]["input"]["path_absolute"])
+                source_reason = "source originale (enhanced absent)"
 
             output_mp4 = slowmo_dir / (Path(target_filename).stem + ".mp4")
             variants_msg = f" + {len(slowmo_variants)} variantes" if slowmo_variants else ""

@@ -1,4 +1,4 @@
-"""Audit DB (SQLite) — persiste les résultats de validation + tags humains.
+"""Audit DB — persiste les résultats de validation + tags humains.
 
 Permet de :
 - Mesurer la précision du validateur (Gemini) vs vérité terrain (tag humain)
@@ -6,96 +6,109 @@ Permet de :
 - Identifier les modes de failure récurrents par catégorie/hôtel
 - Faire de l'A/B test rigoureux des changements de prompt
 
-Schéma :
-- `photo_results` : 1 row par photo retouchée (auto-écrit après chaque pipeline)
-- `photo_tags` : tag humain ✅⚠️❌ optionnel par photo
+Backend portable via SQLAlchemy :
+- **Local** : SQLite (`data/audit.db`, single-file, pas de serveur)
+- **Prod Railway** : Postgres (DSN injecté via env var `DATABASE_URL`)
 
-Storage : `data/audit.db` (SQLite, single-file, pas de serveur).
+La même API publique fonctionne sur les 2 backends.
 """
 
 from __future__ import annotations
 
 import json
-import sqlite3
+import os
 import time
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import (
+    Column, Integer, Float, String, Text, Boolean, Index,
+    PrimaryKeyConstraint, create_engine, select, func, and_, or_, text,
+)
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
+
 ROOT = Path(__file__).parent
-DB_PATH = ROOT / "data" / "audit.db"
-DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+DATA_DIR = ROOT / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# DSN — Configurable via env var DATABASE_URL
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Railway injecte automatiquement `DATABASE_URL=postgres://...` quand on attache
+# l'addon Postgres au projet. En local, on tombe sur SQLite file.
+#
+# Railway utilise `postgres://` (legacy) que SQLAlchemy 2.x rejette → on
+# normalise vers `postgresql://`.
+_DB_URL_RAW = os.getenv("DATABASE_URL", "").strip()
+if _DB_URL_RAW.startswith("postgres://"):
+    _DB_URL_RAW = _DB_URL_RAW.replace("postgres://", "postgresql://", 1)
+
+DB_URL = _DB_URL_RAW or f"sqlite:///{DATA_DIR / 'audit.db'}"
+IS_POSTGRES = DB_URL.startswith("postgresql")
+IS_SQLITE = DB_URL.startswith("sqlite")
+
+# Engine SQLAlchemy : pool_pre_ping pour Postgres (évite stale connections)
+# pour SQLite : connect_args check_same_thread=False (Flask multi-threading)
+_engine_kwargs: dict = {"future": True}
+if IS_SQLITE:
+    _engine_kwargs["connect_args"] = {"check_same_thread": False}
+else:
+    _engine_kwargs["pool_pre_ping"] = True
+    _engine_kwargs["pool_recycle"] = 300
+
+engine = create_engine(DB_URL, **_engine_kwargs)
+SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+Base = declarative_base()
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Schema
+# Modèles
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS photo_results (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    slug TEXT NOT NULL,
-    filename TEXT NOT NULL,
-    action TEXT,                    -- ai_add_character / ai_lighting / etc.
-    category TEXT,                  -- piscine / chambre / rooftop / ...
-    vibe TEXT,                      -- Family-Friendly / Luxe / ...
-    ai_validation_json TEXT,        -- raw ai_validation dict (JSON)
-    critical_fields_json TEXT,      -- raw field_checks dict (JSON, 14 champs)
-    lois_json TEXT,                 -- raw lois verdicts dict (JSON, 13 lois)
-    violations_json TEXT,           -- JSON list of violations strings
-    retry_attempted INTEGER DEFAULT 0,  -- bool
-    fallback_to_original INTEGER DEFAULT 0,  -- bool
-    cost_usd REAL,
-    duration_ms INTEGER,
-    created_at REAL NOT NULL        -- unix timestamp
-);
+class PhotoResult(Base):
+    """1 row par photo retouchée par le pipeline (append-only)."""
+    __tablename__ = "photo_results"
 
-CREATE INDEX IF NOT EXISTS idx_photo_results_slug ON photo_results(slug);
-CREATE INDEX IF NOT EXISTS idx_photo_results_created ON photo_results(created_at);
-CREATE INDEX IF NOT EXISTS idx_photo_results_category ON photo_results(category);
-
-CREATE TABLE IF NOT EXISTS photo_tags (
-    slug TEXT NOT NULL,
-    filename TEXT NOT NULL,
-    tag TEXT NOT NULL,              -- 'good' | 'borderline' | 'bad'
-    note TEXT,                      -- optional free text
-    tagged_at REAL NOT NULL,
-    PRIMARY KEY (slug, filename)    -- 1 tag par photo, dernier override
-);
-
-CREATE INDEX IF NOT EXISTS idx_photo_tags_tag ON photo_tags(tag);
-CREATE INDEX IF NOT EXISTS idx_photo_tags_tagged ON photo_tags(tagged_at);
-"""
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    slug = Column(String(255), nullable=False, index=True)
+    filename = Column(String(255), nullable=False)
+    action = Column(String(64))                # ai_add_character / ai_lighting / etc.
+    category = Column(String(64), index=True)  # piscine / chambre / rooftop / ...
+    vibe = Column(String(64))                  # Family-Friendly / Luxe / ...
+    ai_validation_json = Column(Text)          # raw ai_validation dict (JSON string)
+    critical_fields_json = Column(Text)        # raw field_checks dict (14 champs)
+    lois_json = Column(Text)                   # raw lois verdicts dict (13 lois)
+    violations_json = Column(Text)             # JSON list of violations strings
+    retry_attempted = Column(Boolean, default=False)
+    fallback_to_original = Column(Boolean, default=False)
+    cost_usd = Column(Float)
+    duration_ms = Column(Integer)
+    created_at = Column(Float, nullable=False, index=True)  # unix timestamp
 
 
-@contextmanager
-def get_conn():
-    """Context manager qui ouvre une conn SQLite avec row factory."""
-    conn = sqlite3.connect(str(DB_PATH), timeout=10.0)
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
+class PhotoTag(Base):
+    """1 row par tag humain ✅⚠️❌ (UPSERT par (slug, filename))."""
+    __tablename__ = "photo_tags"
+
+    slug = Column(String(255), nullable=False)
+    filename = Column(String(255), nullable=False)
+    tag = Column(String(16), nullable=False, index=True)  # 'good' | 'borderline' | 'bad'
+    note = Column(Text)
+    tagged_at = Column(Float, nullable=False, index=True)
+
+    __table_args__ = (
+        PrimaryKeyConstraint("slug", "filename"),
+    )
 
 
 def init_db():
-    """Initialise les tables si elles n'existent pas. Idempotent.
+    """Crée les tables si elles n'existent pas. Idempotent.
 
-    Inclut les migrations légères (ALTER TABLE ADD COLUMN) pour les colonnes
-    ajoutées après le premier déploiement.
+    SQLAlchemy create_all gère la migration "add table" automatiquement.
+    Pour des changements de schéma plus complexes (renaming, type changes),
+    utiliser Alembic plus tard quand le besoin se présentera.
     """
-    with get_conn() as conn:
-        conn.executescript(SCHEMA)
-        # Migrations : add colonnes si DB ancienne (idempotent via try/except)
-        for col_sql in [
-            "ALTER TABLE photo_results ADD COLUMN lois_json TEXT",  # P1, Martin 15/05/2026
-        ]:
-            try:
-                conn.execute(col_sql)
-            except sqlite3.OperationalError:
-                pass  # colonne existe déjà
+    Base.metadata.create_all(engine)
 
 
 # Auto-init au import du module
@@ -109,8 +122,7 @@ init_db()
 def save_photo_result(slug: str, filename: str, entry: dict) -> None:
     """Persiste le résultat d'une photo retouchée après pipeline.
 
-    Appelé après que enhance_one() ait retourné, depuis app.py.
-    `entry` est l'objet sérialisé envoyé au front (avec action, ai_validation, etc.).
+    Ne JAMAIS bloquer le pipeline pour un échec de log → try/except interne.
     """
     ai_val = entry.get("ai_validation") or {}
     field_checks = ai_val.get("critical_fields") or {}
@@ -120,32 +132,26 @@ def save_photo_result(slug: str, filename: str, entry: dict) -> None:
     factual = (analysis.get("factual") if isinstance(analysis, dict) else {}) or {}
 
     try:
-        with get_conn() as conn:
-            conn.execute(
-                """INSERT INTO photo_results
-                (slug, filename, action, category, vibe, ai_validation_json,
-                 critical_fields_json, lois_json, violations_json, retry_attempted,
-                 fallback_to_original, cost_usd, duration_ms, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    slug,
-                    filename,
-                    entry.get("action") or "unknown",
-                    (factual.get("category") if isinstance(factual, dict) else None) or entry.get("category"),
-                    entry.get("vibe"),
-                    json.dumps(ai_val, ensure_ascii=False, default=str),
-                    json.dumps(field_checks, ensure_ascii=False, default=str),
-                    json.dumps(lois, ensure_ascii=False, default=str),
-                    json.dumps(violations, ensure_ascii=False),
-                    int(bool(ai_val.get("retry_attempted"))),
-                    int(bool(entry.get("fallback_to_original"))),
-                    float(entry.get("cost_usd") or 0),
-                    int(entry.get("duration_ms") or 0),
-                    time.time(),
-                ),
+        with SessionLocal() as session:
+            row = PhotoResult(
+                slug=slug,
+                filename=filename,
+                action=entry.get("action") or "unknown",
+                category=(factual.get("category") if isinstance(factual, dict) else None) or entry.get("category"),
+                vibe=entry.get("vibe"),
+                ai_validation_json=json.dumps(ai_val, ensure_ascii=False, default=str),
+                critical_fields_json=json.dumps(field_checks, ensure_ascii=False, default=str),
+                lois_json=json.dumps(lois, ensure_ascii=False, default=str),
+                violations_json=json.dumps(violations, ensure_ascii=False),
+                retry_attempted=bool(ai_val.get("retry_attempted")),
+                fallback_to_original=bool(entry.get("fallback_to_original")),
+                cost_usd=float(entry.get("cost_usd") or 0),
+                duration_ms=int(entry.get("duration_ms") or 0),
+                created_at=time.time(),
             )
+            session.add(row)
+            session.commit()
     except Exception as e:
-        # Ne JAMAIS bloquer le pipeline pour un échec de log
         print(f"[audit_db] save_photo_result failed for {slug}/{filename}: {e}")
 
 
@@ -157,24 +163,24 @@ VALID_TAGS = {"good", "borderline", "bad"}
 
 
 def set_photo_tag(slug: str, filename: str, tag: str, note: str | None = None) -> dict:
-    """Crée/met à jour le tag humain pour une photo. UPSERT.
-
-    Returns: {ok: bool, slug, filename, tag, tagged_at}
-    """
+    """Crée/met à jour le tag humain pour une photo. UPSERT portable SQLite + Postgres."""
     if tag not in VALID_TAGS:
         return {"ok": False, "error": f"tag invalide '{tag}', attendu {VALID_TAGS}"}
     now = time.time()
     try:
-        with get_conn() as conn:
-            conn.execute(
-                """INSERT INTO photo_tags (slug, filename, tag, note, tagged_at)
-                   VALUES (?, ?, ?, ?, ?)
-                   ON CONFLICT(slug, filename) DO UPDATE SET
-                     tag = excluded.tag,
-                     note = excluded.note,
-                     tagged_at = excluded.tagged_at""",
-                (slug, filename, tag, note, now),
-            )
+        with SessionLocal() as session:
+            # Pattern UPSERT portable : tente UPDATE, sinon INSERT.
+            # (SQLAlchemy 2.x a `.merge()` mais on évite pour rester compatible)
+            existing = session.get(PhotoTag, (slug, filename))
+            if existing:
+                existing.tag = tag
+                existing.note = note
+                existing.tagged_at = now
+            else:
+                session.add(PhotoTag(
+                    slug=slug, filename=filename, tag=tag, note=note, tagged_at=now,
+                ))
+            session.commit()
         return {"ok": True, "slug": slug, "filename": filename, "tag": tag, "tagged_at": now}
     except Exception as e:
         return {"ok": False, "error": str(e)[:200]}
@@ -182,25 +188,21 @@ def set_photo_tag(slug: str, filename: str, tag: str, note: str | None = None) -
 
 def get_photo_tag(slug: str, filename: str) -> dict | None:
     """Récupère le tag actuel d'une photo, ou None."""
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT tag, note, tagged_at FROM photo_tags WHERE slug=? AND filename=?",
-            (slug, filename),
-        ).fetchone()
-    if not row:
-        return None
-    return {"tag": row["tag"], "note": row["note"], "tagged_at": row["tagged_at"]}
+    with SessionLocal() as session:
+        row = session.get(PhotoTag, (slug, filename))
+        if not row:
+            return None
+        return {"tag": row.tag, "note": row.note, "tagged_at": row.tagged_at}
 
 
 def get_all_tags_for_slug(slug: str) -> dict[str, dict]:
-    """Récupère tous les tags d'un slug. Returns {filename: {tag, note, tagged_at}}."""
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT filename, tag, note, tagged_at FROM photo_tags WHERE slug=?",
-            (slug,),
-        ).fetchall()
+    """Tous les tags d'un slug, formatés en {filename: {tag, note, tagged_at}}."""
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(PhotoTag).where(PhotoTag.slug == slug)
+        ).scalars().all()
     return {
-        r["filename"]: {"tag": r["tag"], "note": r["note"], "tagged_at": r["tagged_at"]}
+        r.filename: {"tag": r.tag, "note": r.note, "tagged_at": r.tagged_at}
         for r in rows
     }
 
@@ -210,47 +212,56 @@ def get_all_tags_for_slug(slug: str) -> dict[str, dict]:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def get_dashboard_stats(slug: str | None = None, days: int = 30) -> dict:
-    """Retourne toutes les stats agrégées pour le dashboard.
+    """Stats agrégées pour le dashboard. Filtres optionnels : slug, days.
 
-    Args:
-        slug : filtre sur 1 hôtel précis, ou None pour tous
-        days : fenêtre temporelle (par défaut 30 jours)
-
-    Returns:
-        {
-          "kpis": { total, good, borderline, bad, untagged, success_rate },
-          "by_category": [ {category, total, good_pct, bad_pct}, ... ],
-          "by_slug": [ {slug, total, good_pct, bad_pct}, ... ],
-          "top_violations": [ {violation, count}, ... ],
-          "field_fail_rates": [ {field, fail_count, total, fail_pct}, ... ],
-          "validator_precision": { tp, fp, tn, fn, precision, recall, ... },
-          "evolution": [ {day, good_pct, total}, ... ],
-        }
+    Stratégie : fetch toutes les rows + agrégation Python (pas de SQL natif spécifique).
+    → 100% portable SQLite ↔ Postgres sans réécriture.
     """
     cutoff = time.time() - (days * 86400)
-    slug_filter = ""
-    args: list[Any] = [cutoff]
-    if slug:
-        slug_filter = "AND pr.slug = ?"
-        args.append(slug)
 
-    with get_conn() as conn:
-        # ━━ KPIs globaux ━━
-        rows = conn.execute(
-            f"""SELECT pr.slug, pr.filename, pr.violations_json, pr.critical_fields_json,
-                       pr.lois_json, pr.category, pr.action, pr.retry_attempted,
-                       pr.fallback_to_original, pr.cost_usd, pr.created_at, pt.tag, pt.tagged_at
-                FROM photo_results pr
-                LEFT JOIN photo_tags pt ON pt.slug = pr.slug AND pt.filename = pr.filename
-                WHERE pr.created_at >= ? {slug_filter}
-                ORDER BY pr.created_at DESC""",
-            args,
-        ).fetchall()
+    with SessionLocal() as session:
+        # SELECT avec LEFT JOIN tags
+        stmt = (
+            select(
+                PhotoResult.slug, PhotoResult.filename,
+                PhotoResult.violations_json, PhotoResult.critical_fields_json,
+                PhotoResult.lois_json, PhotoResult.category,
+                PhotoResult.action, PhotoResult.retry_attempted,
+                PhotoResult.fallback_to_original, PhotoResult.cost_usd,
+                PhotoResult.created_at,
+                PhotoTag.tag, PhotoTag.tagged_at,
+            )
+            .outerjoin(
+                PhotoTag,
+                and_(
+                    PhotoTag.slug == PhotoResult.slug,
+                    PhotoTag.filename == PhotoResult.filename,
+                ),
+            )
+            .where(PhotoResult.created_at >= cutoff)
+            .order_by(PhotoResult.created_at.desc())
+        )
+        if slug:
+            stmt = stmt.where(PhotoResult.slug == slug)
+        rows = session.execute(stmt).all()
 
-    # Dédoublonnage : garde la dernière entry par (slug, filename)
+    # Conversion en dicts pour rester compat avec l'agrégation Python actuelle
+    rows_dict = [
+        {
+            "slug": r[0], "filename": r[1],
+            "violations_json": r[2], "critical_fields_json": r[3],
+            "lois_json": r[4], "category": r[5], "action": r[6],
+            "retry_attempted": r[7], "fallback_to_original": r[8],
+            "cost_usd": r[9], "created_at": r[10],
+            "tag": r[11], "tagged_at": r[12],
+        }
+        for r in rows
+    ]
+
+    # Dédup par (slug, filename) — garde la row la plus récente (déjà ORDER BY created_at DESC)
     seen: set[tuple[str, str]] = set()
     unique_rows = []
-    for r in rows:
+    for r in rows_dict:
         key = (r["slug"], r["filename"])
         if key in seen:
             continue
@@ -258,15 +269,10 @@ def get_dashboard_stats(slug: str | None = None, days: int = 30) -> dict:
         unique_rows.append(r)
 
     total = len(unique_rows)
-    # ━━ Double tracking fallback (Martin 15/05/2026) ━━
-    # Les fallback_to_original sont comptés AUTOMATIQUEMENT et exclus du calcul
-    # de "% succès". Logique : la photo finale = originale propre (donc OK pour
-    # publication), mais le PIPELINE IA a échoué — c'est ce qu'on veut mesurer
-    # séparément sans demander à Martin de tagger manuellement.
+    # Double tracking fallback : compté auto, exclu du calcul success_rate
     fallback_rows = [r for r in unique_rows if r["fallback_to_original"]]
     fallback_count = len(fallback_rows)
     fallback_cost_usd = round(sum((r["cost_usd"] or 0) for r in fallback_rows), 4)
-    # Les "taggables" = total moins les fallback (que Martin n'a pas à tagger)
     taggable_rows = [r for r in unique_rows if not r["fallback_to_original"]]
 
     tagged = [r for r in taggable_rows if r["tag"]]
@@ -274,25 +280,24 @@ def get_dashboard_stats(slug: str | None = None, days: int = 30) -> dict:
     border_count = sum(1 for r in tagged if r["tag"] == "borderline")
     bad_count = sum(1 for r in tagged if r["tag"] == "bad")
     untagged = len(taggable_rows) - len(tagged)
-    # Success rate basé sur les taguées non-borderline ET hors fallback
     judged_non_border = [r for r in tagged if r["tag"] != "borderline"]
     good_for_rate = sum(1 for r in judged_non_border if r["tag"] == "good")
     success_rate = (good_for_rate / len(judged_non_border) * 100) if judged_non_border else 0.0
 
     kpis = {
         "total": total,
-        "taggable": len(taggable_rows),       # = total - fallback
+        "taggable": len(taggable_rows),
         "tagged": len(tagged),
-        "untagged": untagged,                  # photos taggables non-taguées (à tagger)
+        "untagged": untagged,
         "good": good_count,
         "borderline": border_count,
         "bad": bad_count,
-        "fallback_auto": fallback_count,       # ✨ comptabilisé AUTOMATIQUEMENT
+        "fallback_auto": fallback_count,
         "fallback_cost_usd": fallback_cost_usd,
         "success_rate": round(success_rate, 1),
     }
 
-    # ━━ By category ━━
+    # By category
     cat_stats: dict[str, dict] = {}
     for r in unique_rows:
         cat = r["category"] or "unknown"
@@ -305,15 +310,14 @@ def get_dashboard_stats(slug: str | None = None, days: int = 30) -> dict:
             cat_stats[cat]["untagged"] += 1
     by_category = [
         {
-            "category": cat,
-            **stats,
+            "category": cat, **stats,
             "good_pct": round(stats["good"] / max(1, stats["total"] - stats["untagged"]) * 100, 1) if (stats["total"] - stats["untagged"]) else 0,
             "bad_pct": round(stats["bad"] / max(1, stats["total"] - stats["untagged"]) * 100, 1) if (stats["total"] - stats["untagged"]) else 0,
         }
         for cat, stats in sorted(cat_stats.items(), key=lambda x: -x[1]["total"])
     ]
 
-    # ━━ By slug ━━
+    # By slug
     slug_stats: dict[str, dict] = {}
     for r in unique_rows:
         s = r["slug"]
@@ -326,15 +330,14 @@ def get_dashboard_stats(slug: str | None = None, days: int = 30) -> dict:
             slug_stats[s]["untagged"] += 1
     by_slug = [
         {
-            "slug": s,
-            **stats,
+            "slug": s, **stats,
             "good_pct": round(stats["good"] / max(1, stats["total"] - stats["untagged"]) * 100, 1) if (stats["total"] - stats["untagged"]) else 0,
             "bad_pct": round(stats["bad"] / max(1, stats["total"] - stats["untagged"]) * 100, 1) if (stats["total"] - stats["untagged"]) else 0,
         }
         for s, stats in sorted(slug_stats.items(), key=lambda x: -x[1]["total"])
     ]
 
-    # ━━ Top violations ━━
+    # Top violations
     violation_counts: dict[str, int] = {}
     for r in unique_rows:
         try:
@@ -348,7 +351,7 @@ def get_dashboard_stats(slug: str | None = None, days: int = 30) -> dict:
         for v, c in sorted(violation_counts.items(), key=lambda x: -x[1])
     ][:15]
 
-    # ━━ Field fail rates (critical fields validator) ━━
+    # Field fail rates
     field_stats: dict[str, dict] = {}
     for r in unique_rows:
         try:
@@ -370,29 +373,21 @@ def get_dashboard_stats(slug: str | None = None, days: int = 30) -> dict:
                 field_stats[fname]["na"] += 1
     field_fail_rates = [
         {
-            "field": fname,
-            "total": s["total"],
-            "fail": s["fail"],
-            "pass": s["pass"],
-            "na": s["na"],
+            "field": fname, "total": s["total"], "fail": s["fail"],
+            "pass": s["pass"], "na": s["na"],
             "fail_pct": round(s["fail"] / max(1, s["total"] - s["na"]) * 100, 1) if (s["total"] - s["na"]) else 0,
         }
         for fname, s in sorted(field_stats.items(), key=lambda x: -x[1]["fail"])
     ]
 
-    # ━━ Validator precision/recall vs tags humains ━━
-    # Validator says OK ↔ ai_validation.violations is empty
-    # Validator says FAIL ↔ ai_validation.violations not empty
-    # Human truth : tag = 'good' → OK; tag = 'bad' → not OK; 'borderline' → exclu
-    # ⚠️ Fallback exclus de la matrice (la photo finale = originale, donc validator
-    # passe naturellement → si Martin tag 'bad', ce serait un faux signal car le
-    # validator a CORRECTEMENT déclenché le fallback. Comptés séparément.)
+    # Validator precision/recall vs tags humains
+    # Fallback exclus de la matrice (la photo finale = originale, faux signal sinon)
     tp = fp = tn = fn = 0
     for r in tagged:
         if r["tag"] == "borderline":
             continue
         if r["fallback_to_original"]:
-            continue  # voir comment au-dessus
+            continue
         try:
             vs = json.loads(r["violations_json"] or "[]")
         except Exception:
@@ -400,13 +395,13 @@ def get_dashboard_stats(slug: str | None = None, days: int = 30) -> dict:
         validator_ok = len(vs) == 0
         human_ok = r["tag"] == "good"
         if validator_ok and human_ok:
-            tn += 1   # vrai négatif (= validator dit OK, humain confirme OK)
+            tn += 1
         elif validator_ok and not human_ok:
-            fn += 1   # faux négatif (= validator a manqué une erreur)
+            fn += 1
         elif not validator_ok and human_ok:
-            fp += 1   # faux positif (= validator a flag à tort)
+            fp += 1
         elif not validator_ok and not human_ok:
-            tp += 1   # vrai positif (= validator a bien flag)
+            tp += 1
     total_judged = tp + fp + tn + fn
     precision = (tp / max(1, tp + fp)) if (tp + fp) else 0
     recall = (tp / max(1, tp + fn)) if (tp + fn) else 0
@@ -419,8 +414,7 @@ def get_dashboard_stats(slug: str | None = None, days: int = 30) -> dict:
         "f1": round(f1 * 100, 1),
     }
 
-    # ━━ LOI verdicts agrégés (Martin 15/05/2026, P1) ━━
-    # Pour chaque LOI, on compte les PASS / FAIL / N/A sur l'ensemble du window.
+    # LOI verdicts agrégés
     loi_stats: dict[str, dict] = {}
     for r in unique_rows:
         try:
@@ -446,27 +440,21 @@ def get_dashboard_stats(slug: str | None = None, days: int = 30) -> dict:
                 loi_stats[loi_id]["fail"] += 1
             elif status == "N/A":
                 loi_stats[loi_id]["na"] += 1
-    # Tri : criticité (critical → major → minor) puis taux FAIL desc
     criticality_order = {"critical": 0, "major": 1, "minor": 2}
     loi_verdicts_agg = []
     for loi_id, s in loi_stats.items():
         evaluable = s["total"] - s["na"]
         fail_pct = round(s["fail"] / max(1, evaluable) * 100, 1) if evaluable else 0
         loi_verdicts_agg.append({
-            "loi_id": loi_id,
-            "label": s["label"],
-            "criticality": s["criticality"],
-            "description": s["description"],
-            "total": s["total"],
-            "pass": s["pass"],
-            "fail": s["fail"],
-            "na": s["na"],
+            "loi_id": loi_id, "label": s["label"], "criticality": s["criticality"],
+            "description": s["description"], "total": s["total"],
+            "pass": s["pass"], "fail": s["fail"], "na": s["na"],
             "fail_pct": fail_pct,
             "pass_pct": round(s["pass"] / max(1, evaluable) * 100, 1) if evaluable else 0,
         })
     loi_verdicts_agg.sort(key=lambda x: (criticality_order.get(x["criticality"], 99), -x["fail_pct"]))
 
-    # ━━ Évolution dans le temps (par jour) ━━
+    # Évolution dans le temps (par jour)
     from collections import defaultdict
     daily: dict[str, dict] = defaultdict(lambda: {"total": 0, "good": 0, "bad": 0, "border": 0, "untagged": 0})
     for r in unique_rows:
@@ -482,8 +470,7 @@ def get_dashboard_stats(slug: str | None = None, days: int = 30) -> dict:
             daily[day]["untagged"] += 1
     evolution = [
         {
-            "day": day,
-            **stats,
+            "day": day, **stats,
             "good_pct": round(stats["good"] / max(1, stats["total"] - stats["untagged"]) * 100, 1) if (stats["total"] - stats["untagged"]) else None,
         }
         for day, stats in sorted(daily.items())
@@ -499,4 +486,30 @@ def get_dashboard_stats(slug: str | None = None, days: int = 30) -> dict:
         "validator_precision": validator_precision,
         "evolution": evolution,
         "window_days": days,
+        "backend": "postgresql" if IS_POSTGRES else "sqlite",
     }
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Rétrocompat : `get_conn()` legacy context manager (sqlite3 raw)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Cleanup à faire un jour : les scripts/tests qui appellent encore audit_db.get_conn()
+# devraient passer par SessionLocal(). Pour l'instant on garde l'alias en mode
+# DEPRECATED warning pour éviter de casser des chemins existants.
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def get_conn():
+    """DEPRECATED — utiliser SessionLocal() à la place.
+
+    Fournit un context manager qui émule l'interface sqlite3 minimale
+    (execute / executescript) pour rétrocompat avec le code legacy.
+    """
+    conn = engine.raw_connection()
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()

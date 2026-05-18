@@ -10,3 +10,6 @@ playwright>=1.40.0
 playwright-stealth>=2.0.0
 patchright>=1.59.0  # Playwright undetected (bypass DataDome Expedia)
 weasyprint>=60.0    # PDF export (alternative à Playwright PDF)
+SQLAlchemy>=2.0     # ORM portable SQLite (local) ↔ Postgres (Railway prod)
+psycopg2-binary>=2.9  # Driver Postgres (utilisé en prod via DATABASE_URL)
+gunicorn>=21        # WSGI server pour Railway (Flask dev server pas adapté en prod)

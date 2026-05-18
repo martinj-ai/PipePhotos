@@ -1727,8 +1727,8 @@ flowchart TD
           </div>
 
           <!-- Étape 5 : Résolution de la photo source -->
-          <h4 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2 mt-6">Étape 5 — Résolution de la photo source (Martin 14/05/2026 v2)</h4>
-          <p class="text-sm text-gray-700 mb-2">Une fois la photo cible choisie, il faut décider quelle <strong>version pixel</strong> envoyer à Higgsfield. 3 cas possibles :</p>
+          <h4 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2 mt-6">Étape 5 — Résolution de la photo source (Martin 15/05/2026 v3)</h4>
+          <p class="text-sm text-gray-700 mb-2"><strong>Changement majeur</strong> : on autorise désormais Kling à animer la version <strong>FINALE avec humain IA</strong> (et plus l'intermédiaire sans humain). Pré-requis : la photo doit avoir passé la validation post-IA 100% clean.</p>
           <div class="overflow-x-auto mb-3">
             <table class="w-full text-sm border border-gray-200 rounded">
               <thead>
@@ -1739,13 +1739,13 @@ flowchart TD
                 </tr>
               </thead>
               <tbody class="divide-y text-[13px]">
-                <tr><td class="py-2 px-3 font-semibold"><code>use_intermediate = false</code></td><td class="py-2 px-3"><code>enhanced/{filename}.jpg</code> (photo finale du pack avec tout : retouches + LUT)</td><td class="py-2 px-3 text-xs">Pas d'humain IA → comportement standard, on slowmote la photo finale</td></tr>
-                <tr class="bg-emerald-50"><td class="py-2 px-3 font-semibold"><code>use_intermediate = true</code> + intermédiaire dispo</td><td class="py-2 px-3"><code>enhanced/_intermediates/_step*_{filename}.jpg</code> + LUT brand appliquée à la volée</td><td class="py-2 px-3 text-xs">Photo a un humain ajouté IA → on prend la version <strong>avant</strong> ai_add_character (= après lighting/clutter), on ajoute la LUT pour cohérence visuelle</td></tr>
-                <tr class="bg-amber-50"><td class="py-2 px-3 font-semibold"><code>use_intermediate = true</code> + pas d'intermédiaire dispo</td><td class="py-2 px-3"><code>uploads/{filename}.jpg</code> (photo originale brute, sans LUT)</td><td class="py-2 px-3 text-xs">Cas rare (humain IA mais pas de chaînage) → fallback sécuritaire sur l'originale</td></tr>
+                <tr><td class="py-2 px-3 font-semibold">Pas d'humain IA</td><td class="py-2 px-3"><code>enhanced/{filename}.jpg</code> (photo finale du pack)</td><td class="py-2 px-3 text-xs">Comportement standard, on slowmote la photo finale</td></tr>
+                <tr class="bg-emerald-50"><td class="py-2 px-3 font-semibold">Humain IA + validation 100% clean</td><td class="py-2 px-3"><code>enhanced/{filename}.jpg</code> (photo finale AVEC humain)</td><td class="py-2 px-3 text-xs">🆕 La motion respecte l'humain : micro-mouvements naturels (respiration, blink, cheveux légers) autorisés. Pas d'humain figé statue.</td></tr>
+                <tr class="bg-red-50"><td class="py-2 px-3 font-semibold">Humain IA + validation FAIL (ou fallback)</td><td class="py-2 px-3"><strong>SKIP</strong> cette candidate, passe à la suivante</td><td class="py-2 px-3 text-xs">Kling amplifierait les défauts détectés (anatomy, face, pool). Pas de slowmo sur photo non-clean.</td></tr>
               </tbody>
             </table>
           </div>
-          <p class="text-xs text-gray-600 italic">L'intermédiaire est sauvegardé par <code>enhance.py</code> dans <code>enhanced/_intermediates/_step{i}_{filename}.jpg</code> à chaque chaînage (ex: <code>ai_lighting → ai_add_character</code>). Désactivable via <code>KEEP_AI_INTERMEDIATES=0</code>.</p>
+          <p class="text-xs text-gray-600 italic"><strong>L'intermédiaire</strong> (<code>enhanced/_intermediates/_step{i}_{filename}.jpg</code>) reste sauvegardé pour debug visuel mais <strong>n'est plus utilisé</strong> comme source slowmo.</p>
 
           <!-- Output -->
           <h4 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2 mt-6">Résultat retourné</h4>
@@ -1753,52 +1753,69 @@ flowchart TD
   "filename": "booking_044_451219735.jpg",
   "motion_subject": "pool_float",      ← prompt Higgsfield correspondant
   "motion_strength": 85,                ← score Gemini
-  "slot": 1,                            ← position dans le pack final (top photo prioritaire)
-  "use_intermediate": true,             ← 🆕 si humain ajouté IA → utilise intermédiaire+LUT
-  "fallback_used": false                ← true si étape 4 (ambient) déclenchée
+  "slot": 1,                            ← position dans le pack final
+  "has_ai_human": true,                 ← 🆕 photo a un humain ajouté IA
+  "use_intermediate": false,            ← (toujours false désormais, conservé en rétrocompat)
+  "fallback_used": false                ← true si fallback motion_subject="ambient"
 }</pre>
 
           <!-- Visualisation arbre de décision -->
-          <h4 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2 mt-6">Arbre de décision complet</h4>
+          <h4 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2 mt-6">Arbre de décision complet (v3)</h4>
           <pre class="bg-gray-900 text-gray-100 rounded p-4 text-[11px] overflow-x-auto leading-relaxed">Pour chaque photo du pack final ordonné :
 │
 ├── category == "piscine" OU "piscine" ∈ categories_secondary ?
-│   └── NON → EXCLUE (règle pool-only, Martin 14/05/2026)
+│   └── NON → EXCLUE (règle pool-only)
 │
-├── 🆕 A-t-elle un humain natif au premier plan ?
-│   └── OUI → EXCLUE (Kling déforme — pas d'intermédiaire pour fix)
+├── A-t-elle un humain NATIF au premier plan ?
+│   └── OUI → EXCLUE (Kling déforme les humains de la photo source)
+│
+├── 🆕 A-t-elle un humain AJOUTÉ IA ?
+│   └── OUI → vérifie validation post-IA :
+│              ├── ai_validation.ok == True ET violations vides
+│              │   ET fallback_to_original == False
+│              │   → OK, photo candidate
+│              └── SINON → EXCLUE (slowmo amplifierait les défauts)
 │
 ├── slowmo_potential.has_motion_subject == true ?
 │   ├── OUI →
 │   │   ├── motion_subject ∈ {pool_float, water, foliage} ?
-│   │   │   ├── OUI → AJOUTE aux candidates
-│   │   │   │       use_intermediate = (humain ajouté IA ? oui/non)
-│   │   │   └── NON → IGNORÉE (fire/fountain/curtains/steam exclus)
+│   │   │   ├── OUI → AJOUTE aux candidates (has_ai_human = bool)
+│   │   │   └── NON → IGNORÉE (fire/fountain/curtains/steam exclus pool)
 │   └── NON → IGNORÉE
 │
 └── (fin de boucle)
 
 SI candidates non vide :
-    🆕 TRI : slot asc (top photo first), puis motion_strength desc en tie-break
-    → 1ère candidate = GAGNANTE (souvent slot 1 si piscine)
+    TRI : slot asc (top photo first), puis motion_strength desc en tie-break
+    → 1ère candidate = GAGNANTE
 
 SI candidates VIDE (fallback) :
     Parcourt à nouveau le pack
-    → 1ère photo PISCINE SANS humain natif
-    → assigne motion_subject = "ambient", fallback_used = true
-
-SI aucune photo piscine sans humain natif :
-    → None retourné, pas de slowmo généré
+    → 1ère photo PISCINE SANS humain natif AVEC validation clean
+    → motion_subject = "ambient", fallback_used = true
 
 ═══════════════════════════════════════════════════════════════
 ENSUITE — Résolution de la source pixel (app.py) :
 
-SI target.use_intermediate == True :
-    Cherche enhanced/_intermediates/_step*_{filename}.jpg
-    ├── EXISTE → applique LUT brand + utilise ce fichier
-    └── ABSENT → fallback sur uploads/{filename}.jpg (sans LUT)
-SINON :
-    Utilise enhanced/{filename}.jpg (photo finale standard)</pre>
+→ Source = enhanced/{filename}.jpg (photo finale)
+   (humain IA inclus si présent — la validation clean garantit
+    qu'elle est exploitable par Kling sans amplifier de défauts)</pre>
+
+          <!-- Bloc anti-timelapse + micro-mouvements humains -->
+          <h4 class="text-sm font-bold text-gray-800 uppercase tracking-wide mb-2 mt-6">🆕 Clauses prompts (Martin 15/05/2026 v3)</h4>
+          <p class="text-sm text-gray-700 mb-2">Pour autoriser les photos avec humains IA en source slowmo sans casser le rendu, 2 clauses sont injectées dans CHAQUE prompt <code>PROMPTS_BY_SUBJECT</code> :</p>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+            <div class="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+              <div class="text-sm font-bold text-blue-900 mb-1">🚫 Anti-timelapse</div>
+              <p class="text-[11px] text-blue-900">"CRITICAL TEMPO RULE: this clip plays at REAL-TIME natural speed. NOT a time-lapse, NOT accelerated, NOT fast-forward, NOT sped-up."</p>
+              <p class="text-[10px] text-blue-700 mt-1 italic">Évite l'effet "tout va vite" qui rendrait l'humain statique au milieu (= effet Final Destination).</p>
+            </div>
+            <div class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+              <div class="text-sm font-bold text-emerald-900 mb-1">👤 Micro-mouvements humains</div>
+              <p class="text-[11px] text-emerald-900">"Humans show MINIMAL natural micro-movements: soft chest breathing, occasional blink, hair barely moving. NO body shifting, NO arm gestures, NO walking, NO head turning."</p>
+              <p class="text-[10px] text-emerald-700 mt-1 italic">Évite l'effet statue figée (peu naturel) tout en empêchant les gros mouvements (qui foirent l'anatomie Kling).</p>
+            </div>
+          </div>
         </section>
 
         <section class="card-dayuse p-6 mb-6">

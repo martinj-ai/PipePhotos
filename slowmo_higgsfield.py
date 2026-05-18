@@ -66,52 +66,97 @@ CROSSFADE_DURATION_S = float(os.getenv("SLOWMO_CROSSFADE_DURATION", "0.5"))
 # Mots-clés négatifs : "no camera movement", "static composition" — Kling DoP a tendance
 # à pousser des camera moves cinématiques par défaut, on les coupe.
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# CLAUSE ANTI-TIMELAPSE (Martin 15/05/2026 — autorisation slowmo avec humains)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Quand on autorise les photos AVEC humain IA en source slowmo, le risque #1 est
+# que Kling génère un mouvement "timelapse" (nuages qui défilent vite, vagues
+# agitées, etc.) → humain statique au milieu = effet Final Destination, bizarre.
+# Cette clause est injectée dans TOUS les prompts pour bannir ce comportement.
+_ANTI_TIMELAPSE_CLAUSE = (
+    "CRITICAL TEMPO RULE: this clip plays at REAL-TIME natural speed. "
+    "NOT a time-lapse, NOT accelerated, NOT fast-forward, NOT sped-up. "
+    "Water ripples flow at normal speed, leaves sway at real breeze pace, "
+    "floats drift at lazy real-time speed. Any visible motion respects "
+    "real-world physics timing. Avoid any 'time skipping' or 'fast montage' feel. "
+)
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# CLAUSE HUMAINS (Martin 15/05/2026)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Avant : "people remain perfectly still" → effet statue, peu naturel.
+# Maintenant : on autorise des MICRO-mouvements naturels (respiration, blink,
+# cheveux qui bougent avec la brise) MAIS interdiction de tout mouvement
+# corporel significatif (gestes, marche, rotation tête).
+_HUMANS_MICRO_MOTION_CLAUSE = (
+    "Humans visible in the scene (if any) show MINIMAL natural micro-movements: "
+    "soft chest breathing (gentle rise/fall), occasional natural blink, "
+    "hair barely moving with subtle breeze. NO body shifting, NO arm gestures, "
+    "NO walking, NO head turning, NO posture changes. Humans hold their position "
+    "naturally — alive but at rest, not frozen statues. "
+)
+
 PROMPTS_BY_SUBJECT = {
     "pool_float": (
         "The inflatable pool float (flamingo, unicorn, swan, donut, etc.) drifts very slowly "
         "and gently on the water surface — soft horizontal bob and slow rotation around its "
         "vertical axis. Small concentric ripples spread around the float as it moves. "
         "Static composition, locked-off shot, no camera movement, no zoom, no pan. "
-        "People and other objects remain perfectly still. Only the float and the water "
-        "ripples around it move softly. The float never leaves the frame."
+        + _HUMANS_MICRO_MOTION_CLAUSE +
+        "Only the float and the water ripples around it move softly. The float never leaves the frame. "
+        + _ANTI_TIMELAPSE_CLAUSE
     ),
     "water": (
         "Subtle gentle water ripples on the surface, soft slow ambient movement, "
         "natural reflection shimmer. Static composition, locked-off shot, "
-        "no camera movement, no zoom, no pan. People and objects remain perfectly still. "
-        "Only the water surface moves softly."
+        "no camera movement, no zoom, no pan. "
+        + _HUMANS_MICRO_MOTION_CLAUSE +
+        "Only the water surface moves softly. "
+        + _ANTI_TIMELAPSE_CLAUSE
     ),
     "curtains": (
         "Soft gentle breeze making the curtains and light fabrics sway slowly, "
         "ambient drift. Static composition, locked-off shot, no camera movement. "
-        "Everything else remains still."
+        + _HUMANS_MICRO_MOTION_CLAUSE +
+        "Everything else remains still. "
+        + _ANTI_TIMELAPSE_CLAUSE
     ),
     "foliage": (
         "Gentle wind softly moving the leaves and plants, ambient natural sway. "
         "Static composition, locked-off shot, no camera movement, no zoom, no pan. "
-        "Only foliage moves subtly."
+        + _HUMANS_MICRO_MOTION_CLAUSE +
+        "Only foliage moves subtly. "
+        + _ANTI_TIMELAPSE_CLAUSE
     ),
     "fire": (
         "Gentle dancing flames, soft warm flicker, slow ember glow. "
         "Static composition, locked-off shot, no camera movement. "
-        "Everything else remains perfectly still."
+        + _HUMANS_MICRO_MOTION_CLAUSE +
+        "Everything else remains perfectly still. "
+        + _ANTI_TIMELAPSE_CLAUSE
     ),
     "steam": (
         "Soft slow rising steam and mist, gentle ambient drift. "
         "Static composition, locked-off shot, no camera movement. "
-        "Background and objects remain still."
+        + _HUMANS_MICRO_MOTION_CLAUSE +
+        "Background and objects remain still. "
+        + _ANTI_TIMELAPSE_CLAUSE
     ),
     "fountain": (
         "Gentle water flow from the fountain, soft continuous splashing, "
         "ambient water motion. Static composition, locked-off shot, no camera movement. "
-        "Everything else remains still."
+        + _HUMANS_MICRO_MOTION_CLAUSE +
+        "Everything else remains still. "
+        + _ANTI_TIMELAPSE_CLAUSE
     ),
 }
 
 PROMPT_FALLBACK = (
     "Subtle ambient atmosphere with very gentle natural motion. "
     "Static composition, locked-off shot, no camera movement, no zoom, no pan. "
-    "Photorealistic, high quality."
+    + _HUMANS_MICRO_MOTION_CLAUSE +
+    "Photorealistic, high quality. "
+    + _ANTI_TIMELAPSE_CLAUSE
 )
 
 
@@ -164,50 +209,69 @@ def pick_slowmo_target(
 ) -> Optional[dict]:
     """Choisit la photo du pack final qui sera convertie en slowmo.
 
-    Stratégie (Martin 14/05/2026 v2 — "top photo piscine + intermédiaire si humain IA") :
+    Stratégie (Martin 15/05/2026 v3 — "humains IA autorisés si validation 100% clean") :
       1. **Filtre catégorie PISCINE** (primary OR secondary). Garde scope pool-only.
       2. EXCLURE les photos avec humain NATIF au premier plan
-         (Higgsfield déforme — pas d'intermédiaire pour fix).
-      3. Garder les photos avec `slowmo_potential.has_motion_subject == True`
+         (Higgsfield/Kling déforme les humains natifs de la photo source).
+      3. Si la photo a un humain AJOUTÉ IA → on l'AUTORISE comme source slowmo
+         (vs avant où on basculait sur intermédiaire) MAIS UNIQUEMENT si :
+         (a) `ai_validation.ok == True` (= 0 violation détectée)
+         (b) `fallback_to_original == False` (= on a bien une vraie photo IA, pas l'originale en fallback)
+         Sinon → SKIP cette candidate (Kling amplifierait les défauts détectés).
+      4. Garder les photos avec `slowmo_potential.has_motion_subject == True`
          ET `motion_subject` ∈ {pool_float, water, foliage}.
-      4. **Tri par SLOT ASCENDANT** (= top photo en priorité, peu importe motion_strength).
+      5. **Tri par SLOT ASCENDANT** (= top photo en priorité, peu importe motion_strength).
          Tie-break : motion_strength desc.
-      5. Si la candidate gagnante a un humain ajouté IA (`persona_used` ou step
-         `ai_add_character`) → flag `use_intermediate=True`. Le caller utilisera
-         l'intermédiaire `_step0_*.jpg` (avant ajout perso) + appliquera la LUT brand.
       6. Fallback : si aucune candidate qualifiée → 1ère photo PISCINE sans humain
-         natif avec motion_subject="ambient".
+         natif AVEC validation OK, motion_subject="ambient".
 
     Args:
         ordered_pack : pack final ordonné (slot 1, 2, …)
         by_filename : analyses Gemini Vision indexées par filename
         enhanced_results : résultats enhance_one indexés. Sert à détecter les photos
-            avec humain ajouté IA (pour set le flag `use_intermediate`).
+            avec humain ajouté IA + vérifier la validation post-IA.
 
     Returns:
         dict {filename, motion_subject, motion_strength, slot, fallback_used,
-              use_intermediate} ou None.
+              has_ai_human, use_intermediate=False} ou None.
+        `use_intermediate` est conservé en rétrocompat mais toujours False désormais.
     """
-    # ━ Set des photos avec humain ajouté IA — flag pour utiliser l'intermédiaire ━
-    # (Avant : on excluait. Maintenant : on utilise la version intermédiaire avant
-    # ajout perso, sur laquelle on appliquera la LUT brand au moment du slowmo.)
-    humans_added_filenames: set[str] = set()
+    # ━ Index des enhanced_results par filename pour lookup rapide ━
+    enhanced_by_fn: dict[str, dict] = {}
     if enhanced_results:
         for r in enhanced_results:
             fname = r.get("filename") or (
                 r.get("input_path", "").rsplit("/", 1)[-1]
                 if r.get("input_path") else None
             )
-            if not fname:
-                continue
-            has_human = bool(r.get("persona_used"))
-            if not has_human:
-                steps = r.get("steps") or []
-                has_human = any(
-                    s.get("action") == "ai_add_character" for s in steps
-                )
-            if has_human:
-                humans_added_filenames.add(fname)
+            if fname:
+                enhanced_by_fn[fname] = r
+
+    def _has_ai_human(r: dict) -> bool:
+        """Détecte si une photo a un humain ajouté par IA."""
+        if r.get("persona_used"):
+            return True
+        for s in (r.get("steps") or []):
+            if s.get("action") == "ai_add_character":
+                return True
+        return False
+
+    def _validation_clean(r: dict) -> bool:
+        """Photo passe la validation IA full clean (0 violation, pas fallback).
+
+        Martin 15/05/2026 : strict — slowmo amplifie les défauts (face/anatomy,
+        pool surface, etc.) donc on n'autorise qu'une photo qui a TOUT validé.
+        """
+        if r.get("fallback_to_original"):
+            return False
+        ai_val = r.get("ai_validation") or {}
+        if not ai_val:
+            return True  # pas de validation = pas de step IA = OK par défaut
+        if not ai_val.get("ok"):
+            return False
+        if ai_val.get("violations"):
+            return False
+        return True
 
     candidates = []
     for slot, entry in enumerate(ordered_pack, 1):
@@ -219,14 +283,22 @@ def pick_slowmo_target(
         if not _is_pool_category(analysis):
             continue
 
-        # 2. Exclusion humains NATIFS au premier plan (impossible à fix via intermédiaire)
+        # 2. Exclusion humains NATIFS au premier plan (Kling déforme)
         factual = analysis.get("factual") or {}
         if (factual.get("human_count") or 0) > 0:
             presence = (factual.get("human_presence_type") or "").lower()
             if presence in ("full_visible", "fully visible", "complete", "prominent"):
                 continue
 
-        # 3. Motion_subject autorisé pool-only
+        # 3. Si humain AJOUTÉ IA → exiger validation 100% clean
+        r = enhanced_by_fn.get(filename) or {}
+        has_ai_human = _has_ai_human(r)
+        if has_ai_human and not _validation_clean(r):
+            # Photo avec humain IA mais validation pas clean → SKIP
+            # (Kling amplifierait les défauts détectés sur l'humain ou la scène)
+            continue
+
+        # 4. Motion_subject autorisé pool-only
         sp = analysis.get("slowmo_potential") or {}
         if sp.get("has_motion_subject"):
             motion_subj = sp.get("motion_subject", "water")
@@ -236,7 +308,10 @@ def pick_slowmo_target(
                     "motion_subject": motion_subj,
                     "motion_strength": int(sp.get("motion_strength", 0) or 0),
                     "slot": slot,
-                    "use_intermediate": filename in humans_added_filenames,
+                    "has_ai_human": has_ai_human,
+                    # use_intermediate gardé en rétrocompat mais désormais TOUJOURS False
+                    # (Martin 15/05/2026 : on utilise la version finale avec humain IA)
+                    "use_intermediate": False,
                     "fallback_used": False,
                 })
 
@@ -245,7 +320,7 @@ def pick_slowmo_target(
         candidates.sort(key=lambda c: (c["slot"], -c["motion_strength"]))
         return candidates[0]
 
-    # Fallback : 1ère photo PISCINE sans humain natif (scope restreint à piscine)
+    # Fallback : 1ère photo PISCINE sans humain natif AVEC validation OK
     for slot, entry in enumerate(ordered_pack, 1):
         filename = entry["input"]["filename"]
         a = by_filename.get(filename) or {}
@@ -257,16 +332,22 @@ def pick_slowmo_target(
             presence = (factual.get("human_presence_type") or "").lower()
             if presence in ("full_visible", "fully visible", "complete", "prominent"):
                 continue
+        # Exiger validation clean pour le fallback aussi
+        r = enhanced_by_fn.get(filename) or {}
+        has_ai_human = _has_ai_human(r)
+        if has_ai_human and not _validation_clean(r):
+            continue
         return {
             "filename": filename,
             "motion_subject": "ambient",
             "motion_strength": 0,
             "slot": slot,
-            "use_intermediate": filename in humans_added_filenames,
+            "has_ai_human": has_ai_human,
+            "use_intermediate": False,
             "fallback_used": True,
         }
 
-    # Aucune photo PISCINE sans humain natif disponible → pas de slowmo
+    # Aucune photo PISCINE valide disponible → pas de slowmo
     return None
 
 
