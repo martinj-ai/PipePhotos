@@ -3489,21 +3489,61 @@ photo finale enhanced (jpeg)
           // proceed === true → on continue avec output_formats=[] (assumé conscient)
         }
 
-        const r = await fetch("/api/run", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            slug: state.slug,
-            resume_from: resumeFrom,
-            deselected: [...(state.deselected || [])],
-            output_formats: checkedFormats,
-            outpaint_enabled: outpaintEnabled,
-            outpaint_quality: outpaintQuality,
-            slowmo_enabled: slowmoEnabled,
-          }),
-        });
-        const data = await r.json();
-        if (!r.ok) throw new Error(data.error || "Erreur");
+        // Helper : fetch + parse + fallback recovery si le proxy Railway timeout
+        // (Martin 19/05/2026 : sur prod Railway, le proxy HTTP coupe à ~5min mais
+        //  le pipeline backend continue. On poll /api/progress jusqu'à done puis
+        //  on fetch /api/last-response/<slug> pour récupérer la réponse complète.)
+        async function _runWithRecovery() {
+          try {
+            const r = await fetch("/api/run", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                slug: state.slug,
+                resume_from: resumeFrom,
+                deselected: [...(state.deselected || [])],
+                output_formats: checkedFormats,
+                outpaint_enabled: outpaintEnabled,
+                outpaint_quality: outpaintQuality,
+                slowmo_enabled: slowmoEnabled,
+              }),
+            });
+            const data = await r.json();
+            if (!r.ok) throw new Error(data.error || "Erreur");
+            return data;
+          } catch (fetchErr) {
+            // Si "Failed to fetch" / TypeError → fallback recovery via polling + last-response
+            const isProxyTimeout = (fetchErr && (
+              fetchErr.message === "Failed to fetch" ||
+              fetchErr.name === "TypeError" ||
+              String(fetchErr).includes("network")
+            ));
+            if (!isProxyTimeout) throw fetchErr;
+            // Banner d'attente : le backend continue, on attend qu'il finisse
+            runResult.innerHTML = `<div class="bg-blue-50 border border-blue-200 rounded p-3 text-sm text-blue-900">
+              ⏳ <strong>Connexion HTTP coupée par le proxy Railway</strong> (timeout ~5min), mais le pipeline backend tourne toujours.
+              <br>On poll <code>/api/progress</code> jusqu'à <code>done</code>, puis on récupère la réponse via <code>/api/last-response</code>.
+              <br><span class="text-xs italic">Aucune analyse n'est perdue, c'est juste un workaround pour les pipelines longs.</span>
+            </div>`;
+            // Poll jusqu'à ce que progress.done == true (ou erreur explicite)
+            for (let i = 0; i < 600; i++) {  // 600 × 3s = 30 min max
+              await new Promise(res => setTimeout(res, 3000));
+              try {
+                const pr = await fetch(`/api/progress?slug=${encodeURIComponent(state.slug)}`);
+                const ps = await pr.json();
+                if (ps && ps.done) break;
+              } catch (_) { /* continue poll */ }
+            }
+            // Fetch la réponse persistée
+            const recResp = await fetch(`/api/last-response/${encodeURIComponent(state.slug)}`);
+            if (!recResp.ok) {
+              throw new Error("Pipeline non terminé ou réponse non persistée. Recharge dans 1 min.");
+            }
+            return await recResp.json();
+          }
+        }
+
+        const data = await _runWithRecovery();
         stopPoll();
         runResult.innerHTML = renderResults(data);
         // Init sliders APRÈS injection HTML (le DOM est garanti d'être à jour ici)

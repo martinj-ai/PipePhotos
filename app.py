@@ -2057,7 +2057,12 @@ def api_run():
     except Exception as e:
         print(f"[audit_db] persist batch failed for {slug}: {e}")
 
-    return jsonify({
+    # ━━ Construit le response_data avant le return (pour persistence + return) ━━
+    # (Martin 19/05/2026, fix "Failed to fetch" — Railway HTTP proxy timeout ~5min
+    #  coupe la connexion front sur un pipeline long, mais le pipeline backend continue.
+    #  On persiste la réponse complète dans final_response.json pour permettre au
+    #  front de la récupérer via /api/last-response/<slug> quand sa connexion timeout.)
+    response_data = {
         "slug": slug,
         "pipeline_started_at": pipeline_started_at,
         "pipeline_completed_at": pipeline_completed_at,
@@ -2127,7 +2132,24 @@ def api_run():
         # ━━ Workflow visualization data ━━
         "photo_journey": photo_journey_payload,  # pré-calculé avant progress.finish (cf. note ci-dessus)
         "workflow_nodes": photo_journey_mod.NODE_DEFINITIONS,
-    })
+    }
+
+    # ━━ Persiste la réponse pour recovery (Martin 19/05/2026, fix Failed to fetch) ━━
+    # Railway HTTP proxy timeout ~5min coupe la connexion sur un pipeline long, mais
+    # le backend continue à tourner. On écrit la réponse sur disk pour que le front
+    # puisse la récupérer via /api/last-response/<slug> après que sa connexion ait
+    # été coupée.
+    try:
+        final_response_path = ROOT / "data" / "output" / slug / "final_response.json"
+        final_response_path.parent.mkdir(parents=True, exist_ok=True)
+        # Utilise app.json.dumps qui passe par NumpyJSONProvider → gère numpy types
+        with open(final_response_path, "w") as f:
+            f.write(app.json.dumps(response_data))
+        print(f"[run] final_response.json persisté ({slug}) — récupérable via /api/last-response/{slug}")
+    except Exception as e:
+        print(f"[run] persist final_response failed: {e}")
+
+    return jsonify(response_data)
 
 
 def _build_slowmo_summary(slowmo_result: dict, slug: str) -> dict:
@@ -2779,6 +2801,32 @@ def api_get_tags_bulk():
     if not slug:
         return jsonify({"error": "slug requis"}), 400
     return jsonify(audit_db.get_all_tags_for_slug(slug))
+
+
+@app.route("/api/last-response/<slug>")
+def api_last_response(slug):
+    """Retourne la dernière réponse pipeline persistée (recovery après Failed to fetch).
+
+    Quand le Railway proxy timeout coupe la connexion HTTP front pendant le pipeline,
+    le backend continue à tourner et écrit `final_response.json` à la fin. Cet endpoint
+    permet au front de récupérer la réponse complète sans relancer le pipeline.
+
+    Usage côté front :
+    - POST /api/run lance le pipeline
+    - Si fetch fail (Failed to fetch / timeout), poll /api/progress?slug=X
+    - Quand progress.done=true, fetch /api/last-response/<slug> → réponse complète
+    """
+    final_response_path = ROOT / "data" / "output" / slug / "final_response.json"
+    if not final_response_path.exists():
+        return jsonify({"error": f"Aucune réponse persistée pour le slug '{slug}'. "
+                                  "Le pipeline n'a peut-être pas terminé, ou les fichiers ont été "
+                                  "wipés (filesystem éphémère Railway sans Volume attaché)."}), 404
+    try:
+        with open(final_response_path) as f:
+            data = json.load(f)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": f"Lecture final_response.json échouée : {str(e)[:200]}"}), 500
 
 
 @app.route("/api/audit-dashboard")
