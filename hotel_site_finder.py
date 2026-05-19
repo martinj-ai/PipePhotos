@@ -126,11 +126,9 @@ def _check_url_alive(url: str, hotel_name: str | None = None) -> dict:
     from playwright.sync_api import sync_playwright
     from playwright_stealth import Stealth
     try:
+        from playwright_helpers import chromium_launch_args
         with Stealth().use_sync(sync_playwright()) as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=["--disable-blink-features=AutomationControlled"],
-            )
+            browser = p.chromium.launch(headless=True, args=chromium_launch_args())
             context = browser.new_context(
                 user_agent=USER_AGENT,
                 viewport={"width": 1920, "height": 1080},

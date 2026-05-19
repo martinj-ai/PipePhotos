@@ -142,11 +142,9 @@ def _fetch_booking_html(url: str, timeout: int = 30000) -> str | None:
     """Récupère le HTML de la page Booking via Playwright stealth."""
     cleaned = booking_scraper._clean_url(url) if hasattr(booking_scraper, "_clean_url") else url
     try:
+        from playwright_helpers import chromium_launch_args
         with Stealth().use_sync(sync_playwright()) as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=["--disable-blink-features=AutomationControlled"],
-            )
+            browser = p.chromium.launch(headless=True, args=chromium_launch_args())
             context = browser.new_context(
                 user_agent=USER_AGENT,
                 viewport={"width": 1920, "height": 1080},

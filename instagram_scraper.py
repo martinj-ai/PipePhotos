@@ -116,11 +116,9 @@ def scrape_instagram_photos(profile_url: str, max_photos: int = 30) -> dict:
         return out
 
     try:
+        from playwright_helpers import chromium_launch_args
         with Stealth().use_sync(sync_playwright()) as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=["--disable-blink-features=AutomationControlled"],
-            )
+            browser = p.chromium.launch(headless=True, args=chromium_launch_args())
             context = browser.new_context(
                 user_agent=USER_AGENT,
                 viewport={"width": 1280, "height": 900},

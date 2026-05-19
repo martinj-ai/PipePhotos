@@ -204,9 +204,10 @@ def generate_pdf(slug: str, run_data: dict) -> bytes:
     html = _build_html(slug, run_data)
 
     from playwright.sync_api import sync_playwright
+    from playwright_helpers import chromium_launch_args
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=True, args=chromium_launch_args())
         context = browser.new_context(viewport={"width": 1240, "height": 1754})  # A4 portrait @150dpi
         page = context.new_page()
         # data: URL pour charger le HTML sans avoir à écrire un fichier temporaire

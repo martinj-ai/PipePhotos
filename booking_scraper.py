@@ -67,11 +67,9 @@ def scrape_booking_photos(url: str, headless: bool = True, max_scrolls: int = 30
     target_url = _clean_url(url)
     photo_urls: set[str] = set()
 
+    from playwright_helpers import chromium_launch_args
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=headless,
-            args=["--disable-blink-features=AutomationControlled"],
-        )
+        browser = p.chromium.launch(headless=headless, args=chromium_launch_args())
         context = browser.new_context(
             user_agent=USER_AGENT,
             viewport={"width": 1920, "height": 1080},
