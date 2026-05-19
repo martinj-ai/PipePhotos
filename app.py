@@ -52,6 +52,35 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200 MB par batch
 
+# ━━ JSON encoder numpy-safe (Martin 19/05/2026, fix prod Sagamore) ━━━━━━━━━
+# Le pipeline produit des scores via ImageHash / numpy / scipy → certaines
+# valeurs sont des numpy.int64 / numpy.float64 / numpy.ndarray que Flask
+# ne sait pas serialiser → crash "Object of type int64 is not JSON serializable"
+# AU MOMENT de retourner la réponse finale, après que tout le pipeline ait
+# tourné (= analyses + photos déjà sauvées sur disk + DB, juste la réponse
+# HTTP qui foire → "Unexpected token '<'" côté front car page erreur HTML).
+# Fix : custom JSON provider qui convertit auto les types numpy.
+try:
+    import numpy as _np_for_json
+    from flask.json.provider import DefaultJSONProvider as _DefaultJSONProvider
+
+    class _NumpySafeJSONProvider(_DefaultJSONProvider):
+        def default(self, obj):
+            if isinstance(obj, _np_for_json.integer):
+                return int(obj)
+            if isinstance(obj, _np_for_json.floating):
+                return float(obj)
+            if isinstance(obj, _np_for_json.ndarray):
+                return obj.tolist()
+            if isinstance(obj, (_np_for_json.bool_,)):
+                return bool(obj)
+            # Path, datetime, etc. — fallback str()
+            return super().default(obj)
+
+    app.json = _NumpySafeJSONProvider(app)
+except ImportError:
+    pass  # numpy pas installé → on garde le provider Flask par défaut
+
 # ━━ Proxy fix pour Railway (Martin 19/05/2026) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Railway/Heroku/Render mettent l'app derrière un reverse proxy HTTPS qui forward
 # en HTTP interne. Sans ce middleware, Flask url_for(_external=True) génère des
