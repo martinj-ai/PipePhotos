@@ -98,6 +98,11 @@ def scrape_booking_photos(url: str, headless: bool = True, max_scrolls: int = 30
     Returns:
         Liste d'URLs absolues de photos, dédupliquées par photo ID, meilleure résolution.
     """
+    # Normalise l'URL : strip les suffixes langue (.fr, .en-gb, etc.) pour avoir
+    # la version EN canonique. Booking redirige automatiquement selon Accept-Language
+    # si besoin, et la version sans suffixe a un DOM plus prévisible.
+    url = re.sub(r"\.(fr|en|es|de|it|nl|pt|ru|ja|zh|ko|ar|he|pl|cs|uk|tr|sv|no|da|fi|el)(-[a-z]{2})?\.html",
+                 ".html", url, count=1)
     target_url = _clean_url(url)
     photo_urls: set[str] = set()
     debug = lambda msg: print(f"[booking_scraper] {msg}", file=sys.stderr, flush=True)
@@ -129,18 +134,34 @@ def scrape_booking_photos(url: str, headless: bool = True, max_scrolls: int = 30
             page.goto(target_url, wait_until="domcontentloaded", timeout=45000)
         except Exception as e:
             debug(f"goto error : {e}")
-        debug(f"page loaded · title='{(page.title() or '')[:60]}' · network photos so far : {len(photo_urls)}")
 
-        # Détection blocage anti-bot (DataDome, captcha)
-        page_text = (page.content() or "").lower()
-        is_blocked = any(k in page_text for k in (
-            "datadome", "are you a human", "verify you are human",
-            "captcha", "challenge-platform", "you've been blocked",
-        ))
-        if is_blocked:
-            debug("⚠️ DataDome / captcha détecté — scraping va probablement échouer")
+        # ━ ATTENTE JS RENDER (Martin 19/05/2026, fix Sagamore) ━━━━━━━━━━━━━━━
+        # Booking renvoie une page initiale quasi-vide (challenge DataDome qui
+        # pose chal_t=... + force_referer=...) puis le JS render le contenu en
+        # ~3-5s. Si on check title()/content() trop tôt, on a `title=''` et le
+        # bouton "+N photos" n'est pas encore dans le DOM.
+        # Solution : attendre le selector body qui contient les photos OU
+        # timeout 6s avec fallback.
+        try:
+            # Attend que la galerie principale render — selectors courants Booking
+            page.wait_for_selector(
+                'a[data-testid*="gallery"], button[data-testid*="photos"], '
+                'a[href*="#tab-photos"], div[id*="photo"], img[src*="bstatic.com"]',
+                timeout=8000,
+            )
+            debug("gallery DOM ready")
+        except Exception:
+            debug("gallery DOM not detected after 8s, fallback timeout")
+        page.wait_for_timeout(2000)  # cushion supplémentaire pour finir le render
 
-        # Cookies (multi-language)
+        title = (page.title() or "")[:80]
+        debug(f"page loaded · title='{title}' · URL={page.url[:120]}")
+
+        # Détection blocage anti-bot stricte (DataDome challenge page sans contenu)
+        if not title or len(page.content() or "") < 50000:
+            debug(f"⚠️ Page suspecte (title='{title[:40]}', html_len={len(page.content() or '')}) — challenge ?")
+
+        # Cookies (multi-language) — APRÈS le wait JS render (sinon les buttons ne sont pas là)
         for sel in ("#onetrust-accept-btn-handler", "button[aria-label*='Accept']",
                     "button[aria-label*='Accepter']", "button:has-text('Accepter')",
                     "button:has-text('Accept all')"):
