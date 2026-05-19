@@ -50,13 +50,18 @@ FINAL_UPSCALE_FACTOR = float(os.getenv("FINAL_UPSCALE_FACTOR", "2.0"))
 # --- Prompts (basés sur les exemples Martin) ---
 
 PROMPT_ENSOLEILLEMENT = (
-    "Transform this scene into a bright sunny daytime scene with clear natural sunlight. "
+    "Transform this scene into a bright sunny MIDDAY daytime scene with clear natural sunlight. "
     "Keep the original composition, framing, and all objects unchanged. "
-    "Replace the current lighting with strong daytime sun, realistic natural shadows, "
-    "bright warm daylight, and a clean sunlit atmosphere. "
-    "The image should feel fully illuminated by daylight, with crisp highlights, "
-    "balanced contrast, and natural warm tones. "
-    "Create a realistic, inviting, premium look with a clear sunny daytime ambiance.\n\n"
+    "Replace the current lighting with overhead midday sun (NOT golden hour, NOT late "
+    "afternoon, NOT sunset), realistic short vertical shadows typical of zenith sunlight, "
+    "neutral-toned bright daylight (clean white sunlight, NOT yellow/orange/sepia), "
+    "blue sky, and a clean sunlit atmosphere. "
+    "The image should feel fully illuminated by midday daylight, with crisp highlights, "
+    "balanced contrast, and CLEAN NEUTRAL daylight tones — whites stay white, sky stays blue, "
+    "no golden/amber/sepia color cast. "
+    "Reference : a sunlit hotel photo at 12pm with the sun directly overhead, NOT a 5pm "
+    "golden hour shot. Avoid orange/amber/yellow dominance. "
+    "Create a realistic, inviting, premium look with a clear sunny MIDDAY ambiance.\n\n"
     "💡 ARTIFICIAL LIGHTS — TURN THEM OFF / DIM TO INVISIBLE :\n"
     "In sunlit daytime, artificial fixtures are NOT lit (or visually negligible vs the sun). "
     "If the input shows lit lamps, wall sconces, ceiling spots / downlights, LED strips, "
@@ -84,14 +89,24 @@ PROMPT_ENSOLEILLEMENT = (
     "- Walls, ceilings, floors keep their materials and patterns identical. Tiles, paint, "
     "wood, carpet remain unchanged.\n\n"
     "If you cannot brighten the scene without inventing new windows or removing existing "
-    "decor → return the image with ONLY a global warm color/exposure shift on the existing "
+    "decor → return the image with ONLY a global NEUTRAL color/exposure shift on the existing "
     "pixels (no structural change). A photo that is just 'a bit brighter' is acceptable. "
     "A photo with fabricated architecture is REJECTED.\n\n"
+    "🚫 COLOR CAST FORBIDDEN (Martin 19/05/2026 — équipe Brand : trop jaune) :\n"
+    "- NO golden hour cast, NO amber tint, NO sepia, NO yellow dominance, NO orange dominance\n"
+    "- The output sunlight should be CLEAN WHITE midday sun, not warm golden afternoon sun\n"
+    "- Skies should be BLUE (not orange/pink/peach), whites should be WHITE (not cream/yellow)\n"
+    "- Shadows are NEUTRAL gray (not yellow-tinted)\n"
+    "- If the input was dusk/dawn with warm sky colors, those warm colors must be FULLY REPLACED\n"
+    "  by midday blue sky and neutral daylight — do not let the warm dusk palette bleed into\n"
+    "  the daytime output\n\n"
     "NEGATIVE PROMPT : new windows, new openings, invented skylights, fabricated city view, "
     "removed artwork, removed neon, replaced wall panels, walls turned into glass facades, "
     "alcoves turned into windows, transformed displays, new architectural elements, "
     "visibly glowing lamps in daylight, lit sconces under sunlight, emissive ceiling spots, "
-    "warm light pools on walls under bright daylight, lamps left on at noon."
+    "warm light pools on walls under bright daylight, lamps left on at noon, "
+    "🚨 golden hour cast, amber tint, sepia tones, yellow color dominance, orange dominance, "
+    "🚨 warm afternoon glow, sunset palette bleed-over, peach/rose sky after transformation."
 )
 
 PROMPT_ENHANCEMENT = (
@@ -102,8 +117,8 @@ PROMPT_ENHANCEMENT = (
 )
 
 PROMPT_WARM_BOOST = (
-    "Slightly warm and brighten this hotel photo. "
-    "Add a subtle warm midday tone (neutral-warm, NOT golden hour / NOT sepia yellow), very gentle saturation boost. "
+    "Slightly brighten this hotel photo with neutral midday daylight. "
+    "Add a clean bright midday tone (NEUTRAL, NOT warm/golden, NOT yellow/sepia/amber), very gentle saturation boost. "
     "Keep all elements, composition, and realism perfectly intact. "
     "Minimal, natural enhancement only."
 )

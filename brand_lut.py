@@ -72,14 +72,18 @@ LUT_PROFILES = {
         "warmth_b": 0.97,  # ← moins de pull bleu (était 0.93)
     },
     "strong": {
-        # Photo lumineux-froid / off-brand / sortie de ai_lighting :
-        # correction tonale forte mais on s'arrête AVANT le sépia. Le warmth corrige
-        # la palette froide d'origine sans virer golden hour.
+        # Photo lumineux-froid / off-brand / sortie de ai_lighting (Martin 19/05/2026,
+        # photo Element Marriott Orlando hero_ext montrée jaune malgré v3) :
+        # le profil strong s'applique sur les photos sombre-froid / off-brand → ce sont
+        # justement celles où ai_lighting a transformé la lumière. Le combo (ai_lighting
+        # qui ajoute du warm + LUT strong v3 R+6%) restait trop jaune. v3.1 : on baisse
+        # encore le warmth_r (1.06→1.03) et on remonte le bleu (0.93→0.96). La saturation
+        # haute (1.22) garde l'effet ensoleillé sans pousser le jaune.
         "saturation": 1.22,
         "contrast": 1.13,
         "brightness": 1.06,
-        "warmth_r": 1.06,  # ← réduit (était 1.10)
-        "warmth_b": 0.93,  # ← moins de pull bleu (était 0.88)
+        "warmth_r": 1.03,  # ← v3.1 baissé (était 1.06 en v3, 1.10 en v2)
+        "warmth_b": 0.96,  # ← v3.1 remonté (était 0.93 en v3, 0.88 en v2)
     },
 }
 
