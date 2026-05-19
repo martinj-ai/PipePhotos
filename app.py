@@ -2498,6 +2498,11 @@ def api_export_pdf(slug):
 
     try:
         pdf_bytes = pdf_export.generate_pdf(slug, run_data)
+    except pdf_export.PdfNoPhotosError as e:
+        # Cas attendu : disque wipé (Railway eph fs) ou run_data vide.
+        # On renvoie un 422 ("Unprocessable Entity") avec un message actionnable
+        # plutôt qu'un 500 générique. Le front affiche tel quel via alert().
+        return jsonify({"error": str(e)}), 422
     except Exception as e:
         return jsonify({"error": f"Génération PDF échouée : {type(e).__name__}: {str(e)[:200]}"}), 500
 

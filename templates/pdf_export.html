@@ -766,6 +766,9 @@
     <div class="ba-cell">
       <span class="ba-label after">Après</span>
       <img src="{{ photo.after_data_url }}" alt="après">
+      {% if photo.after_fallback_note %}
+        <span style="position:absolute;bottom:6px;left:6px;background:rgba(244,92,90,0.92);color:#fff;padding:3px 8px;border-radius:100px;font-size:9px;font-weight:600;">⚠️ {{ photo.after_fallback_note }}</span>
+      {% endif %}
     </div>
   </div>
 

@@ -55,8 +55,27 @@ def _action_label(action: str) -> str:
     }.get(action, action)
 
 
+class PdfNoPhotosError(RuntimeError):
+    """Levée quand 0 photo n'a survécu au filtrage disque.
+
+    Sert à signaler au front un cas connu (filesystem Railway wipé entre le
+    run et le clic PDF) avec un message clair plutôt qu'un PDF vide.
+    """
+    pass
+
+
 def _build_html(slug: str, run_data: dict) -> str:
-    """Rend le template Jinja2 avec les données du run + images embeddées en base64."""
+    """Rend le template Jinja2 avec les données du run + images embeddées en base64.
+
+    Comportement face aux fichiers manquants (bug Martin 19/05/2026, "PDF avec juste l'intro") :
+    - Sur Railway, le filesystem `data/` est éphémère sans Volume → un redeploy
+      entre la fin du run et le clic PDF wipe `data/output/<slug>/enhanced/*`.
+    - Avant ce patch : on skippait silencieusement chaque photo dont `after_path`
+      n'existait pas, et si tout était wipé on rendait un PDF avec juste la cover.
+    - Maintenant : on tente d'abord la version enhanced, sinon fallback sur la
+      version uploads (before), sinon on skip avec un log. Si 0 photo ne passe,
+      on lève PdfNoPhotosError pour que la route renvoie un 422 explicite.
+    """
     env = Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),
         autoescape=select_autoescape(["html"]),
@@ -70,14 +89,43 @@ def _build_html(slug: str, run_data: dict) -> str:
     photos_for_template = []
     uploads_dir = ROOT / "data" / "uploads" / slug
     enhanced_dir = ROOT / "data" / "output" / slug / "enhanced"
+
+    # Diagnostic : trace ce qui se passe, surtout utile pour debug Railway eph fs.
+    n_input = len(enhanced_results)
+    n_skipped_no_filename = 0
+    n_skipped_no_file = 0
+    n_used_fallback_before = 0
+    print(f"[pdf_export] {slug} : {n_input} entrées dans run_data.enhanced — uploads_dir={uploads_dir.exists()} enhanced_dir={enhanced_dir.exists()}")
+
     for entry in enhanced_results:
         filename = entry.get("filename")
         if not filename:
+            n_skipped_no_filename += 1
             continue
         before_path = uploads_dir / filename
         after_path = enhanced_dir / filename
-        if not after_path.exists():
+
+        before_exists = before_path.exists()
+        after_exists = after_path.exists()
+
+        # Cas dégénéré : ni l'avant ni l'après sur disque → on n'a rien à afficher,
+        # on skip cette photo (mais log pour debug).
+        if not after_exists and not before_exists:
+            n_skipped_no_file += 1
+            print(f"[pdf_export]   skip {filename} : ni before ni after sur disque")
             continue
+
+        # Cas dégradé : after manquant mais before présent → on utilise before
+        # comme placeholder côté "Après" (mieux qu'un blanc — le user voit au moins
+        # la photo source et un badge dégradé).
+        if not after_exists:
+            n_used_fallback_before += 1
+            after_data_url = _img_to_data_url(before_path)
+            after_fallback_note = "fichier retouché absent du filesystem (utilise la source)"
+        else:
+            after_data_url = _img_to_data_url(after_path)
+            after_fallback_note = ""
+
         photos_for_template.append({
             "filename": filename,
             "seo_filename": entry.get("seo_filename") or filename,
@@ -90,9 +138,29 @@ def _build_html(slug: str, run_data: dict) -> str:
             "is_fully_generated": bool(entry.get("is_fully_generated")),
             "is_bonus": bool(entry.get("is_bonus")),
             "persona_used": entry.get("persona_used"),
-            "before_data_url": _img_to_data_url(before_path) if before_path.exists() else "",
-            "after_data_url": _img_to_data_url(after_path),
+            "before_data_url": _img_to_data_url(before_path) if before_exists else "",
+            "after_data_url": after_data_url,
+            "after_fallback_note": after_fallback_note,
         })
+
+    print(
+        f"[pdf_export] {slug} : {len(photos_for_template)} photos OK, "
+        f"{n_skipped_no_filename} sans filename, {n_skipped_no_file} sans fichier, "
+        f"{n_used_fallback_before} en fallback before"
+    )
+
+    # Si 0 photo n'a survécu → erreur explicite (le front affichera un alert clair
+    # au lieu d'un PDF vide téléchargé).
+    if not photos_for_template:
+        if n_input == 0:
+            raise PdfNoPhotosError(
+                "Aucune photo dans run_data.enhanced. Relance le pipeline avant d'exporter le PDF."
+            )
+        raise PdfNoPhotosError(
+            f"Aucun fichier image trouvé sur disque pour les {n_input} photos du run. "
+            f"Cause probable : le filesystem Railway a été wipé par un redeploy. "
+            f"Solution : attache un Volume Railway sur /app/data (5GB), ou relance le pipeline."
+        )
 
     # Stats globales du run
     n_total = len(photos_for_template)
