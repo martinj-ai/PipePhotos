@@ -132,9 +132,7 @@ def api_scrape_booking():
         return jsonify({"error": data["error"]}), 500
 
     # Génère un slug à partir du chemin Booking (ex: yotel-miami) ou du nom hôtel
-    parsed_path = url.rstrip("/").split("/")
-    booking_slug = parsed_path[-1].replace(".html", "") if parsed_path else "hotel"
-    slug = f"booking-{booking_slug}"
+    slug = f"booking-{booking_scraper.booking_url_to_slug(url)}"
 
     # Sauvegarde au même endroit que les scrapes RP (pour réutiliser le pipeline en aval)
     rp_dir = ROOT / "data" / "rp"
@@ -188,9 +186,7 @@ def api_identify_hotel():
         return jsonify({"error": data["error"]}), 500
 
     # Slug + sauvegarde du rp_data au même endroit que /api/scrape-booking
-    parsed_path = url.rstrip("/").split("/")
-    booking_slug = parsed_path[-1].replace(".html", "") if parsed_path else "hotel"
-    slug = f"booking-{booking_slug}"
+    slug = f"booking-{booking_scraper.booking_url_to_slug(url)}"
     rp_dir = ROOT / "data" / "rp"
     rp_dir.mkdir(parents=True, exist_ok=True)
     progress.update("booking_scrape", current=2, total=3,
@@ -241,9 +237,7 @@ def api_auto_find_url():
         return jsonify({"error": "URL Booking valide requise"}), 400
 
     # ━ Scrape Booking (depuis cache si possible) pour récupérer nom/ville/pays ━
-    parsed_path = booking_url.rstrip("/").split("/")
-    booking_slug = parsed_path[-1].replace(".html", "") if parsed_path else "hotel"
-    slug = f"booking-{booking_slug}"
+    slug = f"booking-{booking_scraper.booking_url_to_slug(booking_url)}"
     rp_path = ROOT / "data" / "rp" / f"{slug}.json"
 
     if rp_path.exists():

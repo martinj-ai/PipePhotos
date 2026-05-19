@@ -20,6 +20,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from playwright.sync_api import sync_playwright
+from playwright_stealth import Stealth
 
 
 USER_AGENT = (
@@ -53,6 +54,39 @@ def _clean_url(url: str) -> str:
     return f"{base}?checkin=2026-06-15&checkout=2026-06-16&group_adults=2"
 
 
+def booking_url_to_slug(url: str) -> str:
+    """Extrait un slug filesystem-safe depuis une URL Booking.
+
+    Exemples :
+        https://www.booking.com/hotel/us/the-sagamore.fr.html?aid=...&gclid=Cj...
+          → "the-sagamore"
+        https://www.booking.com/hotel/us/the-gates-hotel-south-beach.html
+          → "the-gates-hotel-south-beach"
+        https://www.booking.com/hotel/fr/leeu-collection.en-gb.html
+          → "leeu-collection"
+
+    Sans nettoyage, l'ancien code utilisait `parsed_path[-1].replace(".html", "")`
+    qui laissait les query params dans le slug → erreur OSError "File name too long"
+    sur le filesystem ext4 (limite 255 chars), bug Sagamore Hotel Martin 19/05/2026.
+    """
+    parsed = urllib.parse.urlparse(url)
+    # On parse uniquement le path : strip query, fragment, etc.
+    parts = [p for p in parsed.path.rstrip("/").split("/") if p]
+    last = parts[-1] if parts else "hotel"
+    # Strip .html + suffix langue éventuels (.fr, .en-gb, .es, .de, ...)
+    last = last.replace(".html", "")
+    # Strip les codes langue : .fr / .en / .es / .de / .it / .nl / .pt / .ru / .ja /
+    # .zh / .ko / .ar / .he / .pl / .cs / .uk / .tr + variants régionaux (.en-gb, .pt-br, etc.)
+    last = re.sub(r"\.(fr|en|es|de|it|nl|pt|ru|ja|zh|ko|ar|he|pl|cs|uk|tr|sv|no|da|fi|el)(-[a-z]{2})?$", "", last)
+    # Sanitize : keep alphanumeric + - _
+    last = re.sub(r"[^a-zA-Z0-9_-]", "-", last)
+    # Collapse multiple dashes + trim
+    last = re.sub(r"-+", "-", last).strip("-")
+    # Cap à 80 chars (large marge vs 255 ext4)
+    last = last[:80] if last else "hotel"
+    return last.lower()
+
+
 def scrape_booking_photos(url: str, headless: bool = True, max_scrolls: int = 30) -> list[str]:
     """Récupère les URLs de photos haute résolution d'une fiche Booking.
 
@@ -69,7 +103,13 @@ def scrape_booking_photos(url: str, headless: bool = True, max_scrolls: int = 30
     debug = lambda msg: print(f"[booking_scraper] {msg}", file=sys.stderr, flush=True)
 
     from playwright_helpers import chromium_launch_args
-    with sync_playwright() as p:
+    # Stealth wrapper (Martin 19/05/2026, fix DataDome bug Sagamore prod) :
+    # Booking utilise DataDome qui détecte Chromium headless via les flags
+    # navigator.webdriver, navigator.plugins, WebGL fingerprint, etc.
+    # playwright_stealth patche tout ça automatiquement → bypass DataDome de
+    # base. Mêmes use_sync que les autres scrapers du pipe (hotel_site_finder,
+    # booking_amenities_extractor, etc.).
+    with Stealth().use_sync(sync_playwright()) as p:
         browser = p.chromium.launch(headless=headless, args=chromium_launch_args())
         context = browser.new_context(
             user_agent=USER_AGENT,
