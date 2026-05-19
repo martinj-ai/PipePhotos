@@ -103,7 +103,7 @@ PROMPT_ENHANCEMENT = (
 
 PROMPT_WARM_BOOST = (
     "Slightly warm and brighten this hotel photo. "
-    "Add subtle golden-hour warmth, very gentle saturation boost. "
+    "Add a subtle warm midday tone (neutral-warm, NOT golden hour / NOT sepia yellow), very gentle saturation boost. "
     "Keep all elements, composition, and realism perfectly intact. "
     "Minimal, natural enhancement only."
 )
@@ -525,8 +525,8 @@ _SCENARIO_CATALOG: dict[tuple[str, str], str] = {
         f"clean white sneakers. "
         f"POSE : They stand close, her shoulder against his arm, both gazing out at the "
         f"horizon / city skyline (NOT at camera). He holds a sleek cocktail glass with "
-        f"clear ice and citrus in his outer hand. Natural late-afternoon golden warm light "
-        f"hits their profiles, slight golden hour glow."
+        f"clear ice and citrus in his outer hand. Natural bright midday natural sunlight (soft warm but not yellow/sepia) "
+        f"hits their profiles, soft natural sheen (no golden hour glow)."
     ),
     ("couples", "outdoor_deck"): (
         f"Place exactly TWO subjects standing casually on the existing outdoor deck — a "
@@ -536,8 +536,8 @@ _SCENARIO_CATALOG: dict[tuple[str, str], str] = {
         f"MAN : {_CA_MAN} He wears an open linen shirt in oat tone, tailored sand chino "
         f"shorts, clean sneakers. "
         f"POSE : They face each other in soft profile to camera, mid-conversation. She "
-        f"holds a takeaway coffee cup in one hand with a soft laugh. Natural golden warm "
-        f"light. Neither looks at the camera."
+        f"holds a takeaway coffee cup in one hand with a soft laugh. Natural bright midday "
+        f"light (clear neutral-warm daylight, no golden hour cast). Neither looks at the camera."
     ),
     ("couples", "indoor_seating"): (
         f"Place exactly TWO subjects on the existing sofa or lounge chair visible in the "
@@ -584,7 +584,7 @@ _SCENARIO_CATALOG: dict[tuple[str, str], str] = {
         f"POSE : She reclines comfortably on the lounger, propped slightly up on a flat "
         f"cushion, one knee bent. Slim hardback book held open in one hand, the other hand "
         f"resting on her thigh. Soft confident half-smile, gaze on the book (NOT at camera). "
-        f"Natural mid-afternoon golden sun on her tanned body, soft glowing skin."
+        f"Natural bright midday sun (no golden hour cast — clear neutral-warm daylight) on her tanned body, soft glowing skin."
     ),
     ("solos", "cabana_daybed"): (
         f"Place exactly ONE subject on the existing cabana daybed visible in the photo — a "
@@ -602,15 +602,15 @@ _SCENARIO_CATALOG: dict[tuple[str, str], str] = {
         f"POSE : She holds a sleek cocktail glass with clear ice and citrus in one hand, the "
         f"other hand resting lightly on the railing. She gazes out at the city skyline / "
         f"horizon (profile to camera, NOT at camera). Confident serene expression. Natural "
-        f"late-afternoon golden hour warm light glowing on her tanned side and hair."
+        f"bright midday natural sunlight (soft warm but not yellow/sepia) glowing on her tanned side and hair."
     ),
     ("solos", "outdoor_deck"): (
         f"Place exactly ONE subject standing casually on the existing outdoor deck — a "
         f"young adult woman 24-26. LOOK : {_CA_WOMAN} She wears a flowy cream or terracotta "
         f"short linen dress, natural straw crochet tote bag slung over one shoulder. "
         f"POSE : She holds a takeaway coffee cup in one hand, gazing out at the scene with "
-        f"a soft confident smile (profile to camera, NOT at camera). Natural golden hour "
-        f"warm light."
+        f"a soft confident smile (profile to camera, NOT at camera). Natural bright midday "
+        f"light (clear neutral-warm daylight, NOT golden hour)."
     ),
     ("solos", "indoor_seating"): (
         f"Place exactly ONE subject on the existing sofa or lounge chair visible in the "
@@ -721,7 +721,7 @@ _SCENARIO_CATALOG: dict[tuple[str, str], str] = {
         f"{_FAMILY_LOOK} Mother in a flowy cream short linen dress, father in linen shirt "
         f"and tailored sand chino shorts, child in casual summer clothes. "
         f"POSE : All casually standing close, the child age 6 between the parents, all "
-        f"smiling at something just out of frame (off-camera). Natural golden warm light. "
+        f"smiling at something just out of frame (off-camera). Natural bright midday light (clear neutral-warm daylight, not golden hour). "
         f"None looks at the camera."
     ),
 
@@ -768,7 +768,7 @@ _SCENARIO_CATALOG: dict[tuple[str, str], str] = {
         f"bikini, man in tailored navy swim shorts. Sleek sunglasses on all, wide-brimmed "
         f"straw hat on the center lounger if present. "
         f"POSE : Reclined subjects propped on one elbow, standing subjects in relaxed contrapposto "
-        f"holding a cocktail with citrus. Natural mid-afternoon golden sun on their tanned bodies. "
+        f"holding a cocktail with citrus. Natural bright midday sun (no golden hour cast — clear neutral-warm daylight) on their tanned bodies. "
         f"None look at the camera."
     ),
     ("small_groups", "cabana_daybed"): (
@@ -799,8 +799,8 @@ _SCENARIO_CATALOG: dict[tuple[str, str], str] = {
         f"Outfits : flowy cream silk slip dresses for women with slim heeled sandals, open "
         f"cream linen shirt and tailored sand chino shorts for the man. "
         f"POSE : They form a loose group facing each other in soft profile, sleek cocktail "
-        f"glasses with clear ice in hand, mid-laugh. Natural late-afternoon golden hour warm "
-        f"light glowing on their tanned profiles. None looks at the camera."
+        f"glasses with clear ice in hand, mid-laugh. Natural bright midday daylight "
+        f"(clear neutral-warm, NO golden hour cast) on their tanned profiles. None looks at the camera."
     ),
     ("small_groups", "outdoor_deck"): (
         f"Place exactly THREE subjects standing in a loose group on the existing outdoor "
@@ -809,7 +809,7 @@ _SCENARIO_CATALOG: dict[tuple[str, str], str] = {
         f"Outfits : flowy cream / terracotta short linen dresses for women, oat linen shirt "
         f"and tailored sand shorts for the man. Sleek sunglasses on all. "
         f"POSE : They share a candid laugh, slightly turned toward each other. Natural "
-        f"golden warm light. None looks at the camera."
+        f"bright midday daylight (clear neutral-warm, NO golden hour). None looks at the camera."
     ),
 
     # ━━ GROUPS (4 amis énergie festive California) ━━━━━━━━━━━━━━━━━━━━━━
@@ -842,7 +842,7 @@ _SCENARIO_CATALOG: dict[tuple[str, str], str] = {
         f"friends (two women 24-26, two men 26-28). Women : {_CA_WOMAN} Men : {_CA_MAN} "
         f"Outfits : chic modern swimwear, wide-brimmed straw hats and sleek sunglasses. "
         f"POSE : They share a candid relaxed moment — one sitting up to talk to the others, "
-        f"the others reclining propped on one elbow. Natural mid-afternoon golden sun on "
+        f"the others reclining propped on one elbow. Natural bright midday sun (no golden hour cast — clear neutral-warm daylight) on "
         f"their tanned bodies. None looks at the camera."
     ),
     ("groups", "rooftop_deck"): (
@@ -852,7 +852,7 @@ _SCENARIO_CATALOG: dict[tuple[str, str], str] = {
         f"Outfits : flowy cream / terracotta silk slip dresses for women, open cream linen "
         f"shirts with tailored sand chino shorts for men. "
         f"POSE : Mid-toast with sleek cocktail glasses (clear ice + citrus) in hand, all "
-        f"smiling, two of them mid-laugh. Natural late-afternoon golden hour warm light on "
+        f"smiling, two of them mid-laugh. Natural bright midday natural sunlight (soft warm but not yellow/sepia) on "
         f"profiles. None looks at the camera."
     ),
     ("groups", "outdoor_deck"): (
@@ -862,7 +862,7 @@ _SCENARIO_CATALOG: dict[tuple[str, str], str] = {
         f"Outfits : flowy linen short dresses for women, oat linen shirts and tailored "
         f"sand shorts for men. Sleek sunglasses, natural straw crochet tote bag visible. "
         f"POSE : Mid-laugh in candid group conversation, slightly turned toward each other. "
-        f"Natural golden warm light. None looks at the camera."
+        f"Natural bright midday light (clear neutral-warm daylight, not golden hour). None looks at the camera."
     ),
     ("groups", "dining_table"): (
         "Place FOUR subjects around the existing dining table — a group of trendy mixed-race "
@@ -1188,7 +1188,7 @@ PERSONA_TEMPLATES = {
 CATEGORY_ACTION_HINT = {
     "cabana":   "lounging on the existing daybed/cabana sofa, sunglasses on, relaxed posture (use existing furniture only)",
     "transat":  "reclining on the existing sun lounger(s), correct contact with the chair, natural weight (use existing furniture only)",
-    "piscine":  "DEFAULT placement = MODEL pose IN or AT the water. Priority order: (1) emerging from the pool at the edge (wet hair slicked back, elbows on pool rim, droplets running down — Vogue Vacation editorial), (2) swimming breaststroke head above water in golden light, (3) sitting at pool edge with calves in water in editorial model pose, (4) standing waist-deep gliding hands through water. Stylish swimwear (bikini/one-piece). Editorial wet-look beauty, fashion-editorial composition. Use an existing lounger ONLY if clearly empty in foreground. ⛔ DO NOT use 'planking on the back' pose (lying flat horizontally on water — looks artificial). NEVER invent a raft, lounger, daybed, towel, or any object.",
+    "piscine":  "DEFAULT placement = MODEL pose IN or AT the water. Priority order: (1) emerging from the pool at the edge (wet hair slicked back, elbows on pool rim, droplets running down — Vogue Vacation editorial), (2) swimming breaststroke head above water in bright midday light, (3) sitting at pool edge with calves in water in editorial model pose, (4) standing waist-deep gliding hands through water. Stylish swimwear (bikini/one-piece). Editorial wet-look beauty, fashion-editorial composition. Use an existing lounger ONLY if clearly empty in foreground. ⛔ DO NOT use 'planking on the back' pose (lying flat horizontally on water — looks artificial). NEVER invent a raft, lounger, daybed, towel, or any object.",
     "piscine_vue_aerienne": "DO NOT add subjects (aerial view — added humans would be tiny). If the brief insists, return image unchanged.",
     "rooftop":  "standing at the rooftop with view in background holding a drink, OR seated on existing rooftop lounger, OR if there's a rooftop pool: in/at the pool (cf. piscine rules)",
     "f_and_b":  "around the existing dining table, mid-meal moment (passing food, pouring drink), one or two glasses on the table",
@@ -1538,7 +1538,7 @@ Count check before output : if you placed more than {target_n}, remove the extra
 - Match existing lighting direction & color temperature on faces / clothing / shadows.
 
 🎨 STYLE — California-influencer travel aesthetic :
-Premium lifestyle photo, warm saturated tones, golden hour ambient, Kodak Portra 800 grain feel, candid travel-magazine moment (never staged catalog). {vibe_mood}.
+Premium lifestyle photo, saturated daylight tones, bright midday ambient (NOT golden hour, NOT yellow/sepia — clear neutral-warm sunlight), Kodak Portra 800 grain feel, candid travel-magazine moment (never staged catalog). {vibe_mood}.
 
 👤 FACE QUALITY (Nano Banana common failure) :
 Photorealistic faces — clear eyes / nose / mouth, natural skin texture, no smudge / no melted features. For small/medium-distance subjects, prefer 3/4 angle, sunglasses, or hat brim shadow to mask details.

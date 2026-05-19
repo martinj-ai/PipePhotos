@@ -22,45 +22,64 @@ from PIL import Image, ImageEnhance
 ROOT = Path(__file__).parent
 CONFIG_PATH = ROOT / "config" / "brand_lut.json"
 
+# ━━ LUT BRAND v3 (Martin 19/05/2026, retour équipe Brand) ━━━━━━━━━━━━━━━━━━━━
+# Bug v2 : la LUT v2 (warmth_r 1.05-1.10, warmth_b 0.88-0.93) donnait un rendu
+# trop jaune / sépia, façon golden hour fin d'après-midi. L'équipe Brand veut un
+# look "soleil de midi" : ensoleillé, énergique, blancs blancs, ciel bleu vif,
+# couleurs vives — mais PAS de dominante jaune dorée.
+#
+# Stratégie v3 :
+#   - Warmth_r réduit ~40-50% (R*1.01-1.06 au lieu de 1.03-1.10) → moins de push rouge
+#   - Warmth_b proche neutre (B*0.93-0.99 au lieu de 0.88-0.96) → moins de pull bleu
+#     = ciel bleu préservé, blancs blancs, pas de virage jaune
+#   - Saturation augmentée (compense la "richesse perçue" perdue en réduisant le warmth)
+#   - Contraste augmenté (le soleil zénithal donne des ombres marquées vs douces de golden hour)
+#   - Brightness un poil plus haute (forte exposition midi)
+#
+# Référence visuelle : photographie de piscine "soleil de midi" = palette saturée
+# bleu profond / blanc franc / vert palmiers vif, ombres courtes nettes. À l'opposé :
+# golden hour = palette dorée chaude, ombres longues. On part vers midi.
+
 # Paramètres par défaut — utilisés en fallback si `profile` n'est pas fourni.
 # On reste sur le profil "medium" pour ne pas casser les call sites existants.
 DEFAULT_PARAMS = {
-    "saturation": 1.15,
-    "contrast": 1.10,
-    "brightness": 1.04,
-    "warmth_r": 1.05,
-    "warmth_b": 0.93,
+    "saturation": 1.18,
+    "contrast": 1.12,
+    "brightness": 1.05,
+    "warmth_r": 1.03,
+    "warmth_b": 0.97,
 }
 
-# ━━ 3 profils LUT adaptatifs ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Calibrés empiriquement sur des photos Aloft Miami (Martin retour 12/05/2026 :
-# "trop jaune sur photos chaudes, on perd l'effet ensoleillé naturel").
+# ━━ 3 profils LUT adaptatifs v3 (soleil de midi) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 LUT_PROFILES = {
     "soft": {
-        # Photo déjà chaude/aligned-warm (ex: piscine Miami au soleil + transats orange).
-        # Pas besoin de pousser le warmth — ça virerait sépia. On garde un pop modéré.
-        "saturation": 1.12,
-        "contrast": 1.08,
-        "brightness": 1.03,
-        "warmth_r": 1.03,
-        "warmth_b": 0.96,
-    },
-    "medium": {
-        # Photo neutre/mixte/aligned-cool : boost modéré, équilibré.
-        "saturation": 1.15,
+        # Photo déjà chaude/aligned-warm : on neutralise quasi-totalement le warmth
+        # (la photo est déjà naturellement chaude) et on POSE le pop sat/contrast pour
+        # l'effet ensoleillé sans virer sépia.
+        "saturation": 1.14,
         "contrast": 1.10,
         "brightness": 1.04,
-        "warmth_r": 1.05,
-        "warmth_b": 0.93,
+        "warmth_r": 1.01,  # ← quasi-neutre (était 1.03)
+        "warmth_b": 0.99,  # ← neutre (était 0.96)
     },
-    "strong": {
-        # Photo lumineux-froid / off-brand / sortie de ai_lighting (était sombre) :
-        # full bump pour corriger la palette froide ou dévitalisée.
-        "saturation": 1.20,
+    "medium": {
+        # Photo neutre/mixte : warmth légèrement présent (le soleil de midi a quand
+        # même une légère dominante chaude vs lumière studio), mais 2× moins fort que v2.
+        "saturation": 1.18,
         "contrast": 1.12,
         "brightness": 1.05,
-        "warmth_r": 1.10,
-        "warmth_b": 0.88,
+        "warmth_r": 1.03,  # ← réduit (était 1.05)
+        "warmth_b": 0.97,  # ← moins de pull bleu (était 0.93)
+    },
+    "strong": {
+        # Photo lumineux-froid / off-brand / sortie de ai_lighting :
+        # correction tonale forte mais on s'arrête AVANT le sépia. Le warmth corrige
+        # la palette froide d'origine sans virer golden hour.
+        "saturation": 1.22,
+        "contrast": 1.13,
+        "brightness": 1.06,
+        "warmth_r": 1.06,  # ← réduit (était 1.10)
+        "warmth_b": 0.93,  # ← moins de pull bleu (était 0.88)
     },
 }
 

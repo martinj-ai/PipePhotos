@@ -228,7 +228,7 @@ RÈGLE D'OR : si après lecture du scenario_block tu N'ES PAS À 100% SÛR que N
 - Si feasibility = "skip" → mets "scenario_block": "" et explique skip_reason
 
 Exemple de scenario_block bien formé pour photo piscine + couple :
-"Place exactly 2 subjects sitting at the existing pool edge on the bare concrete deck on the right of the frame, feet dangling in the water — a young adult couple. The woman 24-26 (slim toned, golden tan, sun-bleached blonde wavy hair) wears a sleek olive one-piece swimsuit. The man 26-28 (lean athletic, Mediterranean tan, tousled brown hair) wears navy tailored swim shorts. POSE : she sits cross-ankled looking down at the water with a soft smile ; he sits next to her, one arm relaxed behind, head slightly turned toward her. They don't touch. Natural mid-afternoon warm sun on their tanned skin. Neither looks at the camera."
+"Place exactly 2 subjects sitting at the existing pool edge on the bare concrete deck on the right of the frame, feet dangling in the water — a young adult couple. The woman 24-26 (slim toned, golden tan, sun-bleached blonde wavy hair) wears a sleek olive one-piece swimsuit. The man 26-28 (lean athletic, Mediterranean tan, tousled brown hair) wears navy tailored swim shorts. POSE : she sits cross-ankled looking down at the water with a soft smile ; he sits next to her, one arm relaxed behind, head slightly turned toward her. They don't touch. Natural bright midday sun (clear neutral-warm daylight, NOT golden hour) on their tanned skin. Neither looks at the camera."
 """
 
 
