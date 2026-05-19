@@ -52,6 +52,19 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200 MB par batch
 
+# ━━ Proxy fix pour Railway (Martin 19/05/2026) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Railway/Heroku/Render mettent l'app derrière un reverse proxy HTTPS qui forward
+# en HTTP interne. Sans ce middleware, Flask url_for(_external=True) génère des
+# URLs en http://... au lieu de https://..., ce qui casse OAuth (redirect_uri
+# mismatch côté Google car Google attend https://).
+# x_proto=1 : lit X-Forwarded-Proto (https/http)
+# x_host=1  : lit X-Forwarded-Host (le vrai host public, ex: photodaypass-production.up.railway.app)
+# x_for=1   : lit X-Forwarded-For (IP client réelle)
+if os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("BEHIND_PROXY") == "1":
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1, x_for=1)
+    app.config["PREFERRED_URL_SCHEME"] = "https"
+
 # ━━ SSO Google OAuth (Martin 19/05/2026) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Protection globale : toutes les routes exigent un login Google avec email
 # se terminant par @dayuse.com. Routes publiques (login, callback, healthcheck,

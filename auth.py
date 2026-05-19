@@ -154,29 +154,49 @@ _LOGIN_HTML = """<!DOCTYPE html>
     * { box-sizing: border-box; }
     body {
       font-family: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: linear-gradient(135deg, #FFAF36 0%, #FFC536 100%);
+      background: #F4F4F6;
+      background-image:
+        radial-gradient(circle at 15% 20%, rgba(255, 175, 54, 0.06) 0%, transparent 45%),
+        radial-gradient(circle at 85% 80%, rgba(110, 105, 172, 0.05) 0%, transparent 45%);
       min-height: 100vh;
       margin: 0;
       display: flex;
       align-items: center;
       justify-content: center;
       padding: 20px;
+      color: #292935;
     }
     .card {
       background: white;
-      border-radius: 24px;
-      padding: 48px 40px;
-      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.15);
+      border-radius: 20px;
+      padding: 44px 40px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 12px 36px rgba(0, 0, 0, 0.08);
       max-width: 420px;
       width: 100%;
       text-align: center;
+      border: 1px solid #EAEAEB;
+    }
+    .logo-mark {
+      width: 56px;
+      height: 56px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, #FFAF36 0%, #FFC536 50%, #FF9F26 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 20px;
+      box-shadow: 0 8px 24px rgba(255, 175, 54, 0.35);
+      font-size: 24px;
+      font-weight: 800;
+      color: white;
+      letter-spacing: -0.5px;
     }
     h1 {
-      font-size: 32px;
+      font-size: 26px;
       font-weight: 800;
-      margin: 0 0 8px;
+      margin: 0 0 6px;
       color: #292935;
-      letter-spacing: -1px;
+      letter-spacing: -0.8px;
     }
     .subtitle { color: #54545d; font-size: 14px; margin-bottom: 32px; line-height: 1.5; }
     .google-btn {
@@ -221,8 +241,9 @@ _LOGIN_HTML = """<!DOCTYPE html>
 </head>
 <body>
   <div class="card">
-    <h1>📸 PipePhotos</h1>
-    <p class="subtitle">Pipeline IA photos pour Dayuse Day Access<br>Connecte-toi pour accéder à l'outil.</p>
+    <div class="logo-mark">D</div>
+    <h1>Day Access Photo Tool</h1>
+    <p class="subtitle">Pipeline IA photos Dayuse<br>Connecte-toi pour accéder à l'outil.</p>
     {% if error %}
       <div class="error">⚠️ {{ error }}</div>
     {% endif %}
