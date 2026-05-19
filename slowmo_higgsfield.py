@@ -82,18 +82,40 @@ _ANTI_TIMELAPSE_CLAUSE = (
 )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# CLAUSE HUMAINS (Martin 15/05/2026)
+# CLAUSE HUMAINS (Martin 19/05/2026 v2 — visages STRICTEMENT immobiles)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Avant : "people remain perfectly still" → effet statue, peu naturel.
-# Maintenant : on autorise des MICRO-mouvements naturels (respiration, blink,
-# cheveux qui bougent avec la brise) MAIS interdiction de tout mouvement
-# corporel significatif (gestes, marche, rotation tête).
+# Évolution :
+# - v1 (15/05) : "humans show micro-movements (breathing, blinks, hair sway)"
+#   → Kling animait quand même les visages / têtes → effet "uncanny valley",
+#     yeux qui bougent, lèvres qui frémissent, micro-rotations de tête → rendu
+#     dégueu sur photos lifestyle Dayuse. Bug observé Martin 18/05/2026.
+# - v2 (19/05) : INTERDICTION ABSOLUE de tout mouvement facial/tête/yeux.
+#   Seules les EXTRÉMITÉS (pieds dans l'eau, mains qui caressent l'eau, doigts)
+#   peuvent bouger, en plus de la respiration imperceptible. Les visages
+#   restent figés comme sur une PHOTO — c'est volontaire, ça donne un effet
+#   "moment suspendu" Dayuse aspirational, pas un GIF artificiel.
 _HUMANS_MICRO_MOTION_CLAUSE = (
-    "Humans visible in the scene (if any) show MINIMAL natural micro-movements: "
-    "soft chest breathing (gentle rise/fall), occasional natural blink, "
-    "hair barely moving with subtle breeze. NO body shifting, NO arm gestures, "
-    "NO walking, NO head turning, NO posture changes. Humans hold their position "
-    "naturally — alive but at rest, not frozen statues. "
+    "🚨 CRITICAL HUMAN STILLNESS RULE — read this TWICE :\n"
+    "Humans visible in the scene (if any) MUST keep their FACE, HEAD and EYES "
+    "ABSOLUTELY FROZEN — exactly as in the input photo. Treat them as a HIGH-RES "
+    "PHOTOGRAPH grafted onto the moving scene, not as animated characters.\n\n"
+    "❌ STRICTLY FORBIDDEN movements :\n"
+    "- NO blinking (eyes stay exactly as captured in the photo, no closing/opening)\n"
+    "- NO lip / mouth motion (no breathing through mouth visible, no micro-expressions)\n"
+    "- NO head turning, tilting, or any rotation\n"
+    "- NO facial micro-expressions (eyebrows, cheeks, jaw all stay frozen)\n"
+    "- NO eye darting / pupil movement\n"
+    "- NO chest breathing visible (the rib cage stays perfectly still)\n"
+    "- NO body shifting, NO arm gestures, NO leg crossing/uncrossing, NO walking\n"
+    "- NO posture changes, NO weight shifting\n\n"
+    "✅ ONLY these EXTREMITY motions are allowed (small, slow, natural) :\n"
+    "- Feet/calves in water → tiny ripples around them, water displacement\n"
+    "- Hands resting in/near water → fingers may move imperceptibly, water reacts\n"
+    "- Hair tips → barely moving with the same breeze that moves leaves/water\n"
+    "- Loose clothing edges (sarong, dress hem) → soft fabric sway only at the edges\n\n"
+    "RESULT TARGET : the human looks like a PHOTOGRAPH overlaid on a living scene. "
+    "Stillness is intentional and aspirational (Dayuse 'moment suspendu' aesthetic), "
+    "NOT a failed animation. If you can't honor this, freeze the human entirely. "
 )
 
 PROMPTS_BY_SUBJECT = {
