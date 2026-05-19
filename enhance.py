@@ -1242,28 +1242,34 @@ def compute_target_humans(persona: str, capacity: int) -> int:
 # (taille plausible, subject ON or NEAR the float, jamais multiple floats).
 import hashlib
 
-# ━━ POOL_FLOATS_OPTIONS : restreint aux formes COMPACTES (Martin 19/05/2026) ━━
-# Bug récurrent : Nano Banana rend les bouées avec extensions visuelles (ailes, queue,
-# feuilles, cou) à 2-3× leur taille déclarée. Sur un pineapple float "1.5m diameter",
-# les feuilles ajoutent ~50% de surface visuelle → la bouée occupe 30-40% de la piscine
-# au lieu des 12% ciblés. Les formes pures disque/ellipse n'ont pas ce problème : pas
-# d'extension qui peut "déborder" → l'IA respecte mieux la contrainte de taille.
-#
-# RETIRÉ (extensions = bouées géantes garanties) :
-#   - flamingo (cou + queue), swan (ailes), unicorn (corne + crinière), pineapple
-#     (feuilles vertes), watermelon (rind), avocado (gros anneau + noyau central),
-#     ice cream cone (cône vertical), rainbow arch (large), peacock (queue), shell
-#     (scallop large), golden swan (idem swan)
-#
-# GARDÉ (formes compactes disque/ellipse uniquement) :
+# ━━ POOL_FLOATS_OPTIONS : variété conservée + scale lock par item ━━━━━━━━━━━
+# Martin (19/05/2026) : on garde le côté trendy/Instagram (flamingo, pineapple,
+# swan, unicorn…) parce que ça fait l'identité visuelle Dayuse. Bug taille
+# adressé via 3 leviers conjoints :
+#   1. Description par item annoté "small / single-seater / compact / ~1-1.5m"
+#      → force Nano Banana à rendre la version personnelle, PAS la version giant
+#      party flamingo de 3m. La taille déclarée par item est notre anchor le
+#      plus fiable (l'IA respecte mieux une longueur en mètres qu'un pourcentage).
+#   2. Prompt build_pool_float_only_prompt avec scale lock 10% surface eau + "size
+#      of a child or beach ball, NEVER adult+arms".
+#   3. Validator pool_float_realistic seuil 12% FAIL.
 POOL_FLOATS_OPTIONS = [
-    "a colorful donut pool float — pink frosting with rainbow sprinkles, glossy finish, compact round shape (~1m diameter)",
-    "a translucent pastel-colored inflatable ring — clean minimalist aesthetic, soft mint or peach tone, simple disc shape",
-    "an inflatable lemon slice float — bright yellow with white pulp pattern, flat circular disc shape (~0.9m diameter)",
-    "a classic round inflatable inner tube — pastel coral color, simple disc shape with no protruding parts",
-    "a small white inflatable ring float — clean minimalist look, single-seater, photogenic in aerial shot, compact disc",
-    "an inflatable star-shaped float — pastel pink, flat star outline (~1m wide), photogenic top-down",
-    "a chocolate donut pool float — brown glossy frosting with pastel sprinkles, classic round disc (~1m)",
+    # Classiques iconiques — version PERSONNELLE (pas party prop)
+    "a SMALL pink inflatable flamingo float — single-seater, compact ~1.4m long (NOT the giant 3m party flamingo), photogenic top-pose with neck folded",
+    "a SMALL inflatable pineapple float — bright yellow body ~1.2m tall with realistic green leaves (not the oversized 2m+ party version), single-seater",
+    "a colorful donut pool float — pink frosting with rainbow sprinkles, glossy finish, compact ~1m diameter",
+    "a SMALL white inflatable swan float — single-seater, compact ~1.3m long, elegant tucked-wing pose (NOT the giant party swan)",
+    "a watermelon slice inflatable float — pink flesh with dark seeds and green rind, compact ~1m wide single-seater",
+    "a translucent pastel-colored inflatable ring — clean minimalist aesthetic, soft mint or peach tone, ~1m diameter disc",
+    # Instagrammable / influenceur-friendly — version PERSONNELLE
+    "a SMALL inflatable unicorn float — pastel rainbow mane, gold horn, soft white body, single-seater compact ~1.3m (NOT the giant 2.5m unicorn)",
+    "an avocado pool float — green outer ring with a centered brown stone (you sit IN it), compact single-seater ~1.2m diameter",
+    "a SMALL inflatable ice cream cone float — pastel scoop on a waffle cone pattern, cherry on top, single-seater ~1.3m long",
+    "a SMALL golden swan float — same as classic swan but in metallic gold finish (luxe instagram aesthetic), compact ~1.3m long",
+    "a SMALL inflatable peacock float — turquoise and emerald body with realistic tail feather pattern, single-seater ~1.3m",
+    "an inflatable shell float — iridescent pearl-pink scallop, mermaidcore aesthetic, compact ~1m diameter",
+    "an inflatable lemon slice float — bright yellow with white pulp pattern, summer-fresh look, ~1m diameter disc",
+    "a classic round inflatable inner tube — pastel coral color, simple ~1m disc with no protruding parts",
 ]
 
 POOL_FLOAT_BASE_PROBABILITY = 0.35
