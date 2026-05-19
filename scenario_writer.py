@@ -123,9 +123,19 @@ Une photo SANS sujet ajouté vaut TOUJOURS mieux qu'une photo avec sujet placé 
 a. Aucun anchor sec ne permet ≥ 8% de hauteur frame ET joker bouée non applicable (vibe incompatible ou pas de piscine assez grande).
 b. La photo est ESSENTIELLEMENT remplie par l'eau (>50% de la frame est de l'eau visible) ET les anchors secs sont tous PETITS / au FOND. Dans ce cas, forcer un placement sec mène quasi-systématiquement à invention de deck dans l'eau par Nano Banana. → SKIP.
 c. Le primary_anchor candidat est à moins de 0.5m visuel du bord d'eau (= zone "à risque" où Nano Banana confond deck et eau). Sauf si tu peux vraiment décrire ABSOLUMENT (mètres précis, repère visuel sec sans ambiguïté).
-d. La photo est une VUE AÉRIENNE / DRONE de la piscine entière (= sujet humain forcément microscopique).
+d. La photo est une VUE AÉRIENNE / DRONE / PANORAMIQUE LARGE — étendu Martin 19/05/2026 :
+   - `piscine_vue_aerienne` (vue drone piscine) → SKIP, sauf joker bouée
+   - `beach` avec shot_type=wide OU aerial → SKIP (vue panoramique plage = sujet
+     forcément microscopique, OU Nano Banana zoome → échelle cassée comme bug
+     Sagamore #4 où le couple était géant par rapport à la perspective plage)
+   - `exterieur` avec shot_type=aerial → SKIP (même raison)
+   - `hero_ext` ou `facade` avec camera_position.distance=far → SKIP
+   - Tout shot panoramique où l'horizon occupe > 50% de la frame → SKIP
+   Règle générale : si la photo n'a pas un anchor humain CLAIREMENT lisible
+   en mi-distance (pas microscopique au fond, pas oversized par recadrage),
+   SKIP est toujours préférable à un humain mal placé.
 
-Quand tu skips, mets un `skip_reason` court et précis qui aidera le debug : "no_readable_anchor", "water_dominates_frame_invention_risk", "anchor_too_close_to_water", "aerial_view_no_human_scale".
+Quand tu skips, mets un `skip_reason` court et précis qui aidera le debug : "no_readable_anchor", "water_dominates_frame_invention_risk", "anchor_too_close_to_water", "aerial_view_no_human_scale", "panoramic_beach_no_anchor", "wide_exterior_no_anchor".
 
 🍩 JOKER "BOUÉE GONFLABLE + HUMAIN DESSUS" (Martin 15/05/2026) :
 Pour les photos PISCINE où AUCUN anchor sec n'est lisible (= tous les transats/daybeds sont trop loin ou orientés mal), tu peux proposer un combo "bouée gonflable décorative + sujet allongé dessus" plutôt qu'un anchor lointain peu lisible.
