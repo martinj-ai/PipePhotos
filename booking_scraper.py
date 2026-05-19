@@ -66,6 +66,7 @@ def scrape_booking_photos(url: str, headless: bool = True, max_scrolls: int = 30
     """
     target_url = _clean_url(url)
     photo_urls: set[str] = set()
+    debug = lambda msg: print(f"[booking_scraper] {msg}", file=sys.stderr, flush=True)
 
     from playwright_helpers import chromium_launch_args
     with sync_playwright() as p:
@@ -83,51 +84,105 @@ def scrape_booking_photos(url: str, headless: bool = True, max_scrolls: int = 30
                 photo_urls.add(r.url)
 
         page.on("response", on_response)
-        page.goto(target_url, wait_until="networkidle", timeout=30000)
-
-        # Cookies
+        debug(f"goto {target_url}")
         try:
-            page.click("#onetrust-accept-btn-handler", timeout=2500)
-            page.wait_for_timeout(1000)
-        except Exception:
-            pass
+            page.goto(target_url, wait_until="domcontentloaded", timeout=45000)
+        except Exception as e:
+            debug(f"goto error : {e}")
+        debug(f"page loaded · title='{(page.title() or '')[:60]}' · network photos so far : {len(photo_urls)}")
 
-        page.wait_for_timeout(2000)
+        # Détection blocage anti-bot (DataDome, captcha)
+        page_text = (page.content() or "").lower()
+        is_blocked = any(k in page_text for k in (
+            "datadome", "are you a human", "verify you are human",
+            "captcha", "challenge-platform", "you've been blocked",
+        ))
+        if is_blocked:
+            debug("⚠️ DataDome / captcha détecté — scraping va probablement échouer")
 
-        # Trouve et clique sur le bouton "+N photos"
-        box = page.evaluate("""() => {
+        # Cookies (multi-language)
+        for sel in ("#onetrust-accept-btn-handler", "button[aria-label*='Accept']",
+                    "button[aria-label*='Accepter']", "button:has-text('Accepter')",
+                    "button:has-text('Accept all')"):
+            try:
+                page.click(sel, timeout=1500)
+                debug(f"cookies accepted via {sel}")
+                page.wait_for_timeout(800)
+                break
+            except Exception:
+                pass
+
+        # ━ Stratégie 1 : scroll la PAGE PRINCIPALE pour déclencher le lazy-load
+        # des thumbnails (Booking lazy-load les photos hôtel à mesure qu'on scroll).
+        debug("scrolling main page to trigger lazy-load thumbnails")
+        for i in range(15):
+            page.mouse.wheel(0, 1200)
+            page.wait_for_timeout(180)
+        page.wait_for_timeout(1500)
+        debug(f"after page scroll : {len(photo_urls)} photo URLs captured")
+
+        # ━ Stratégie 2 : clic sur le bouton "+N photos" (galerie modale)
+        # Élargissement du regex pour matcher : "+98 photos", "98 photos", "+98 photo",
+        # "Voir les 98 photos", "Toutes les photos", "View all photos", "98 fotos", etc.
+        box = page.evaluate(r"""() => {
             const els = document.querySelectorAll('button, a, div, span');
+            // Patterns de buttons photos (FR/EN/ES typiques sur Booking)
+            const patterns = [
+                /^\+?\s*\d+\s*photos?$/i,
+                /^\+?\s*\d+\s*fotos?$/i,
+                /voir.*\d+.*photos?/i,
+                /(view|see).*\d+.*photos?/i,
+                /ver.*\d+.*fotos?/i,
+                /toutes? les photos/i,
+                /all photos/i,
+                /todas las fotos/i,
+            ];
             for (const el of els) {
                 const t = (el.innerText || '').trim();
-                if (/^\\+?\\s*\\d+\\s*photos?$/i.test(t) && t.length < 30) {
+                if (!t || t.length > 80) continue;
+                if (patterns.some(p => p.test(t))) {
                     el.scrollIntoView({block: 'center'});
                     const r = el.getBoundingClientRect();
-                    return {x: r.x + r.width / 2, y: r.y + r.height / 2, text: t};
+                    if (r.width > 0 && r.height > 0) {
+                        return {x: r.x + r.width / 2, y: r.y + r.height / 2, text: t};
+                    }
                 }
             }
             return null;
         }""")
 
         if box:
-            page.mouse.click(box["x"], box["y"])
-            page.wait_for_timeout(3000)
+            debug(f"found photos button : '{box['text'][:50]}' → clicking")
+            try:
+                page.mouse.click(box["x"], box["y"])
+                page.wait_for_timeout(3000)
+            except Exception as e:
+                debug(f"click error : {e}")
 
-        # Scroll vertical dans la modale pour lazy-load toutes les photos
-        for _ in range(max_scrolls):
-            page.mouse.wheel(0, 1500)
-            page.wait_for_timeout(220)
-
-        page.wait_for_timeout(1500)
+            # Scroll vertical dans la modale pour lazy-load toutes les photos
+            debug(f"scrolling modal ({max_scrolls} times)")
+            for _ in range(max_scrolls):
+                page.mouse.wheel(0, 1500)
+                page.wait_for_timeout(220)
+            page.wait_for_timeout(1500)
+            debug(f"after modal scroll : {len(photo_urls)} photo URLs captured")
+        else:
+            debug("⚠️ NO photos button found — falling back on main page scan only")
 
         # Capture finale du DOM (au cas où certaines images n'ont pas généré d'event réseau)
-        dom_imgs = page.eval_on_selector_all(
-            "img",
-            "imgs => imgs.map(i => i.src || i.getAttribute('data-src') || '').filter(s => s && s.includes('cf.bstatic.com') && s.includes('/hotel/'))",
-        )
-        for u in dom_imgs:
-            photo_urls.add(u)
+        try:
+            dom_imgs = page.eval_on_selector_all(
+                "img",
+                "imgs => imgs.map(i => i.src || i.getAttribute('data-src') || '').filter(s => s && s.includes('cf.bstatic.com') && s.includes('/hotel/'))",
+            )
+            for u in dom_imgs:
+                photo_urls.add(u)
+            debug(f"DOM scan : +{len(dom_imgs)} candidates · total URLs : {len(photo_urls)}")
+        except Exception as e:
+            debug(f"DOM scan error : {e}")
 
         browser.close()
+    debug(f"final : {len(photo_urls)} raw URLs before dedup/filter")
 
     # Dédup par photo ID, garde la plus haute résolution
     by_id: dict[str, tuple[str, int]] = {}
