@@ -2538,6 +2538,12 @@ def api_hotels_processed():
     OU une analyse OU un run complet. Utilisé par le sélecteur 'Reprendre un hôtel'
     en haut de Step 1 pour permettre de skip le scrap si on bosse sur un hôtel
     qu'on a déjà processé.
+
+    Sources combinées (Martin 19/05/2026 — fix Railway eph fs) :
+      1. Filesystem `data/rp/*.json` (le plus riche : name, city, vibe, stars)
+      2. Filesystem `data/uploads/<slug>/` (uploads only)
+      3. Postgres `photo_results` (NEW : persistant à travers les redeploys,
+         sauve la liste même quand filesystem wipé sur Railway sans Volume)
     """
     hotels = []
     rp_dir = ROOT / "data" / "rp"
@@ -2571,6 +2577,31 @@ def api_hotels_processed():
                     "name": sub.name.replace("-", " ").title(),
                     "rp_scraped": False,
                 })
+
+    # Source 3 : Postgres (slugs depuis audit_db.photo_results)
+    # Permet de retrouver les hôtels processés même après un redeploy qui a
+    # wipé le filesystem (Railway éphémère sans Volume attaché).
+    try:
+        with audit_db.SessionLocal() as session:
+            from sqlalchemy import distinct, select, func as _sql_func
+            stmt = select(
+                audit_db.PhotoResult.slug,
+                _sql_func.max(audit_db.PhotoResult.created_at).label("last_run_at"),
+            ).group_by(audit_db.PhotoResult.slug)
+            for row in session.execute(stmt).all():
+                slug = row[0]
+                if slug in seen_slugs:
+                    continue
+                seen_slugs.add(slug)
+                hotels.append({
+                    "slug": slug,
+                    "name": slug.replace("-", " ").title(),
+                    "rp_scraped": False,
+                    "from_db_only": True,  # signal au front : pas de cache disque
+                    "last_run_at": row[1],
+                })
+    except Exception as e:
+        print(f"[hotels-processed] DB source failed (non-bloquant) : {e}")
 
     # Enrichi avec compteurs (sources, analyses, enhanced) pour le badge
     for h in hotels:
