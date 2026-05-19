@@ -52,10 +52,21 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200 MB par batch
 
+# ━━ SSO Google OAuth (Martin 19/05/2026) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Protection globale : toutes les routes exigent un login Google avec email
+# se terminant par @dayuse.com. Routes publiques (login, callback, healthcheck,
+# static) bypass auto via le middleware before_request.
+# Configurer via env vars : GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET,
+#                            FLASK_SECRET_KEY, ALLOWED_EMAIL_DOMAIN.
+import auth as auth_module
+auth_module.init_oauth(app)
+app.register_blueprint(auth_module.auth_bp)
+auth_module.require_login_globally(app)
+
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", current_user=auth_module.current_user())
 
 
 @app.route("/api/scrape", methods=["POST"])
