@@ -371,36 +371,52 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
     """
     amenities = rp_data.get("amenities_normalized", {})
 
-    # ━━ Compte les photos qui tagguent chaque amenity (purement diagnostic) ━━
-    # Note 11/05/2026 (Martin) : "n'affiche les photos que des amenities identifiées sur la page
-    # Booking". Si Booking ne déclare PAS cabana, on n'affiche pas le bucket cabana même si 5
-    # photos lui ressemblent — risque de classer des photos d'une AUTRE installation similaire
-    # (lounges, daybeds tropicaux d'un autre hôtel revendiqué en stock photo, etc.) comme cabana.
-    # On compte quand même pour audit/debug.
+    # ━━ Compte les photos qui tagguent chaque amenity ━━
     amenity_photo_counts: dict[str, int] = {}
     for entry in analyses:
         targets = gemini_categories_to_targets(entry.get("analysis") or {})
         for t in targets:
             amenity_photo_counts[t] = amenity_photo_counts.get(t, 0) + 1
 
-    # 1) Shopping list active : STRICT Booking — seules les amenities déclarées par Booking
-    #    sont retenues. Les buckets non-amenity (hero_ext, detail) restent toujours actifs.
-    #    Suppression de l'auto-activation par 2+ photos (cf. note ci-dessus).
+    # 1) Shopping list active — DEUX sources combinées :
+    #    a) Amenities déclarées dans la fiche RP/Booking (canonique)
+    #    b) Amenities détectées par Gemini Vision sur les photos (≥ 1 photo)
+    #
+    # ━━ Évolution de policy (Martin) ━━
+    # - 11/05/2026 → "STRICT Booking" : on ignorait les photos. Bucket OFF si pas déclaré
+    #   par Booking, même si 5 photos lui ressemblaient (risque stock photos d'un autre hôtel).
+    # - 19/05/2026 → "Trust photos > fiche" : si Gemini voit l'amenity sur les photos, on
+    #   active le bucket même si pas déclaré par la fiche. Cas Sagamore : cabanas visibles
+    #   sur les photos mais absentes du tableau amenities Booking → on les loupait. Le réel
+    #   (= les photos) prime sur le déclaratif (= la fiche RP).
+    #   Risque accepté : false positives Gemini. Mitigé par badge UI "📸 photos uniquement"
+    #   pour que l'utilisateur garde le contrôle.
+    #
+    # Seuil = 1 photo détectée (full trust comme demandé Martin). Si signal trop bruité plus tard,
+    # remonter à 2 via la constante ci-dessous.
+    MIN_PHOTOS_TO_ACTIVATE = int((rp_data.get("_config") or {}).get("min_photos_to_activate", 1))
+
     active_targets = {}
-    auto_activated: dict[str, bool] = {}  # toujours False désormais — gardé pour rétro-compat schema
-    rejected_buckets: dict[str, int] = {}  # cat → nb photos rejetées car amenity non déclarée Booking
+    activated_from_photos: dict[str, int] = {}  # cat → nb photos qui ont déclenché l'activation
+    activated_from_fiche: dict[str, bool] = {}  # cat → True si activé via la fiche
+    rejected_buckets: dict[str, int] = {}  # cat → nb photos rejetées (cas où photos < seuil)
     for cat, conf in TARGETS.items():
         req = conf["required_amenity"]
         if req is None:
+            # Buckets non-amenity (hero_ext, detail) toujours actifs
             active_targets[cat] = dict(conf)
         elif amenities.get(req):
-            # Activé par Booking/RP — on fait confiance, on peut générer si manquant
+            # Activé par la fiche (source primaire) — chemin nominal
             active_targets[cat] = dict(conf)
-            auto_activated[cat] = False
+            activated_from_fiche[cat] = True
         else:
-            # Amenity non déclarée Booking → bucket OFF, même si 5 photos lui ressemblent
+            # Pas dans la fiche → on regarde les photos (Martin 19/05/2026, trust photos)
             n_photos = amenity_photo_counts.get(cat, 0)
-            if n_photos > 0:
+            if n_photos >= MIN_PHOTOS_TO_ACTIVATE:
+                active_targets[cat] = dict(conf)
+                activated_from_photos[cat] = n_photos
+            elif n_photos > 0:
+                # < seuil : on tag pour visibilité mais on n'active pas le bucket
                 rejected_buckets[cat] = n_photos
 
     # 2) Bucket les photos par catégories cibles (multi-tagging : 1 photo peut être dans plusieurs buckets)
@@ -589,12 +605,17 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
             status = "ok"
             msg = f"{found} photo(s) {cat} — OK"
 
+        from_photos_only = cat in activated_from_photos
         by_category[cat] = {
             "target_min": conf["min"],
             "target_max": conf["max"],
             "found": found,
             "kept_estimate": keep,
-            "auto_activated_by_photos": auto_activated.get(cat, False),
+            # auto_activated_by_photos : alias rétro-compat (anciens consommateurs front)
+            "auto_activated_by_photos": from_photos_only,
+            # from_photos_only : nouveau flag canonique (Martin 19/05/2026)
+            "from_photos_only": from_photos_only,
+            "photos_detected_count": activated_from_photos.get(cat, 0),  # 0 si fiche-only
             "photos": [
                 {
                     "filename": e["input"]["filename"],
@@ -605,7 +626,10 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
                 for idx, e in enumerate(buckets[cat])
             ],
             "status": status,
-            "message": msg + (" (bucket activé par les photos détectées, pas par Booking)" if auto_activated.get(cat, False) else ""),
+            "message": msg + (
+                f" (📸 détecté seulement sur les photos ({activated_from_photos[cat]} photo(s) Gemini), pas dans la fiche RP)"
+                if from_photos_only else ""
+            ),
         }
 
     # 5) Photos non-mappées (chambre, staff, catégorie absente du shopping list...)
@@ -625,11 +649,11 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
         seen_bonus.add(fname)
         bonus_unique.append(b)
 
-    # ━━ Ajout 11/05/2026 : on injecte aussi dans rejected_low_score les photos dont la cat
-    # principale n'est pas dans une amenity Booking-declared. Permet à Martin de voir pourquoi
-    # une photo cabana de Yotel a été ignorée (cabana absente de Booking).
+    # ━━ Rejected_low_score : on injecte les photos dont la cat n'a même pas atteint le seuil
+    # minimum de photos pour activer le bucket (Martin 19/05/2026 — anciennement "non déclarée
+    # par Booking"). Si une photo isolée tagge une cat et qu'il n'y en a que 1 < MIN_PHOTOS_TO_ACTIVATE,
+    # on l'explicite pour que Martin voie pourquoi elle est ignorée.
     for cat, n_photos in rejected_buckets.items():
-        # On retrouve les entrées qui taguent cette cat pour les expliciter
         for entry in analyses:
             targets = gemini_categories_to_targets(entry.get("analysis") or {})
             if cat not in targets:
@@ -638,7 +662,10 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
                 "filename": entry["input"]["filename"],
                 "category": cat,
                 "score": score_of_entry(entry),
-                "reason": f"amenity '{cat}' non déclarée par Booking (gate strict) — bucket désactivé",
+                "reason": (
+                    f"amenity '{cat}' : {n_photos} photo(s) détectée(s) < seuil {MIN_PHOTOS_TO_ACTIVATE}, "
+                    f"et absente de la fiche RP — bucket désactivé (risque hallucination Gemini sur photo isolée)"
+                ),
             })
 
     return {
@@ -649,7 +676,9 @@ def compute_coverage(rp_data: dict, analyses: list[dict]) -> dict:
         "by_category": by_category,
         "unmapped": unmapped_summary,
         "rejected_low_score": rejected_low_score,
-        "rejected_buckets_not_in_booking": rejected_buckets,  # cat → nb photos taguées mais non déclarées Booking
+        "rejected_buckets_not_in_booking": rejected_buckets,  # rétro-compat (renommer plus tard)
+        "amenities_from_photos_only": activated_from_photos,  # cat → nb photos (Martin 19/05/2026)
+        "amenities_from_fiche": activated_from_fiche,  # cat → True si dans la fiche RP
         "rescued_transformable": rescued_transformable,
         "bonus_lifestyle": [
             {"filename": b["entry"]["input"]["filename"], "amenity": b["amenity"], "score": b["score"]}

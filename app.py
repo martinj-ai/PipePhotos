@@ -1183,10 +1183,14 @@ def api_run():
             continue
         if not photo_generator.can_generate(cat):
             continue  # food, pool, cabana etc. : pas de génération autorisée
-        # ━ Génération uniquement si bucket activé par Booking (pas par les photos seulement) ━
-        # Si auto_activated_by_photos=True, c'est qu'on a des photos mais pas de mention Booking.
-        # Ne pas générer dans ce cas (risque de fabriquer un faux spa pour un hôtel sans).
-        if info.get("auto_activated_by_photos"):
+        # ━ Pas de génération IA pour les buckets activés depuis les photos seulement ━
+        # Martin 19/05/2026 : depuis la policy "trust photos > fiche", un bucket peut être
+        # activé même sans mention dans la fiche RP. Dans ce cas, on a déjà ≥1 photo réelle
+        # pour cette amenity → on s'en contente plutôt que de générer un faux IA, parce que :
+        # 1) le risque hallucination Gemini sur l'amenity reste (cabanas vs lounges)
+        # 2) si on génère un faux et qu'en vrai l'hôtel n'a pas l'amenity → contenu trompeur
+        # On préfère un bucket "missing" honnête à un faux IA contestable.
+        if info.get("from_photos_only") or info.get("auto_activated_by_photos"):
             continue
         # On a un manque ET la catégorie peut être générée ET Booking confirme l'amenity
         gen_dir = ROOT / "data" / "uploads" / slug

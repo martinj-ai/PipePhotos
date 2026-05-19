@@ -4015,12 +4015,18 @@ photo finale enhanced (jpeg)
       `;
 
       // Couverture
+      // Badge "photos uniquement" (Martin 19/05/2026) : signal qu'une amenity a été activée
+      // uniquement parce que Gemini l'a vue sur les photos (et pas dans la fiche RP).
+      // Permet à l'utilisateur de garder un œil dessus en cas de false positive Gemini.
       const catsHTML = Object.entries(cov.by_category).map(([cat, info]) => {
         const color = info.status === 'ok' ? 'green' : info.status === 'missing' ? 'red' : 'amber';
+        const photosOnlyBadge = info.from_photos_only
+          ? `<span class="ml-1.5 bg-purple-100 text-purple-700 text-[9px] uppercase font-bold px-1.5 py-0.5 rounded" title="Activé par Gemini Vision sur les photos (${info.photos_detected_count} détectée${info.photos_detected_count > 1 ? 's' : ''}). Pas déclaré dans la fiche RP — vérifie qu'il n'y a pas de false positive.">📸 photos uniquement</span>`
+          : '';
         return `
           <div class="border border-${color}-200 bg-${color}-50 rounded-lg p-3">
             <div class="flex items-center justify-between mb-1">
-              <span class="font-semibold text-sm capitalize">${cat}</span>
+              <span class="font-semibold text-sm capitalize">${cat}${photosOnlyBadge}</span>
               <span class="text-xs text-${color}-700">${info.found}/${info.target_min}-${info.target_max}</span>
             </div>
             <div class="text-xs text-gray-600">${info.message}</div>
