@@ -352,7 +352,7 @@ Maintenant retourne ce JSON STRICT (aucun markdown, aucun texte hors JSON) :
   },
   "pool_float_realistic": {
     "status": "PASS" | "FAIL" | "N/A",
-    "evidence": "1 phrase brève : si une bouée gonflable a été ajoutée, est-elle de taille et perspective réalistes ? PASS = bouée ≤ ~15% surface eau, perspective cohérente avec la photo (top-down si vue aérienne, oblique sinon), style photoréaliste. FAIL = bouée géante (> 20% surface eau) OU perspective incohérente (3D frontale sur photo top-down, ou inversement) OU style CGI candy. N/A si aucune bouée ajoutée.",
+    "evidence": "1 phrase brève : si une bouée gonflable a été ajoutée, est-elle de taille et perspective réalistes ? Seuils resserrés (Martin 19/05/2026, bug bouées géantes persistant). PASS = bouée ≤ ~10% surface eau ET bouée ≤ taille d'un lounger visible voisin ET perspective cohérente avec la photo (top-down si vue aérienne, oblique sinon) ET style photoréaliste. FAIL = bouée ≥ 12% surface eau (NE PAS attendre 20% — 12% est déjà la limite haute) OU bouée plus grande qu'un lounger visible OU perspective incohérente (3D frontale sur photo top-down, ou inversement) OU style CGI candy. N/A si aucune bouée ajoutée.",
     "size_pct_of_water": int
   },
   "subject_anatomy_intact": {

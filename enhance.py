@@ -139,6 +139,20 @@ def build_pool_float_only_prompt(float_desc: str, is_aerial: bool = False) -> st
 
 You are ONLY allowed to add ONE pool float in the existing pool water of this image — specifically: {float_desc}.
 
+🚨 THE FLOAT IS THE *ONLY* NEW PIXEL (Martin 19/05/2026, retry bug invented_furniture) :
+Every pixel of the output OTHER than the float MUST be PIXEL-IDENTICAL to the input.
+In particular, there must be:
+- ❌ NOTHING UNDER the float (no raft, no platform, no daybed, no rigid support — the float
+  sits DIRECTLY on the existing water surface)
+- ❌ NOTHING BESIDE the float (no second float, no auxiliary object, no decoration added)
+- ❌ NOTHING ATTACHED to the float (no rope, no platform behind, no extra inflatable
+  surrounding it)
+- ❌ NO ANCHOR / PLATFORM / SUPPORT visible anywhere in the water that wasn't there before
+- ❌ NO HAND, no body part, no shadow of a person near the float
+The float floats FREELY in the pool water. The water remains the water. Nothing
+else changes. If you can't add the float WITHOUT inventing some kind of support
+or accompanying object → DO NOT add it. Return image UNCHANGED.
+
 You MUST NEVER add ANY of the following:
 - Any human, person, character, body part, hand, leg, shadow of a person
 - Any furniture, lounger, daybed, towel, plant, decoration, drink, sign, logo
@@ -151,12 +165,13 @@ You MUST NEVER add ANY of the following:
 - Place it IN the existing pool water, in a zone that is currently EMPTY (no swimmers, no decoration in that spot already).
 - Pick a natural-looking position : near the center of the water surface, or gently drifting near the edge.
 
-📏 SCALE LOCK — CRITICAL (Martin 15/05/2026, bug bouées géantes) :
-- The float must NEVER cover more than ~12% of the visible water surface. NOT 25%, NOT 20% — strict 12% max.
-- SCALE ANCHOR : the float must be approximately the SAME SIZE as ONE of the existing loungers/daybeds visible around the pool. If a lounger appears N pixels long in the input, the float should be MAX N pixels long (NOT 2× a lounger, NOT 3× a lounger).
-- For a typical 5m×3m pool seen from a standard angle, the float should appear ROUGHLY the size of an ADULT HUMAN LYING DOWN — never larger.
-- ❌ FORBIDDEN : a giant float occupying half the pool. That looks fake and ruins the photo. A small natural float in a corner is INFINITELY better than a giant one centered.
-- Mental visual test BEFORE finalizing : compare the float to the visible loungers in the photo. Float longer than a lounger = WRONG, downscale immediately.
+📏 SCALE LOCK — CRITICAL (Martin 15/05/2026 + 19/05/2026, bug bouées géantes persistant) :
+- The float must NEVER cover more than ~10% of the visible water surface. NOT 25%, NOT 20%, NOT 15% — strict 10% max.
+- SCALE ANCHOR : the float must be SMALLER than the smallest lounger/daybed visible around the pool. If a lounger appears N pixels long in the input, the float should be ≤ 0.8 × N (NOT N, NOT 2N).
+- VISUAL TEST : if you mentally place an ADULT HUMAN lying down next to your float, the human should be LONGER than the float, not shorter. The float is roughly the size of a child or a beach ball, NEVER the size of an adult+arms.
+- For a typical 5m×3m pool, the float should appear barely 1m in diameter — like a small playful accent in a corner, NOT a centerpiece.
+- ❌ FORBIDDEN : a giant float occupying a third of the pool. That looks fake and ruins the photo. A small natural float in a corner is INFINITELY better than a giant one centered.
+- Mental visual test BEFORE finalizing : compare the float to the visible loungers AND to the smallest visible step/ladder. Float ≥ size of a lounger = WRONG, downscale immediately to half that.
 
 🌊 Realistic INTEGRATION with the water:
 - Subtle wake / ripple around it
@@ -176,8 +191,11 @@ You MUST NEVER add ANY of the following:
 NEGATIVE PROMPT:
 - new humans, new people, hands, legs, body parts
 - new furniture, new objects beyond the single float
+- 🚨 new raft, platform, daybed, support UNDER or BESIDE the float (most common failure mode)
+- 🚨 second auxiliary object accompanying the float (= invented furniture)
 - duplicated floats, multiple floats, more than one float
-- 🚨 oversized float covering > 12% of water surface (banned even if "centerpiece" look is tempting)
+- 🚨 oversized float covering > 10% of water surface (banned even if "centerpiece" look is tempting)
+- 🚨 float larger than a single visible lounger/daybed (always downscale)
 - 🚨 3D perspective float on a top-down aerial photo
 - changes to framing, composition, perspective, water shape, decking
 - cartoon / CGI look, oversaturated colors, plastic shine, glowing edges
@@ -1224,23 +1242,28 @@ def compute_target_humans(persona: str, capacity: int) -> int:
 # (taille plausible, subject ON or NEAR the float, jamais multiple floats).
 import hashlib
 
+# ━━ POOL_FLOATS_OPTIONS : restreint aux formes COMPACTES (Martin 19/05/2026) ━━
+# Bug récurrent : Nano Banana rend les bouées avec extensions visuelles (ailes, queue,
+# feuilles, cou) à 2-3× leur taille déclarée. Sur un pineapple float "1.5m diameter",
+# les feuilles ajoutent ~50% de surface visuelle → la bouée occupe 30-40% de la piscine
+# au lieu des 12% ciblés. Les formes pures disque/ellipse n'ont pas ce problème : pas
+# d'extension qui peut "déborder" → l'IA respecte mieux la contrainte de taille.
+#
+# RETIRÉ (extensions = bouées géantes garanties) :
+#   - flamingo (cou + queue), swan (ailes), unicorn (corne + crinière), pineapple
+#     (feuilles vertes), watermelon (rind), avocado (gros anneau + noyau central),
+#     ice cream cone (cône vertical), rainbow arch (large), peacock (queue), shell
+#     (scallop large), golden swan (idem swan)
+#
+# GARDÉ (formes compactes disque/ellipse uniquement) :
 POOL_FLOATS_OPTIONS = [
-    # Classiques iconiques (toujours efficaces)
-    "a classic pink inflatable flamingo float — full body, gold details, photogenic top-pose",
-    "a giant inflatable pineapple float — bright yellow body with realistic green leaves on top",
-    "a colorful donut pool float — pink frosting with rainbow sprinkles, glossy finish",
-    "a white inflatable swan float — elegant, large wings, gold beak accents",
-    "a watermelon slice inflatable float — pink flesh with dark seeds and green rind",
-    "a translucent pastel-colored inflatable ring — clean minimalist aesthetic, soft mint or peach tone",
-    # Instagrammable / influenceur-friendly (Martin 12/05/2026)
-    "a magical inflatable unicorn float — pastel rainbow mane, gold horn, soft white body",
-    "a giant inflatable rainbow arch float — multicolor stripes, photogenic from above",
-    "an avocado pool float — green outer ring with a centered brown stone (you can sit IN it)",
-    "an inflatable ice cream cone float — pastel scoop on a waffle cone pattern, cherry on top",
-    "a golden swan float — same as classic swan but in metallic gold finish (luxe instagram aesthetic)",
-    "an inflatable peacock float — turquoise and emerald body with realistic tail feather pattern",
-    "an inflatable shell float — iridescent pearl-pink scallop, mermaidcore aesthetic",
-    "an inflatable lemon slice float — bright yellow with white pulp pattern, summer-fresh look",
+    "a colorful donut pool float — pink frosting with rainbow sprinkles, glossy finish, compact round shape (~1m diameter)",
+    "a translucent pastel-colored inflatable ring — clean minimalist aesthetic, soft mint or peach tone, simple disc shape",
+    "an inflatable lemon slice float — bright yellow with white pulp pattern, flat circular disc shape (~0.9m diameter)",
+    "a classic round inflatable inner tube — pastel coral color, simple disc shape with no protruding parts",
+    "a small white inflatable ring float — clean minimalist look, single-seater, photogenic in aerial shot, compact disc",
+    "an inflatable star-shaped float — pastel pink, flat star outline (~1m wide), photogenic top-down",
+    "a chocolate donut pool float — brown glossy frosting with pastel sprinkles, classic round disc (~1m)",
 ]
 
 POOL_FLOAT_BASE_PROBABILITY = 0.35
@@ -2692,7 +2715,44 @@ _SWAPPABLE_FROM_ZONES = ["in_water", "lounger", "cabana_daybed", "rooftop_deck",
                           "indoor_seating", "gym_mat", "dining_table"]
 
 
-def _reinforced_prompt(original_prompt: str, violations: list[str]) -> tuple[str, list[str]]:
+# ━ Renforcement contextuel pour ai_add_pool_float + invented_furniture ━━━━━━
+# Martin 19/05/2026 — la reinforcement générique "invented_furniture" parle de
+# SUJETS placés sur du mobilier inventé, mais sur ai_add_pool_float il n'y a pas
+# de sujet : la bouée est seule. Nano Banana invente alors un "support" sous la
+# bouée (raft/plateforme/daybed flottant) que le validator détecte comme
+# invented_furniture. Le retry actuel n'adresse pas ce cas spécifique.
+# Ce bloc remplace le bloc invented_furniture quand l'action est ai_add_pool_float.
+_POOL_FLOAT_NO_SUPPORT_REINFORCEMENT = (
+    "🚨 CRITICAL VIOLATION ON POOL FLOAT — INVENTED SUPPORT UNDER FLOAT : "
+    "in your previous output, you placed the inflatable float ON TOP of a "
+    "FABRICATED raft / platform / daybed / floating structure that did NOT exist "
+    "in the original photo. This is the most common failure mode and it is "
+    "ABSOLUTELY FORBIDDEN.\n\n"
+    "STRICT RULES for this retry :\n"
+    "(a) The float must sit DIRECTLY on the EXISTING water surface — no support "
+    "    of ANY kind underneath, including no transparent platform, no raft, "
+    "    no rigid frame, no daybed, no platform of any sort.\n"
+    "(b) The float must have NOTHING attached to it : no rope, no platform behind, "
+    "    no auxiliary inflatable, no second object floating nearby.\n"
+    "(c) The water under the float remains WATER — same color, same ripples as "
+    "    in the input. The only visible difference under the float is a soft "
+    "    natural shadow from the float itself.\n"
+    "(d) If you cannot honor (a) AND (b) AND (c) → DO NOT add the float at all. "
+    "    Return the image UNCHANGED. A bare pool is INFINITELY better than a "
+    "    pool with a fake raft under a fake float.\n\n"
+    "Pre-flight mental check before producing the output :\n"
+    "1. Is the float on the water? YES required, not on a platform.\n"
+    "2. Is there any new rigid object next to the float? NO required.\n"
+    "3. Does the area under/around the float still look like the original pool water? YES required.\n"
+    "If any check fails → return the input image unchanged."
+)
+
+
+def _reinforced_prompt(
+    original_prompt: str,
+    violations: list[str],
+    primary_action: str | None = None,
+) -> tuple[str, list[str]]:
     """Construit un prompt 'durci' en concaténant les renforcements ciblés + swap scenario.
 
     Stratégie de retry (Martin 12/05/2026) : un simple header de renforcement ne suffit pas
@@ -2705,6 +2765,13 @@ def _reinforced_prompt(original_prompt: str, violations: list[str]) -> tuple[str
         mobilier inventable — il faut juste une piscine et un bord visible.
       - `outdoor_deck` : debout sur le sol existant. Fallback si pas de piscine.
 
+    Args:
+        primary_action : l'action IA principale qui a produit la violation
+            (ex "ai_add_character", "ai_add_pool_float"). Permet d'adapter le
+            renforcement au contexte — ex sur ai_add_pool_float + invented_furniture,
+            on utilise un bloc dédié interdisant tout support sous la bouée (Martin
+            19/05/2026, photo Sagamore beach aerial).
+
     Returns: (prompt_durci, applied_strategies)
     """
     if not original_prompt or not violations:
@@ -2714,31 +2781,42 @@ def _reinforced_prompt(original_prompt: str, violations: list[str]) -> tuple[str
     prompt = original_prompt
 
     # ━ Stratégie 1 : swap scenario vers safe haven ━
-    # On regarde la 1ère violation actionnable qui demande un swap.
-    for v in violations:
-        targets = _SCENARIO_SWAP_TARGETS.get(v)
-        if not targets:
-            continue
-        primary_target, secondary_target = targets
+    # Skip si action = ai_add_pool_float (pas de scenario character à swap, et le
+    # swap pourrait casser le prompt float-only).
+    if primary_action != "ai_add_pool_float":
+        for v in violations:
+            targets = _SCENARIO_SWAP_TARGETS.get(v)
+            if not targets:
+                continue
+            primary_target, secondary_target = targets
 
-        # Tente swap vers le primary (pool_edge)
-        new_prompt, swapped, swapped_from = _swap_scenario(prompt, _SWAPPABLE_FROM_ZONES, primary_target)
-        if swapped:
-            prompt = new_prompt
-            applied.append(f"scenario_swap_{swapped_from.split('/')[1]}_to_{primary_target}")
-            break
-
-        # Si pas de match (scenario actuel n'est pas swappable, ex: pool_edge déjà), tente secondary
-        if secondary_target:
-            new_prompt, swapped, swapped_from = _swap_scenario(prompt, _SWAPPABLE_FROM_ZONES, secondary_target)
+            # Tente swap vers le primary (pool_edge)
+            new_prompt, swapped, swapped_from = _swap_scenario(prompt, _SWAPPABLE_FROM_ZONES, primary_target)
             if swapped:
                 prompt = new_prompt
-                applied.append(f"scenario_swap_{swapped_from.split('/')[1]}_to_{secondary_target}")
+                applied.append(f"scenario_swap_{swapped_from.split('/')[1]}_to_{primary_target}")
                 break
 
-    # ━ Stratégie 2 : header de renforcement classique ━
+            # Si pas de match (scenario actuel n'est pas swappable, ex: pool_edge déjà), tente secondary
+            if secondary_target:
+                new_prompt, swapped, swapped_from = _swap_scenario(prompt, _SWAPPABLE_FROM_ZONES, secondary_target)
+                if swapped:
+                    prompt = new_prompt
+                    applied.append(f"scenario_swap_{swapped_from.split('/')[1]}_to_{secondary_target}")
+                    break
+
+    # ━ Stratégie 2 : header de renforcement classique (avec override contextuel) ━
     blocks = []
     for v in violations:
+        # Override contextuel pour le combo (ai_add_pool_float, invented_furniture)
+        # → on remplace la reinforcement générique par le bloc float-only.
+        if primary_action == "ai_add_pool_float" and v == "invented_furniture":
+            blocks.append(
+                f"[CRITICAL — RETRY AFTER VIOLATION 'invented_furniture' on pool float]\n"
+                f"{_POOL_FLOAT_NO_SUPPORT_REINFORCEMENT}"
+            )
+            applied.append("pool_float_no_support_override")
+            continue
         text = VIOLATION_REINFORCEMENT.get(v)
         if text:
             blocks.append(f"[CRITICAL — RETRY AFTER VIOLATION '{v}']\n{text}")
@@ -2958,7 +3036,14 @@ def enhance_one(input_path: Path, strategy: dict, output_dir: Path) -> dict:
             if actionable_violations and last_ai_step_input and last_ai_step_index is not None:
                 retry_attempted = True
                 last_step = steps[last_ai_step_index]
-                reinforced, retry_strategies = _reinforced_prompt(last_step.get("prompt", ""), actionable_violations)
+                # primary_ai_action est passé en context pour permettre des renforcements
+                # contextuels (ex: ai_add_pool_float + invented_furniture → bloc dédié
+                # "NO support under float", Martin 19/05/2026).
+                reinforced, retry_strategies = _reinforced_prompt(
+                    last_step.get("prompt", ""),
+                    actionable_violations,
+                    primary_action=primary_ai_action,
+                )
                 # Trace les stratégies appliquées sur le step (visible dans ai_validation pour debug UI)
                 if retry_strategies:
                     last_step["retry_strategies"] = retry_strategies
@@ -3106,13 +3191,40 @@ def enhance_one(input_path: Path, strategy: dict, output_dir: Path) -> dict:
         if upscale_meta and not upscale_meta.get("error"):
             methods.append(upscale_meta["method"])
 
+        # ━ Message de fallback contextualisé (Martin 19/05/2026, G) ━━━━━━━━━━━
+        # Avant : message générique "Validation post-IA échouée 2×". Maintenant on
+        # précise l'action qui a foiré + la violation persistante, pour que la UI
+        # explique clairement à Martin pourquoi la bouée (ou l'humain) a été annulée.
+        if fallback_to_original:
+            primary_action = (steps[last_ai_step_index]["action"]
+                              if last_ai_step_index is not None and last_ai_step_index < len(steps)
+                              else strategy["action"])
+            final_violations = (ai_validation or {}).get("violations", []) or []
+            violation_str = ", ".join(final_violations[:3]) if final_violations else "violations persistantes"
+            if primary_action == "ai_add_pool_float":
+                fallback_reason = (
+                    f"🛑 Bouée annulée — Nano Banana persiste à inventer du mobilier "
+                    f"(`{violation_str}`) malgré le retry avec renforcement spécifique. "
+                    f"On garde l'originale plutôt qu'une retouche cassée."
+                )
+            elif primary_action == "ai_add_character":
+                fallback_reason = (
+                    f"🛑 Humain annulé — validation post-IA échouée 2× "
+                    f"(`{violation_str}`). On garde la photo originale."
+                )
+            else:
+                fallback_reason = (
+                    f"🛑 Retouche IA annulée — `{primary_action}` n'a pas passé la "
+                    f"validation après retry ({violation_str}). Fallback original."
+                )
+        else:
+            fallback_reason = None
+
         return {
             "input_path": str(input_path),
             "output_path": str(output_path),
             "action": strategy["action"] if not fallback_to_original else "fallback_original",
-            "reason": strategy.get("reason", "") if not fallback_to_original else (
-                "Validation post-IA échouée 2× → fallback sur l'originale (mieux qu'une photo IA pétée)."
-            ),
+            "reason": fallback_reason if fallback_to_original else strategy.get("reason", ""),
             "steps": [{
                 "action": s["action"],
                 "reason": s.get("reason", ""),
