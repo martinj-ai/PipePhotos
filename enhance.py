@@ -1284,14 +1284,6 @@ POOL_FLOATS_OPTIONS = [
     "an inflatable shell float — iridescent pearl-pink scallop, mermaidcore aesthetic, compact ~1m diameter",
     "an inflatable lemon slice float — bright yellow with white pulp pattern, summer-fresh look, ~1m diameter disc",
     "a classic round inflatable inner tube — pastel coral color, simple ~1m disc with no protruding parts",
-    # Nouvelles options 2026 (Martin 20/05/2026, ajouts trendy compatibles scale lock)
-    "an inflatable monstera leaf float — large flat tropical green leaf shape (~1.2m long), photogenic top-down, very trendy summer aesthetic",
-    "an inflatable strawberry float — red body with realistic seeds and small green leaves on top, compact ~1m, photogenic summer fruit",
-    "an inflatable daisy flower float — large white petals with a yellow center, flat layered disc (~1.1m diameter), photogenic top-down summer vibe",
-    "an inflatable cherry float — twin red cherries shape with a small green stem connector, compact ~1.1m wide, cute photogenic playful look",
-    "an inflatable cloud float — soft fluffy white cloud shape, pastel sky-blue accents, compact ~1m wide, dreamy photogenic top-down",
-    "an inflatable yin yang float — minimalist black and white disc (~1m diameter), modern zen design, photogenic top-down",
-    "an inflatable smiley face float — bright yellow with classic smile, compact ~1m disc, iconic playful single-seater",
 ]
 
 POOL_FLOAT_BASE_PROBABILITY = 0.35
