@@ -3498,6 +3498,13 @@ photo finale enhanced (jpeg)
         // (Martin 19/05/2026 : sur prod Railway, le proxy HTTP coupe à ~5min mais
         //  le pipeline backend continue. On poll /api/progress jusqu'à done puis
         //  on fetch /api/last-response/<slug> pour récupérer la réponse complète.)
+        // Martin 20/05/2026 : distinction "vrai timeout 5min" vs "crash immédiat".
+        // Si l'erreur arrive en < 30s, c'est PAS un proxy timeout — c'est :
+        //   - Railway en cours de redeploy → 503 instant
+        //   - Crash backend (import error, OOM, env var)
+        //   - Réseau wifi qui blink
+        // On ne déclenche le polling recovery que si on a tenu >= 30s.
+        const _runStartedAt = Date.now();
         async function _runWithRecovery() {
           try {
             const r = await fetch("/api/run", {
@@ -3524,9 +3531,26 @@ photo finale enhanced (jpeg)
               String(fetchErr).includes("network")
             ));
             if (!isProxyTimeout) throw fetchErr;
+            // ━ Anti faux positif : distinguer vrai timeout (>= 30s) vs crash instant (< 30s) ━
+            const elapsedMs = Date.now() - _runStartedAt;
+            const isQuickFail = elapsedMs < 30 * 1000;
+            if (isQuickFail) {
+              // Crash instantané → on remonte une erreur claire, pas de polling inutile
+              runResult.innerHTML = `<div class="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-900">
+                <strong>❌ Pipeline n'a pas démarré</strong> (échec après ${Math.round(elapsedMs/1000)}s — trop tôt pour un timeout proxy à 5min).
+                <br><br>Causes probables :
+                <ul class="list-disc list-inside mt-1 space-y-0.5">
+                  <li><strong>Railway en cours de redeploy</strong> → réessaie dans 1-2 min</li>
+                  <li><strong>Crash backend</strong> (import error, OOM, env var manquante) → check Railway → Logs</li>
+                  <li><strong>Réseau qui blink</strong> → vérifie ta connexion</li>
+                </ul>
+                <span class="text-xs italic mt-2 inline-block">Ce n'est PAS le workaround proxy timeout (qui se déclenche après 5min de pipeline).</span>
+              </div>`;
+              throw new Error(`Pipeline n'a pas démarré (échec après ${Math.round(elapsedMs/1000)}s)`);
+            }
             // Banner d'attente : le backend continue, on attend qu'il finisse
             runResult.innerHTML = `<div class="bg-blue-50 border border-blue-200 rounded p-3 text-sm text-blue-900">
-              ⏳ <strong>Connexion HTTP coupée par le proxy Railway</strong> (timeout ~5min), mais le pipeline backend tourne toujours.
+              ⏳ <strong>Connexion HTTP coupée par le proxy Railway</strong> (timeout ~5min après ${Math.round(elapsedMs/1000)}s de pipeline), mais le pipeline backend tourne toujours.
               <br>On poll <code>/api/progress</code> jusqu'à <code>done</code>, puis on récupère la réponse via <code>/api/last-response</code>.
               <br><span class="text-xs italic">Aucune analyse n'est perdue, c'est juste un workaround pour les pipelines longs.</span>
             </div>`;
