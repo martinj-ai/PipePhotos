@@ -67,18 +67,61 @@ CROSSFADE_DURATION_S = float(os.getenv("SLOWMO_CROSSFADE_DURATION", "0.5"))
 # à pousser des camera moves cinématiques par défaut, on les coupe.
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# CLAUSE ANTI-TIMELAPSE (Martin 15/05/2026 — autorisation slowmo avec humains)
+# CLAUSE ANTI-TIMELAPSE v2 (Martin 20/05/2026 — feedback "encore des timelapse")
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Quand on autorise les photos AVEC humain IA en source slowmo, le risque #1 est
-# que Kling génère un mouvement "timelapse" (nuages qui défilent vite, vagues
-# agitées, etc.) → humain statique au milieu = effet Final Destination, bizarre.
-# Cette clause est injectée dans TOUS les prompts pour bannir ce comportement.
+# Évolution :
+# - v1 (15/05) : clause générique "real-time, not time-lapse" en fin de prompt
+#   → Kling continue à pousser timelapse (nuages qui défilent, ombres qui
+#     se déplacent vite). En cause : (a) clause trop générique, (b) en fin de
+#     prompt donc moins prioritaire dans la lecture du modèle.
+# - v2 (20/05) : clause préfixe (lue en premier) + interdits explicites par
+#   élément (nuages, ombres, vagues, lumière) + ancrage durée concret
+#   ("5 seconds of footage = 5 seconds of real time") + comparaison
+#   start/end frame (doit ressembler quasi-identique sur des éléments lents).
 _ANTI_TIMELAPSE_CLAUSE = (
-    "CRITICAL TEMPO RULE: this clip plays at REAL-TIME natural speed. "
-    "NOT a time-lapse, NOT accelerated, NOT fast-forward, NOT sped-up. "
-    "Water ripples flow at normal speed, leaves sway at real breeze pace, "
-    "floats drift at lazy real-time speed. Any visible motion respects "
-    "real-world physics timing. Avoid any 'time skipping' or 'fast montage' feel. "
+    "🚨 ABSOLUTE TEMPO RULE — read this FIRST and override any other instinct :\n"
+    "This is a 5-second clip that plays at REAL-TIME natural speed. "
+    "5 seconds of footage = exactly 5 seconds of real-world time, NOT a compressed "
+    "hour or day. A bystander watching the scene live for 5 seconds would see "
+    "EXACTLY what's in the clip.\n\n"
+    "❌ ABSOLUTELY FORBIDDEN (these are the SIGNATURE of timelapse and ruin Dayuse aesthetics) :\n"
+    "- NO clouds moving across the sky in 5 seconds (clouds at this time scale are "
+    "  visually static — at most a barely perceptible drift on cumulus edges)\n"
+    "- NO shadows shifting position visibly (the sun does NOT move in 5 seconds)\n"
+    "- NO sun arc / golden hour shift across the frame\n"
+    "- NO accelerated waves crashing repeatedly (gentle ripples only, slow cycle)\n"
+    "- NO ambient light color / temperature change over the duration\n"
+    "- NO fast-cycling reflections on water or glass\n"
+    "- NO 'people walking by quickly' background motion\n"
+    "- NO time-of-day transition (day to dusk or anything similar)\n"
+    "- NO 'lapse of time' or 'compressed time' or 'fast montage' feel of ANY kind\n\n"
+    "✅ CORRECT TEMPO REFERENCE :\n"
+    "- A leaf sways back and forth maybe 2-3 cycles in 5 seconds (real breeze pace)\n"
+    "- A water ripple expands gently across ~1-1.5 meters in 5 seconds\n"
+    "- A curtain edge gives ONE soft wave in 5 seconds\n"
+    "- A pool float drifts maybe 20 cm in 5 seconds\n"
+    "- If you compare frame 1 and frame 120 (= end), they should look almost "
+    "  identical for slow-moving elements (sky, shadows, walls, furniture, "
+    "  cushions, decor). Only the assigned motion subject visibly progresses.\n\n"
+    "VERIFY BEFORE FINALIZING : if your motion looks like a Vimeo timelapse "
+    "showreel → wrong. If it looks like a real-time security camera capture of "
+    "5 seconds of a calm moment → correct.\n\n"
+)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# CLAUSE BONUS : si humain présent, la scène AUTOUR doit aussi être real-time
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Pattern dégueu observé Martin : humain figé (frozen face v2) + monde qui
+# défile en timelapse autour → effet Final Destination / horreur. La clause
+# humain bannit les mouvements de l'humain ; cette clause complète en bannissant
+# le timelapse "autour" de l'humain.
+_HUMAN_SURROUND_REALTIME_CLAUSE = (
+    "🚨 IF a human is visible : the ENVIRONMENT around them must ALSO play at "
+    "real-time speed. NEVER pair a frozen human face with a fast-moving sky / "
+    "rushing clouds / shifting shadows / time-compressed scene — that combination "
+    "is uncanny and forbidden. The human is photographic stillness AND the world "
+    "around them is real-time stillness (only the assigned subtle motion).\n\n"
 )
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -118,67 +161,94 @@ _HUMANS_MICRO_MOTION_CLAUSE = (
     "NOT a failed animation. If you can't honor this, freeze the human entirely. "
 )
 
+# ━━ STRUCTURE DES PROMPTS v2 (Martin 20/05/2026) ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Avant : description sujet → humain → anti-timelapse (en fin). Kling lit en
+# priorité le début → anti-timelapse mal respecté.
+# Maintenant : anti-timelapse EN TÊTE (priorité de lecture) → description sujet
+# → humain stillness → human surround real-time → rappel statique.
 PROMPTS_BY_SUBJECT = {
     "pool_float": (
-        "The inflatable pool float (flamingo, unicorn, swan, donut, etc.) drifts very slowly "
-        "and gently on the water surface — soft horizontal bob and slow rotation around its "
-        "vertical axis. Small concentric ripples spread around the float as it moves. "
-        "Static composition, locked-off shot, no camera movement, no zoom, no pan. "
-        + _HUMANS_MICRO_MOTION_CLAUSE +
-        "Only the float and the water ripples around it move softly. The float never leaves the frame. "
-        + _ANTI_TIMELAPSE_CLAUSE
+        _ANTI_TIMELAPSE_CLAUSE +
+        "MOTION SUBJECT : the inflatable pool float (flamingo, unicorn, swan, donut, etc.) "
+        "drifts very slowly and gently on the water surface — soft horizontal bob and slow "
+        "rotation around its vertical axis. Small concentric ripples spread around the float "
+        "as it moves. The float never leaves the frame.\n\n"
+        "Static composition, locked-off camera, no camera movement, no zoom, no pan.\n\n"
+        + _HUMANS_MICRO_MOTION_CLAUSE
+        + _HUMAN_SURROUND_REALTIME_CLAUSE +
+        "Only the float and the water ripples around it move softly. Everything else (sky, "
+        "clouds, shadows, deck, furniture, plants) stays photographically still."
     ),
     "water": (
-        "Subtle gentle water ripples on the surface, soft slow ambient movement, "
-        "natural reflection shimmer. Static composition, locked-off shot, "
-        "no camera movement, no zoom, no pan. "
-        + _HUMANS_MICRO_MOTION_CLAUSE +
-        "Only the water surface moves softly. "
-        + _ANTI_TIMELAPSE_CLAUSE
+        _ANTI_TIMELAPSE_CLAUSE +
+        "MOTION SUBJECT : subtle gentle water ripples on the surface, soft slow ambient "
+        "movement, natural reflection shimmer. Real water at calm pace — not crashing, not "
+        "rushing.\n\n"
+        "Static composition, locked-off camera, no camera movement, no zoom, no pan.\n\n"
+        + _HUMANS_MICRO_MOTION_CLAUSE
+        + _HUMAN_SURROUND_REALTIME_CLAUSE +
+        "Only the water surface moves softly. Sky, clouds, shadows, surroundings stay still."
     ),
     "curtains": (
-        "Soft gentle breeze making the curtains and light fabrics sway slowly, "
-        "ambient drift. Static composition, locked-off shot, no camera movement. "
-        + _HUMANS_MICRO_MOTION_CLAUSE +
-        "Everything else remains still. "
-        + _ANTI_TIMELAPSE_CLAUSE
+        _ANTI_TIMELAPSE_CLAUSE +
+        "MOTION SUBJECT : soft gentle breeze making the curtains and light fabrics sway "
+        "slowly with one or two cycles over the clip duration. Ambient natural drift.\n\n"
+        "Static composition, locked-off camera, no camera movement, no zoom, no pan.\n\n"
+        + _HUMANS_MICRO_MOTION_CLAUSE
+        + _HUMAN_SURROUND_REALTIME_CLAUSE +
+        "Only the fabric edges sway. Everything else (sky, light, decor, furniture) stays still."
     ),
     "foliage": (
-        "Gentle wind softly moving the leaves and plants, ambient natural sway. "
-        "Static composition, locked-off shot, no camera movement, no zoom, no pan. "
-        + _HUMANS_MICRO_MOTION_CLAUSE +
-        "Only foliage moves subtly. "
-        + _ANTI_TIMELAPSE_CLAUSE
+        _ANTI_TIMELAPSE_CLAUSE +
+        "MOTION SUBJECT : a gentle real breeze softly animating the FOLIAGE — leaves, "
+        "palm fronds, tropical plants, shrubs, grass. Each leaf sways back and forth maybe "
+        "2-3 cycles over the full 5 seconds (= real breeze pace, NOT wind tunnel, NOT storm). "
+        "Palm fronds catch the light as they move ; smaller leaves flutter gently ; tall "
+        "grasses bend slightly. The motion is hypnotic, organic, alive — the kind of "
+        "subtle natural movement you notice in a Dayuse hotel garden when sitting still.\n\n"
+        "Static composition, locked-off camera, no camera movement, no zoom, no pan.\n\n"
+        + _HUMANS_MICRO_MOTION_CLAUSE
+        + _HUMAN_SURROUND_REALTIME_CLAUSE +
+        "Only foliage moves subtly. Sky, clouds, shadows, water surface, buildings stay still."
     ),
     "fire": (
-        "Gentle dancing flames, soft warm flicker, slow ember glow. "
-        "Static composition, locked-off shot, no camera movement. "
-        + _HUMANS_MICRO_MOTION_CLAUSE +
-        "Everything else remains perfectly still. "
-        + _ANTI_TIMELAPSE_CLAUSE
+        _ANTI_TIMELAPSE_CLAUSE +
+        "MOTION SUBJECT : gentle dancing flames, soft warm flicker, slow ember glow. Real "
+        "fire physics at natural pace.\n\n"
+        "Static composition, locked-off camera, no camera movement, no zoom, no pan.\n\n"
+        + _HUMANS_MICRO_MOTION_CLAUSE
+        + _HUMAN_SURROUND_REALTIME_CLAUSE +
+        "Only the flames flicker. Everything else (smoke trails, decor, surroundings) stays still."
     ),
     "steam": (
-        "Soft slow rising steam and mist, gentle ambient drift. "
-        "Static composition, locked-off shot, no camera movement. "
-        + _HUMANS_MICRO_MOTION_CLAUSE +
-        "Background and objects remain still. "
-        + _ANTI_TIMELAPSE_CLAUSE
+        _ANTI_TIMELAPSE_CLAUSE +
+        "MOTION SUBJECT : soft slow rising steam and mist, gentle ambient drift upward. "
+        "Real steam at natural rate — not blasting, not exploding, just curling slowly.\n\n"
+        "Static composition, locked-off camera, no camera movement, no zoom, no pan.\n\n"
+        + _HUMANS_MICRO_MOTION_CLAUSE
+        + _HUMAN_SURROUND_REALTIME_CLAUSE +
+        "Only the steam wisps drift. Background and objects remain still."
     ),
     "fountain": (
-        "Gentle water flow from the fountain, soft continuous splashing, "
-        "ambient water motion. Static composition, locked-off shot, no camera movement. "
-        + _HUMANS_MICRO_MOTION_CLAUSE +
-        "Everything else remains still. "
-        + _ANTI_TIMELAPSE_CLAUSE
+        _ANTI_TIMELAPSE_CLAUSE +
+        "MOTION SUBJECT : gentle water flow from the fountain, soft continuous splashing, "
+        "ambient water motion at calm pace.\n\n"
+        "Static composition, locked-off camera, no camera movement, no zoom, no pan.\n\n"
+        + _HUMANS_MICRO_MOTION_CLAUSE
+        + _HUMAN_SURROUND_REALTIME_CLAUSE +
+        "Only the fountain water flows. Everything else stays still."
     ),
 }
 
 PROMPT_FALLBACK = (
-    "Subtle ambient atmosphere with very gentle natural motion. "
-    "Static composition, locked-off shot, no camera movement, no zoom, no pan. "
-    + _HUMANS_MICRO_MOTION_CLAUSE +
-    "Photorealistic, high quality. "
-    + _ANTI_TIMELAPSE_CLAUSE
+    _ANTI_TIMELAPSE_CLAUSE +
+    "MOTION SUBJECT : subtle ambient atmosphere with very gentle natural motion (foliage "
+    "sway, water shimmer, soft fabric drift — whichever is present in the scene).\n\n"
+    "Static composition, locked-off camera, no camera movement, no zoom, no pan.\n\n"
+    + _HUMANS_MICRO_MOTION_CLAUSE
+    + _HUMAN_SURROUND_REALTIME_CLAUSE +
+    "Photorealistic, high quality. The clip should feel like 5 seconds of real-time presence "
+    "in a calm Dayuse hotel space, NOT a stylized time-lapse."
 )
 
 
