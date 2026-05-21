@@ -266,7 +266,8 @@
     <nav class="flex gap-1 border-b border-gray-200 mb-6">
       <button class="tab-btn active" data-tab="pipeline">🔧 Pipeline</button>
       <button class="tab-btn" data-tab="workflow">🌳 Workflow</button>
-      <button class="tab-btn" data-tab="doc">📚 Documentation</button>
+      <button class="tab-btn" data-tab="base">📚 Base</button>
+      <button class="tab-btn" data-tab="doc">📖 Documentation</button>
       <button class="tab-btn" data-tab="dashboard">📊 Dashboard</button>
     </nav>
 
@@ -2414,6 +2415,35 @@ photo finale enhanced (jpeg)
       </div><!-- /subtab-multiframe-rejected -->
 
     </div><!-- /tab-doc -->
+
+    <!-- ━━━ Tab Base (Martin 20/05/2026) — historique des pipes ━━━━━━━━━━━ -->
+    <div id="tab-base" class="tab-panel">
+      <section class="card-dayuse p-6 mb-4">
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <div>
+            <h2 class="text-base font-semibold">📚 Base — Historique des pipes</h2>
+            <p class="text-xs text-gray-500 mt-1">
+              Tous les pipes complets exécutés. Click sur un hôtel pour voir ses Pipe 1, 2, 3...
+              Click sur un pipe pour voir le rendu complet (scoring, avant/après, motion, prompts, LOI).
+            </p>
+          </div>
+          <button id="base-refresh" class="btn-dayuse-ghost text-xs" style="padding: 6px 14px;">↻ Rafraîchir</button>
+        </div>
+        <div id="base-info" class="text-xs text-gray-600 mb-3"></div>
+        <div id="base-hotels-list" class="space-y-2"></div>
+      </section>
+
+      <!-- Conteneur pour le rendu complet d'un pipe sélectionné -->
+      <section id="base-run-detail" class="hidden card-dayuse p-6 mb-4">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <h3 id="base-run-title" class="text-base font-semibold">Détail du pipe</h3>
+          <div class="flex gap-2">
+            <button id="base-run-close" class="btn-dayuse-ghost text-xs" style="padding: 6px 14px;">✕ Fermer</button>
+          </div>
+        </div>
+        <div id="base-run-content"></div>
+      </section>
+    </div><!-- /tab-base -->
 
     <!-- ━━━ Tab Dashboard (Martin 15/05/2026, pack C) ━━━━━━━━━━━━━━━━━━━━ -->
     <div id="tab-dashboard" class="tab-panel">
@@ -6071,14 +6101,176 @@ photo finale enhanced (jpeg)
     document.getElementById('dash-days')?.addEventListener('change', loadDashboard);
     document.getElementById('dash-slug')?.addEventListener('change', loadDashboard);
 
-    // Load dashboard quand on switche sur l'onglet
+    // Load dashboard / base quand on switche sur l'onglet
     document.querySelectorAll('.tab-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         if (btn.dataset.tab === 'dashboard') {
           loadDashboard();
+        } else if (btn.dataset.tab === 'base') {
+          loadBase();
         }
       });
     });
+
+    // ━━━ Menu Base — historique des pipes en DB (Martin 20/05/2026) ━━━━━━━━━━
+    // Hôtels → click → expand sous-liste Pipe 1, Pipe 2, ... → click pipe →
+    // injecte renderResults(data) dans #base-run-content (rendu complet read-only).
+    async function loadBase() {
+      const list = document.getElementById('base-hotels-list');
+      const info = document.getElementById('base-info');
+      const refreshBtn = document.getElementById('base-refresh');
+      if (!list) return;
+      list.innerHTML = '<div class="text-sm text-gray-500">Chargement…</div>';
+      info.textContent = '';
+      try {
+        const r = await fetch('/api/db/hotels');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const data = await r.json();
+        const hotels = data.hotels || [];
+        if (hotels.length === 0) {
+          list.innerHTML = `<div class="text-sm text-gray-500 italic">
+            Aucun pipe complet en base pour l'instant.
+            Lance un run en mode <strong>"Tout re-analyser"</strong> et il apparaîtra ici à la fin.
+          </div>`;
+          return;
+        }
+        info.textContent = `${hotels.length} hôtel(s) — ${hotels.reduce((s, h) => s + h.n_runs, 0)} pipe(s) au total.`;
+        const fmtDate = (ts) => ts ? new Date(ts * 1000).toLocaleString('fr-FR', {
+          day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit'
+        }) : '—';
+        list.innerHTML = hotels.map(h => `
+          <details class="border border-gray-200 rounded-xl overflow-hidden bg-white">
+            <summary class="px-4 py-3 cursor-pointer hover:bg-gray-50 transition flex items-center justify-between gap-3">
+              <div class="flex-1 min-w-0">
+                <div class="font-semibold text-sm truncate">${h.name}</div>
+                <div class="text-xs text-gray-500 mt-0.5">
+                  <code class="text-[10px] bg-gray-100 px-1 py-0.5 rounded">${h.slug}</code>
+                  · ${h.n_runs} pipe(s) (${h.n_runs_with_images} avec images)
+                  · dernier ${fmtDate(h.last_run_at)}
+                </div>
+              </div>
+              <span class="text-xs text-gray-400">▼</span>
+            </summary>
+            <div class="px-4 py-3 border-t border-gray-100 bg-gray-50" data-slug-runs="${h.slug}">
+              <div class="text-xs text-gray-400 italic">Chargement des pipes…</div>
+            </div>
+          </details>
+        `).join('');
+
+        // Au premier expand de chaque hôtel, on charge ses runs
+        list.querySelectorAll('details').forEach(det => {
+          det.addEventListener('toggle', async () => {
+            if (!det.open) return;
+            const container = det.querySelector('[data-slug-runs]');
+            if (!container || container.dataset.loaded) return;
+            const slug = container.dataset.slugRuns;
+            container.innerHTML = '<div class="text-xs text-gray-400 italic">Chargement…</div>';
+            try {
+              const r = await fetch(`/api/db/hotel/${encodeURIComponent(slug)}/runs`);
+              const d = await r.json();
+              const runs = d.runs || [];
+              if (runs.length === 0) {
+                container.innerHTML = '<div class="text-xs text-gray-500 italic">Aucun pipe.</div>';
+                return;
+              }
+              container.innerHTML = runs.map(rn => `
+                <div class="flex items-center justify-between gap-3 py-2 border-b border-gray-200 last:border-0">
+                  <div class="flex-1 min-w-0">
+                    <div class="text-sm font-semibold">
+                      Pipe ${rn.run_number}
+                      <span class="text-xs font-normal text-gray-500 ml-1">
+                        — ${fmtDate(rn.started_at)}
+                        · ${rn.n_photos_enhanced || 0}/${rn.n_photos_uploaded || 0} retouchées
+                        · $${(rn.cost_usd || 0).toFixed(4)}
+                        ${rn.has_slowmo ? ' · 🎬' : ''}
+                      </span>
+                    </div>
+                    <div class="text-[10px] text-gray-400 mt-0.5">
+                      ${rn.has_images
+                        ? '<span class="text-green-600">📷 images dispo</span>'
+                        : '<span class="text-amber-600">📋 metadata only (images purgées — gestion espace)</span>'}
+                      ${rn.pool_floats_enabled ? ' · 🍩 bouées' : ''}
+                      ${rn.slowmo_enabled ? ' · 🎬 slowmo' : ''}
+                    </div>
+                  </div>
+                  <div class="flex gap-1">
+                    <button class="text-xs px-3 py-1.5 rounded-full bg-cyan-100 text-cyan-800 hover:bg-cyan-200 font-semibold"
+                            data-run-view="${rn.run_id}">👁️ Voir</button>
+                    <button class="text-xs px-2 py-1.5 rounded-full bg-red-50 text-red-700 hover:bg-red-100"
+                            data-run-delete="${rn.run_id}" title="Supprimer ce pipe">🗑</button>
+                  </div>
+                </div>
+              `).join('');
+              container.dataset.loaded = '1';
+
+              // Wire Voir + Supprimer
+              container.querySelectorAll('[data-run-view]').forEach(btn => {
+                btn.addEventListener('click', () => viewBaseRun(parseInt(btn.dataset.runView, 10)));
+              });
+              container.querySelectorAll('[data-run-delete]').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                  if (!confirm('Supprimer définitivement ce pipe ? (irréversible)')) return;
+                  const id = parseInt(btn.dataset.runDelete, 10);
+                  try {
+                    const r = await fetch(`/api/db/run/${id}`, { method: 'DELETE' });
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    container.dataset.loaded = '';
+                    det.open = false; det.open = true;  // force reload via toggle handler
+                  } catch (e) {
+                    alert('Échec suppression : ' + e.message);
+                  }
+                });
+              });
+            } catch (e) {
+              container.innerHTML = `<div class="text-xs text-red-600">Erreur : ${e.message}</div>`;
+            }
+          });
+        });
+      } catch (e) {
+        list.innerHTML = `<div class="text-sm text-red-600">Erreur chargement : ${e.message}</div>`;
+      }
+    }
+
+    // Affiche le rendu complet d'un pipe — injecte renderResults dans #base-run-content
+    async function viewBaseRun(runId) {
+      const section = document.getElementById('base-run-detail');
+      const title = document.getElementById('base-run-title');
+      const content = document.getElementById('base-run-content');
+      if (!section || !content) return;
+      section.classList.remove('hidden');
+      content.innerHTML = '<div class="text-sm text-gray-500 italic">Chargement du rendu…</div>';
+      section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      try {
+        const r = await fetch(`/api/db/run/${runId}`);
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          throw new Error(err.error || 'HTTP ' + r.status);
+        }
+        const data = await r.json();
+        const fmtDate = (ts) => ts ? new Date(ts * 1000).toLocaleString('fr-FR') : '—';
+        title.innerHTML = `${data.hotel_name || data.slug} — <strong>Pipe ${data.run_number}</strong>
+          <span class="text-xs font-normal text-gray-500 ml-2">${fmtDate(data.started_at)}</span>`;
+        // On a besoin de state.slug pour que les sous-renders (export PDF, regen slowmo) marchent
+        state.slug = data.slug;
+        state.lastRun = data.response;
+        content.innerHTML = renderResults(data.response);
+        // Init sliders APRÈS injection DOM (double RAF = paint terminé)
+        requestAnimationFrame(() => {
+          requestAnimationFrame(initCompareSliders);
+          if (typeof wireExportPdfButton === 'function') wireExportPdfButton();
+          if (typeof wireRegenSlowmoButton === 'function') wireRegenSlowmoButton();
+          if (typeof wireCopyPromptButtons === 'function') wireCopyPromptButtons();
+        });
+      } catch (e) {
+        content.innerHTML = `<div class="text-sm text-red-600">Erreur : ${e.message}</div>`;
+      }
+    }
+
+    // Bouton Fermer + Refresh
+    document.getElementById('base-run-close')?.addEventListener('click', () => {
+      document.getElementById('base-run-detail').classList.add('hidden');
+    });
+    document.getElementById('base-refresh')?.addEventListener('click', loadBase);
 
     // ━━━ Raccourci hôtels déjà processés (skip scrap) ━━━
     async function loadHotelShortcut() {
