@@ -2159,6 +2159,36 @@ def api_run():
     except Exception as e:
         print(f"[run] persist final_response failed: {e}")
 
+    # ━━ Persist PipelineRun en DB pour le menu "Base" (Martin 20/05/2026) ━━━━━
+    # SEULEMENT pour les runs COMPLETS (resume_from=scrape) — les modes
+    # selection/postprocess sont des variantes du run en cours, pas un nouveau Pipe N.
+    # On utilise NumpyJSONProvider via app.json.dumps puis on re-parse pour avoir un
+    # dict 100% JSON-sérialisable (sans numpy types) avant insertion.
+    if resume_from == "scrape":
+        try:
+            uploads_dir_run = ROOT / "data" / "uploads" / slug
+            enhanced_dir_run = ROOT / "data" / "output" / slug / "enhanced"
+            slowmo_path_run = None
+            if response_data.get("slowmo") and response_data["slowmo"].get("output_filename"):
+                slowmo_path_run = ROOT / "data" / "output" / slug / "slowmo" / response_data["slowmo"]["output_filename"]
+            # Re-parse via NumpyJSONProvider pour neutraliser les numpy types
+            clean_response = json.loads(app.json.dumps(response_data))
+            save_result = audit_db.save_pipeline_run(
+                slug=slug,
+                response_data=clean_response,
+                uploads_dir=uploads_dir_run,
+                enhanced_dir=enhanced_dir_run,
+                slowmo_path=slowmo_path_run,
+                pool_floats_enabled=pool_floats_enabled,
+                slowmo_enabled=slowmo_enabled,
+            )
+            if save_result.get("ok"):
+                print(f"[run] PipelineRun saved : run_id={save_result['run_id']} Pipe {save_result['run_number']} ({save_result['n_files']} fichiers)")
+            else:
+                print(f"[run] PipelineRun save failed : {save_result.get('error')}")
+        except Exception as e:
+            print(f"[run] PipelineRun persist failed (non-bloquant) : {e}")
+
     return jsonify(response_data)
 
 
@@ -2873,6 +2903,96 @@ def api_last_response(slug):
         return jsonify(data)
     except Exception as e:
         return jsonify({"error": f"Lecture final_response.json échouée : {str(e)[:200]}"}), 500
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Menu "Base" — endpoints DB pour historique des pipes (Martin 20/05/2026)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@app.route("/api/db/hotels")
+def api_db_hotels():
+    """Liste tous les hôtels qui ont au moins 1 PipelineRun, avec metadata."""
+    return jsonify({"hotels": audit_db.list_hotels_with_runs()})
+
+
+@app.route("/api/db/hotel/<slug>/runs")
+def api_db_hotel_runs(slug):
+    """Liste tous les Pipe N d'un hôtel (sans le response_json complet)."""
+    return jsonify({"slug": slug, "runs": audit_db.list_runs_for_slug(slug)})
+
+
+@app.route("/api/db/run/<int:run_id>")
+def api_db_run(run_id):
+    """Détail complet d'un run : metadata + response (avec URLs réécrites vers /api/db/file/<id>)."""
+    run = audit_db.get_pipeline_run(run_id)
+    if not run:
+        return jsonify({"error": f"Run {run_id} not found"}), 404
+
+    # Construit un mapping {kind/filename → file_id} pour réécrire les URLs.
+    file_map = {}
+    for f in run.get("files") or []:
+        file_map[f"{f['kind']}/{f['filename']}"] = f["id"]
+
+    # Réécrit les before_url / after_url / video_url dans le response_data pour
+    # qu'ils pointent vers /api/db/file/<id> (au lieu de /uploads/<slug>/x.jpg)
+    slug = run["slug"]
+    response = run.get("response") or {}
+
+    def _rewrite_url(url: str | None) -> str | None:
+        """Mappe /uploads/<slug>/x.jpg → /api/db/file/<id> selon file_map."""
+        if not url:
+            return url
+        # Cherche /uploads/<slug>/filename ou /output/<slug>/enhanced/filename ou /output/<slug>/slowmo/filename
+        for kind, prefix in [
+            ("uploads", f"/uploads/{slug}/"),
+            ("enhanced", f"/output/{slug}/enhanced/"),
+            ("slowmo", f"/output/{slug}/slowmo/"),
+        ]:
+            if url.startswith(prefix):
+                filename = url[len(prefix):]
+                key = f"{kind}/{filename}"
+                if key in file_map:
+                    return f"/api/db/file/{file_map[key]}"
+                # Pas dans la map → soit images purgées, soit fichier manquant
+                return None  # signal "image indisponible"
+        return url  # URL externe ou autre, pas touché
+
+    # Walk enhanced[] et réécrit before_url / after_url
+    for entry in (response.get("enhanced") or []):
+        entry["before_url"] = _rewrite_url(entry.get("before_url"))
+        entry["after_url"] = _rewrite_url(entry.get("after_url"))
+
+    # Walk photos[] (sources affichées dans la grille)
+    for p in (response.get("photos") or []):
+        p["url"] = _rewrite_url(p.get("url"))
+
+    # Slowmo video_url
+    if response.get("slowmo"):
+        response["slowmo"]["video_url"] = _rewrite_url(response["slowmo"].get("video_url"))
+
+    run["response"] = response
+    return jsonify(run)
+
+
+@app.route("/api/db/file/<int:file_id>")
+def api_db_file(file_id):
+    """Sert le binaire (image ou vidéo) d'un PipelineFile."""
+    res = audit_db.get_pipeline_file_blob(file_id)
+    if not res:
+        return jsonify({"error": "File not found"}), 404
+    data, mime = res
+    return Response(data, mimetype=mime, headers={
+        "Cache-Control": "public, max-age=86400",  # 1 jour, change rarement
+    })
+
+
+@app.route("/api/db/run/<int:run_id>", methods=["DELETE"])
+def api_db_run_delete(run_id):
+    """Supprime un PipelineRun + cascade ses PipelineFile."""
+    res = audit_db.delete_pipeline_run(run_id)
+    if not res.get("ok"):
+        return jsonify(res), 404 if "not found" in (res.get("error") or "").lower() else 500
+    return jsonify(res)
 
 
 @app.route("/api/audit-dashboard")

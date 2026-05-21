@@ -22,10 +22,11 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import (
-    Column, Integer, Float, String, Text, Boolean, Index,
-    PrimaryKeyConstraint, create_engine, select, func, and_, or_, text,
+    Column, Integer, Float, String, Text, Boolean, Index, LargeBinary,
+    PrimaryKeyConstraint, ForeignKey, create_engine, select, func, and_, or_, text,
+    delete,
 )
-from sqlalchemy.orm import declarative_base, sessionmaker, Session
+from sqlalchemy.orm import declarative_base, sessionmaker, Session, relationship
 
 ROOT = Path(__file__).parent
 DATA_DIR = ROOT / "data"
@@ -98,6 +99,67 @@ class PhotoTag(Base):
 
     __table_args__ = (
         PrimaryKeyConstraint("slug", "filename"),
+    )
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Pipeline runs — historique des pipes complets (Martin 20/05/2026)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Permet de naviguer dans le menu "Base" :
+#   - liste des hôtels avec leurs pipes (Pipe 1, Pipe 2, Pipe N)
+#   - chaque pipe = un snapshot complet (scoring, prompts, LOI, audit, images)
+#
+# Stratégie storage (sans Volume Railway, Martin 20/05/2026) :
+#   - metadata (response_json) → JSONB Postgres / TEXT SQLite, illimité
+#   - images binaires → BYTEA Postgres / BLOB SQLite, COMPRESSÉES à 1280px
+#     quality 80 (~200-400 KB par image au lieu de 5-10 MB)
+#   - limite par défaut : 3 runs en images max par slug (purge auto du plus
+#     vieux quand on en insère un 4e). Metadata gardée indéfiniment.
+
+class PipelineRun(Base):
+    """1 row par run COMPLET (resume_from=scrape) du pipeline."""
+    __tablename__ = "pipeline_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    slug = Column(String(255), nullable=False, index=True)
+    run_number = Column(Integer, nullable=False)  # 1, 2, 3... par slug
+    hotel_name = Column(String(255))  # cache pour affichage rapide
+    started_at = Column(Float, nullable=False, index=True)
+    completed_at = Column(Float)
+    duration_s = Column(Float)
+    n_photos_uploaded = Column(Integer, default=0)
+    n_photos_enhanced = Column(Integer, default=0)
+    cost_usd = Column(Float, default=0)
+    response_json = Column(Text)  # final_response.json complet (~50-200 KB)
+    pool_floats_enabled = Column(Boolean, default=False)
+    slowmo_enabled = Column(Boolean, default=False)
+    has_slowmo = Column(Boolean, default=False)
+    has_images = Column(Boolean, default=True)  # False si images purgées (gestion espace)
+
+    __table_args__ = (
+        Index("idx_pipeline_runs_slug_run_number", "slug", "run_number"),
+    )
+
+
+class PipelineFile(Base):
+    """1 row par fichier binaire (image ou vidéo) associé à un PipelineRun.
+
+    Compressé avant stockage pour réduire la taille DB. Servi via /api/db/file/<id>.
+    """
+    __tablename__ = "pipeline_files"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(Integer, ForeignKey("pipeline_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    slug = Column(String(255), nullable=False, index=True)
+    kind = Column(String(32), nullable=False, index=True)  # 'uploads' | 'enhanced' | 'slowmo'
+    filename = Column(String(255), nullable=False)
+    mime_type = Column(String(64), nullable=False)
+    size_bytes = Column(Integer, default=0)
+    data = Column(LargeBinary, nullable=False)
+    created_at = Column(Float, nullable=False)
+
+    __table_args__ = (
+        Index("idx_pipeline_files_run_kind_filename", "run_id", "kind", "filename"),
     )
 
 
@@ -513,3 +575,326 @@ def get_conn():
         conn.commit()
     finally:
         conn.close()
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Pipeline runs API — persist / list / fetch / delete (Martin 20/05/2026)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+MAX_RUNS_WITH_IMAGES_PER_SLUG = int(os.getenv("MAX_RUNS_WITH_IMAGES_PER_SLUG", "3"))
+IMAGE_COMPRESSION_MAX_WIDTH = int(os.getenv("PIPELINE_IMAGE_MAX_WIDTH", "1280"))
+IMAGE_COMPRESSION_QUALITY = int(os.getenv("PIPELINE_IMAGE_QUALITY", "80"))
+
+
+def _compress_image_for_storage(input_path: Path) -> tuple[bytes, str]:
+    """Compresse une image pour stockage DB : redimensionne à 1280px max, JPEG quality 80.
+
+    Returns: (compressed_bytes, mime_type). En cas d'échec, retourne le binaire brut + best-guess MIME.
+    """
+    try:
+        from PIL import Image
+        img = Image.open(input_path)
+        # Convert to RGB pour JPEG (gère le PNG transparent → JPEG en aplatissant sur blanc)
+        if img.mode in ("RGBA", "LA", "P"):
+            bg = Image.new("RGB", img.size, (255, 255, 255))
+            if img.mode == "P":
+                img = img.convert("RGBA")
+            bg.paste(img, mask=img.split()[-1] if img.mode in ("RGBA", "LA") else None)
+            img = bg
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+        # Resize si plus grand que max_width
+        if img.width > IMAGE_COMPRESSION_MAX_WIDTH:
+            ratio = IMAGE_COMPRESSION_MAX_WIDTH / img.width
+            new_h = int(img.height * ratio)
+            img = img.resize((IMAGE_COMPRESSION_MAX_WIDTH, new_h), Image.LANCZOS)
+        # Encode JPEG
+        import io
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=IMAGE_COMPRESSION_QUALITY, optimize=True)
+        return buf.getvalue(), "image/jpeg"
+    except Exception as e:
+        print(f"[audit_db] compress failed for {input_path}: {e} — falling back to raw bytes")
+        return input_path.read_bytes(), "image/jpeg"
+
+
+def _store_file(session: Session, run_id: int, slug: str, kind: str,
+                filename: str, file_path: Path) -> dict | None:
+    """Lit un fichier disque + compresse (images) + insère en BD. Returns dict {id, size, mime} ou None."""
+    if not file_path.exists():
+        return None
+    try:
+        suffix = file_path.suffix.lower()
+        if suffix in (".jpg", ".jpeg", ".png", ".webp"):
+            data, mime = _compress_image_for_storage(file_path)
+        elif suffix == ".mp4":
+            data = file_path.read_bytes()
+            mime = "video/mp4"
+        else:
+            data = file_path.read_bytes()
+            mime = "application/octet-stream"
+        row = PipelineFile(
+            run_id=run_id, slug=slug, kind=kind, filename=filename,
+            mime_type=mime, size_bytes=len(data), data=data, created_at=time.time(),
+        )
+        session.add(row)
+        session.flush()  # pour récupérer l'id
+        return {"id": row.id, "size": len(data), "mime": mime}
+    except Exception as e:
+        print(f"[audit_db] _store_file failed for {file_path}: {e}")
+        return None
+
+
+def _purge_old_runs_with_images(session: Session, slug: str, keep: int = MAX_RUNS_WITH_IMAGES_PER_SLUG) -> int:
+    """Garde les `keep` runs les plus récents AVEC images pour ce slug. Purge les images des autres.
+    Metadata des runs est conservée (juste has_images=False + delete des PipelineFile).
+    Returns: nb de runs purgés.
+    """
+    runs = session.execute(
+        select(PipelineRun).where(
+            PipelineRun.slug == slug,
+            PipelineRun.has_images == True,
+        ).order_by(PipelineRun.started_at.desc())
+    ).scalars().all()
+    if len(runs) <= keep:
+        return 0
+    to_purge = runs[keep:]
+    n_purged = 0
+    for r in to_purge:
+        session.execute(delete(PipelineFile).where(PipelineFile.run_id == r.id))
+        r.has_images = False
+        n_purged += 1
+    return n_purged
+
+
+def save_pipeline_run(
+    slug: str,
+    response_data: dict,
+    uploads_dir: Path,
+    enhanced_dir: Path,
+    slowmo_path: Path | None = None,
+    pool_floats_enabled: bool = False,
+    slowmo_enabled: bool = False,
+) -> dict:
+    """Persiste un run complet en DB : metadata (response_json) + images compressées.
+
+    Args:
+        slug : hôtel slug
+        response_data : le dict response_json complet (final_response.json)
+        uploads_dir : Path vers data/uploads/<slug>/ pour récupérer les "avant"
+        enhanced_dir : Path vers data/output/<slug>/enhanced/ pour les "après"
+        slowmo_path : Path optionnel vers le mp4 slowmo loop
+        pool_floats_enabled : Si bouées étaient activées (pour affichage)
+        slowmo_enabled : Si slowmo était demandé
+
+    Returns:
+        dict {ok: bool, run_id, run_number, n_files, error?}
+    """
+    try:
+        hotel = response_data.get("hotel") or {}
+        hotel_name = hotel.get("name") or slug
+        stats = response_data.get("stats") or {}
+        cost = response_data.get("cost") or {}
+        enhanced_list = response_data.get("enhanced") or []
+        slowmo_meta = response_data.get("slowmo")
+
+        with SessionLocal() as session:
+            # Auto-increment run_number par slug
+            max_n = session.execute(
+                select(func.max(PipelineRun.run_number)).where(PipelineRun.slug == slug)
+            ).scalar() or 0
+            run_number = max_n + 1
+
+            run = PipelineRun(
+                slug=slug,
+                run_number=run_number,
+                hotel_name=hotel_name,
+                started_at=float(response_data.get("pipeline_started_at") or time.time()),
+                completed_at=float(response_data.get("pipeline_completed_at") or time.time()),
+                duration_s=float(response_data.get("pipeline_duration_s") or 0),
+                n_photos_uploaded=int(stats.get("uploaded") or 0),
+                n_photos_enhanced=int(stats.get("enhanced") or 0),
+                cost_usd=float(cost.get("total_usd") or 0),
+                response_json=json.dumps(response_data, ensure_ascii=False, default=str),
+                pool_floats_enabled=bool(pool_floats_enabled),
+                slowmo_enabled=bool(slowmo_enabled),
+                has_slowmo=bool(slowmo_meta and slowmo_meta.get("video_url")),
+                has_images=True,
+            )
+            session.add(run)
+            session.flush()  # pour récupérer run.id
+            run_id = run.id
+
+            # Persist les fichiers (uploads + enhanced + slowmo)
+            n_files = 0
+            for entry in enhanced_list:
+                fn = entry.get("filename")
+                if not fn:
+                    continue
+                # uploads (avant)
+                up_path = uploads_dir / fn
+                if up_path.exists():
+                    if _store_file(session, run_id, slug, "uploads", fn, up_path):
+                        n_files += 1
+                # enhanced (après)
+                enh_path = enhanced_dir / fn
+                if enh_path.exists():
+                    if _store_file(session, run_id, slug, "enhanced", fn, enh_path):
+                        n_files += 1
+
+            # Slowmo mp4
+            if slowmo_path and slowmo_path.exists():
+                if _store_file(session, run_id, slug, "slowmo", slowmo_path.name, slowmo_path):
+                    n_files += 1
+
+            # Purge des anciens runs avec images (garde MAX_RUNS_WITH_IMAGES_PER_SLUG max)
+            n_purged = _purge_old_runs_with_images(session, slug, keep=MAX_RUNS_WITH_IMAGES_PER_SLUG)
+
+            session.commit()
+            print(f"[audit_db] save_pipeline_run OK : slug={slug} run_number={run_number} n_files={n_files} n_purged={n_purged}")
+            return {"ok": True, "run_id": run_id, "run_number": run_number, "n_files": n_files, "n_purged": n_purged}
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"[audit_db] save_pipeline_run FAILED for {slug}: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+def list_hotels_with_runs() -> list[dict]:
+    """Liste tous les hôtels qui ont au moins 1 PipelineRun, avec metadata agrégée."""
+    try:
+        with SessionLocal() as session:
+            stmt = (
+                select(
+                    PipelineRun.slug,
+                    func.max(PipelineRun.hotel_name).label("name"),
+                    func.count(PipelineRun.id).label("n_runs"),
+                    func.max(PipelineRun.started_at).label("last_run_at"),
+                    func.sum(func.cast(PipelineRun.has_images, Integer)).label("n_runs_with_images"),
+                )
+                .group_by(PipelineRun.slug)
+                .order_by(func.max(PipelineRun.started_at).desc())
+            )
+            rows = session.execute(stmt).all()
+            return [
+                {
+                    "slug": r[0],
+                    "name": r[1] or r[0],
+                    "n_runs": int(r[2] or 0),
+                    "last_run_at": float(r[3] or 0),
+                    "n_runs_with_images": int(r[4] or 0),
+                }
+                for r in rows
+            ]
+    except Exception as e:
+        print(f"[audit_db] list_hotels_with_runs failed: {e}")
+        return []
+
+
+def list_runs_for_slug(slug: str) -> list[dict]:
+    """Liste tous les runs d'un hôtel (sans le response_json complet, juste metadata)."""
+    try:
+        with SessionLocal() as session:
+            rows = session.execute(
+                select(PipelineRun)
+                .where(PipelineRun.slug == slug)
+                .order_by(PipelineRun.run_number.desc())
+            ).scalars().all()
+            return [
+                {
+                    "run_id": r.id,
+                    "run_number": r.run_number,
+                    "hotel_name": r.hotel_name,
+                    "started_at": r.started_at,
+                    "completed_at": r.completed_at,
+                    "duration_s": r.duration_s,
+                    "n_photos_uploaded": r.n_photos_uploaded,
+                    "n_photos_enhanced": r.n_photos_enhanced,
+                    "cost_usd": r.cost_usd,
+                    "pool_floats_enabled": r.pool_floats_enabled,
+                    "slowmo_enabled": r.slowmo_enabled,
+                    "has_slowmo": r.has_slowmo,
+                    "has_images": r.has_images,
+                }
+                for r in rows
+            ]
+    except Exception as e:
+        print(f"[audit_db] list_runs_for_slug failed for {slug}: {e}")
+        return []
+
+
+def get_pipeline_run(run_id: int) -> dict | None:
+    """Récupère le détail complet d'un run : metadata + response_json parsé + map des files.
+
+    Returns: dict avec keys : run_id, slug, run_number, ..., response (dict), files (list).
+    """
+    try:
+        with SessionLocal() as session:
+            r = session.get(PipelineRun, run_id)
+            if not r:
+                return None
+            files = session.execute(
+                select(PipelineFile.id, PipelineFile.kind, PipelineFile.filename, PipelineFile.mime_type, PipelineFile.size_bytes)
+                .where(PipelineFile.run_id == run_id)
+            ).all()
+            response_parsed = None
+            try:
+                response_parsed = json.loads(r.response_json) if r.response_json else {}
+            except json.JSONDecodeError:
+                response_parsed = {}
+            return {
+                "run_id": r.id,
+                "slug": r.slug,
+                "run_number": r.run_number,
+                "hotel_name": r.hotel_name,
+                "started_at": r.started_at,
+                "completed_at": r.completed_at,
+                "duration_s": r.duration_s,
+                "n_photos_uploaded": r.n_photos_uploaded,
+                "n_photos_enhanced": r.n_photos_enhanced,
+                "cost_usd": r.cost_usd,
+                "pool_floats_enabled": r.pool_floats_enabled,
+                "slowmo_enabled": r.slowmo_enabled,
+                "has_slowmo": r.has_slowmo,
+                "has_images": r.has_images,
+                "response": response_parsed,
+                "files": [
+                    {
+                        "id": f[0], "kind": f[1], "filename": f[2],
+                        "mime_type": f[3], "size_bytes": f[4],
+                    }
+                    for f in files
+                ],
+            }
+    except Exception as e:
+        print(f"[audit_db] get_pipeline_run failed for {run_id}: {e}")
+        return None
+
+
+def get_pipeline_file_blob(file_id: int) -> tuple[bytes, str] | None:
+    """Récupère le binaire + mime d'un PipelineFile pour /api/db/file/<id>."""
+    try:
+        with SessionLocal() as session:
+            r = session.get(PipelineFile, file_id)
+            if not r:
+                return None
+            return r.data, r.mime_type or "application/octet-stream"
+    except Exception as e:
+        print(f"[audit_db] get_pipeline_file_blob failed for {file_id}: {e}")
+        return None
+
+
+def delete_pipeline_run(run_id: int) -> dict:
+    """Supprime un PipelineRun + cascade ses PipelineFile."""
+    try:
+        with SessionLocal() as session:
+            r = session.get(PipelineRun, run_id)
+            if not r:
+                return {"ok": False, "error": "Run not found"}
+            session.execute(delete(PipelineFile).where(PipelineFile.run_id == run_id))
+            session.delete(r)
+            session.commit()
+            return {"ok": True, "run_id": run_id}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
