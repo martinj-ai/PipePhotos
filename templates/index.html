@@ -542,6 +542,30 @@
         </div>
       </details>
 
+      <!-- Section ajout bouées trendy (Martin 20/05/2026) — Step 4.4
+           DEFAULT = OFF. Si OFF, aucune bouée n'est ajoutée par la pipeline.
+           Si ON, les règles existantes s'appliquent (proba par vibe + déterminisme filename). -->
+      <details id="pool-floats-section" class="mb-3 border border-dayuse-border rounded-xl overflow-hidden">
+        <summary class="px-4 py-3 bg-gradient-to-br from-pink-50 to-rose-50 cursor-pointer hover:bg-pink-100/50 transition-colors flex items-center justify-between gap-3">
+          <div>
+            <span class="font-semibold text-sm">🍩 Ajout de bouées trendy <span class="text-xs text-gray-500 font-normal">(optionnel)</span></span>
+            <span id="pool-floats-summary" class="text-xs text-gray-600 ml-2">— désactivé</span>
+          </div>
+          <span class="text-xs text-rose-700 font-semibold">▼</span>
+        </summary>
+        <div class="p-4 bg-white">
+          <p class="text-xs text-gray-500 mb-3">
+            Si activé, la pipeline peut ajouter occasionnellement une bouée gonflable trendy
+            (flamingo, donut, swan, pineapple, etc.) dans les photos piscine — selon la <strong>vibe de l'hôtel</strong>
+            et avec un seuil de probabilité (~35-70% selon la scène). Désactivé par défaut.
+          </p>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" id="pool-floats-toggle" class="accent-pink-500" />
+            <span class="text-xs font-semibold">🍩 Autoriser l'ajout de bouées trendy</span>
+          </label>
+        </div>
+      </details>
+
       <!-- Section slow-motion loop (Step 4.5) -->
       <details id="slowmo-section" class="mb-5 border border-dayuse-border rounded-xl overflow-hidden">
         <summary class="px-4 py-3 bg-gradient-to-br from-amber-50 to-orange-50 cursor-pointer hover:bg-amber-100/50 transition-colors flex items-center justify-between gap-3">
@@ -3440,6 +3464,9 @@ photo finale enhanced (jpeg)
       const outpaintQuality = (outpaintQualityEl && outpaintQualityEl.value) || 'flash';
       const slowmoToggle = document.getElementById('slowmo-toggle');
       const slowmoEnabled = !!(slowmoToggle && slowmoToggle.checked);
+      // Checkbox bouées (Martin 20/05/2026) — DEFAULT OFF
+      const poolFloatsToggle = document.getElementById('pool-floats-toggle');
+      const poolFloatsEnabled = !!(poolFloatsToggle && poolFloatsToggle.checked);
       // Récupère le mode de reprise (scrape / selection / postprocess) pour que
       // le front sache quelles étapes serveur seront skip → marque-les visuellement.
       const resumeRadioForOpts = document.querySelector('input[name="resume-from"]:checked');
@@ -3518,6 +3545,7 @@ photo finale enhanced (jpeg)
                 outpaint_enabled: outpaintEnabled,
                 outpaint_quality: outpaintQuality,
                 slowmo_enabled: slowmoEnabled,
+                pool_floats_enabled: poolFloatsEnabled,  // Martin 20/05/2026 — checkbox UI
               }),
             });
             const data = await r.json();
@@ -5670,6 +5698,22 @@ photo finale enhanced (jpeg)
       };
       if (slowmoToggle) slowmoToggle.addEventListener("change", updateSlowmoSummary);
       updateSlowmoSummary();
+
+      // Pool floats toggle summary (Martin 20/05/2026)
+      const poolFloatsToggle = document.getElementById("pool-floats-toggle");
+      const poolFloatsSummary = document.getElementById("pool-floats-summary");
+      const updatePoolFloatsSummary = () => {
+        if (!poolFloatsSummary) return;
+        if (poolFloatsToggle && poolFloatsToggle.checked) {
+          poolFloatsSummary.innerHTML = '— <strong class="text-pink-700">activé</strong> · bouées trendy autorisées';
+          poolFloatsSummary.className = "text-xs text-pink-700 ml-2";
+        } else {
+          poolFloatsSummary.textContent = "— désactivé (aucune bouée ajoutée)";
+          poolFloatsSummary.className = "text-xs text-gray-600 ml-2";
+        }
+      };
+      if (poolFloatsToggle) poolFloatsToggle.addEventListener("change", updatePoolFloatsSummary);
+      updatePoolFloatsSummary();
     });
 
     // Charge la config formats au boot

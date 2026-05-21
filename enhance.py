@@ -1294,8 +1294,16 @@ def pick_pool_float_hint(
     vibe: str | None,
     photo_filename: str | None,
     analysis: dict | None = None,
+    enabled: bool = False,
 ) -> str | None:
     """Retourne la description du float à autoriser, ou None pour skip.
+
+    Args:
+        enabled : kill-switch global (Martin 20/05/2026, checkbox UI).
+            False = DEFAULT = aucune bouée n'est jamais ajoutée (comportement basique).
+            True  = bouées ajoutées selon les règles existantes (proba par vibe + déterminisme filename).
+            Le check `if not enabled: return None` est en TÊTE de fonction → garantit
+            qu'aucun chemin code ne contourne le toggle.
 
     Déterministe par filename → un même run replay donne le même résultat.
     Pas systématique : la randomisation déterministe est CRITIQUE pour que ça
@@ -1307,6 +1315,9 @@ def pick_pool_float_hint(
     saturer la piscine, (b) d'ajouter une bouée stylistiquement incohérente avec
     les existantes (perspective, palette).
     """
+    # Kill-switch global (Martin 20/05/2026). DEFAULT = OFF.
+    if not enabled:
+        return None
     if not category:
         return None
     cat_lower = category.lower()
@@ -1584,6 +1595,7 @@ def _pick_main_action(
     persona_override: str | None = None,
     photo_filename: str | None = None,
     image_path: Path | None = None,
+    pool_floats_enabled: bool = False,  # Martin 20/05/2026 — checkbox UI, DEFAULT OFF
 ) -> dict:
     """Choisit l'action principale (hors crop) à appliquer à la photo."""
     if not analysis:
@@ -1703,7 +1715,7 @@ def _pick_main_action(
 
         # ━ Pool float occasionnel (déterministe par filename, voir pick_pool_float_hint) ━
         # Skip auto si la photo a déjà des bouées (cf. analysis passé en arg).
-        pool_float = pick_pool_float_hint(cat, vibe, photo_filename, analysis=analysis)
+        pool_float = pick_pool_float_hint(cat, vibe, photo_filename, analysis=analysis, enabled=pool_floats_enabled)
         fallback_tag = " [fallback safe_zones]" if used_fallback else ""
 
         # ━━ V5 Vision-Generated Scenario (Martin 13/05/2026) ━━━━━━━━━━━━━━━━━━━
@@ -1995,6 +2007,7 @@ def pick_strategy(
     persona_override: str | None = None,
     photo_filename: str | None = None,
     image_path: Path | None = None,
+    pool_floats_enabled: bool = False,  # Martin 20/05/2026 — checkbox UI, DEFAULT OFF
 ) -> dict:
     """Construit la séquence d'actions à appliquer à une photo (chaînage possible, max 2 IA).
 
@@ -2014,7 +2027,7 @@ def pick_strategy(
     - Sinon : step principale unique
     """
     crop_step = _maybe_crop_step(analysis)
-    main_step = _pick_main_action(analysis, category, personas_allowed, vibe, add_character, persona_override, photo_filename, image_path=image_path)
+    main_step = _pick_main_action(analysis, category, personas_allowed, vibe, add_character, persona_override, photo_filename, image_path=image_path, pool_floats_enabled=pool_floats_enabled)
 
     # ━ Si on a déjà un step IA (clutter / lighting / add_character), on évite le crop additionnel ━
     # Le crop modifie le cadrage, l'IA ensuite peut amplifier la dérive (régénération sur image cropée).
@@ -2124,7 +2137,7 @@ def pick_strategy(
     primary_cat = (factual_.get("category") or "").lower()
     already_has_character = any(s.get("action") == "ai_add_character" for s in steps)
     if not already_has_character:
-        float_hint = pick_pool_float_hint(primary_cat, vibe, photo_filename, analysis=analysis)
+        float_hint = pick_pool_float_hint(primary_cat, vibe, photo_filename, analysis=analysis, enabled=pool_floats_enabled)
         if float_hint:
             # Détection vue aérienne pour appliquer les contraintes perspective top-down
             # (Martin 15/05/2026, bug Moxy Miami : cygne 3D ajouté sur photo top-down)

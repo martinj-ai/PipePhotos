@@ -869,6 +869,11 @@ def api_run():
     use_analysis_cache = resume_from in ("selection", "postprocess")
     use_enhance_cache = resume_from == "postprocess"
 
+    # Checkbox UI "ajouter des bouées" (Martin 20/05/2026) — DEFAULT OFF.
+    # Quand OFF (par défaut), aucune bouée n'est ajoutée par la pipeline.
+    # Quand ON, les règles existantes s'appliquent (proba par vibe + déterminisme filename).
+    pool_floats_enabled = bool((payload or {}).get("pool_floats_enabled", False))
+
     # === Étape 1 : Analyse Gemini en parallèle ===
     try:
         model = analyze.get_model()
@@ -1485,6 +1490,7 @@ def api_run():
             persona_override=persona_per_filename.get(filename),
             photo_filename=filename,
             image_path=input_path,
+            pool_floats_enabled=pool_floats_enabled,  # Martin 20/05/2026 — checkbox UI
         )
         existing_enhanced = enhanced_dir / filename
         if use_enhance_cache and existing_enhanced.exists():
